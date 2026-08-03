@@ -3,13 +3,14 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import get_settings
+from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
+from app.routes import auth as auth_routes
 from app.routes import monitor, patterns
 
 scheduler = AsyncIOScheduler()
@@ -44,8 +45,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(patterns.router)
-app.include_router(monitor.router)
+app.include_router(patterns.router, dependencies=[Depends(verify_admin)])
+app.include_router(monitor.router, dependencies=[Depends(verify_admin)])
+app.include_router(auth_routes.router)
 
 
 @app.get("/health")

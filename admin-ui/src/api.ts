@@ -20,11 +20,52 @@ export interface PatternCounts {
 
 const API = "/api"
 
-async function request<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${url}`, {
+/* ── Session token auth ──────────────────────────────────────────── */
+
+let _token: string | null = null
+
+export function setToken(t: string | null) {
+  _token = t
+  if (t) localStorage.setItem("elk_token", t)
+  else localStorage.removeItem("elk_token")
+}
+
+export function getToken(): string | null {
+  if (!_token) _token = localStorage.getItem("elk_token")
+  return _token
+}
+
+/* ── Auth endpoints (no token required) ──────────────────────────── */
+
+export async function login(
+  username: string,
+  password: string,
+): Promise<{ token: string; expires_in: number }> {
+  const res = await fetch(`${API}/auth/login`, {
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    ...opts,
+    body: JSON.stringify({ username, password }),
   })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Login failed" }))
+    throw new Error(err.detail)
+  }
+  return res.json()
+}
+
+/* ── Generic API wrapper ─────────────────────────────────────────── */
+
+async function request<T>(url: string, opts?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+
+  const res = await fetch(`${API}${url}`, { headers, ...opts })
+  if (res.status === 401 && !url.includes("/auth/")) {
+    setToken(null)
+    window.location.href = "/"
+    throw new Error("Session expired")
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || "Request failed")
@@ -32,6 +73,8 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T
   return res.json()
 }
+
+/* ── Pattern CRUD ────────────────────────────────────────────────── */
 
 export async function listPatterns(params?: {
   pattern_type?: string
@@ -51,20 +94,14 @@ export async function createPattern(data: {
   pattern: string
   pattern_type: string
 }): Promise<Pattern> {
-  return request("/patterns/", {
-    method: "POST",
-    body: JSON.stringify(data),
-  })
+  return request("/patterns/", { method: "POST", body: JSON.stringify(data) })
 }
 
 export async function updatePattern(
   id: number,
-  data: { pattern?: string; pattern_type?: string }
+  data: { pattern?: string; pattern_type?: string },
 ): Promise<Pattern> {
-  return request(`/patterns/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  })
+  return request(`/patterns/${id}`, { method: "PUT", body: JSON.stringify(data) })
 }
 
 export async function deletePattern(id: number): Promise<void> {
@@ -75,10 +112,7 @@ export async function bulkImport(data: {
   patterns: string[]
   pattern_type: string
 }): Promise<Pattern[]> {
-  return request("/patterns/bulk", {
-    method: "POST",
-    body: JSON.stringify(data),
-  })
+  return request("/patterns/bulk", { method: "POST", body: JSON.stringify(data) })
 }
 
 export async function getPatternCounts(): Promise<PatternCounts> {

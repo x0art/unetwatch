@@ -13,6 +13,9 @@ patterns through a full REST API.
 - **Bulk import** — add many patterns at once via the UI or API.
 - **Admin console** — a clean web dashboard built with React + TypeScript + Tailwind,
   served directly by FastAPI (no separate server, no CDN).
+- **Authentication** — dashboard login with session tokens, API key or Basic Auth for
+  programmatic access. Credentials stored in `.env`.
+- **Poll countdown** — real-time countdown widget showing time until next ES query.
 - **Serve API + UI from one process** — the built frontend is served at `/`.
 
 ## Tech Stack
@@ -78,6 +81,9 @@ optional and have sensible defaults.
 | `POLL_INTERVAL_MINUTES` | `10`                    | How often to poll ES                 |
 | `ES_QUERY_SIZE`         | `5000`                  | Max documents per ES query           |
 | `DATABASE_URL`          | `sqlite:///./elk_monitoring.db` | SQLite location               |
+| `ADMIN_USER`            | `admin`                 | Dashboard login username             |
+| `ADMIN_PASS`            | `changeme`              | Dashboard login password             |
+| `API_KEY`               | _(empty)_               | Static API key for programmatic use  |
 
 ## API
 
@@ -179,8 +185,9 @@ elk-monitoring/
 - Commit only `.env.example` with placeholder values.
 - The legacy `main.py` script containing hardcoded credentials has been removed;
   all configuration is read from environment variables / `.env`.
-- The admin UI ships with no authentication by default — add a reverse-proxy
-  (or app-level auth) in front of it when exposing to the internet.
+- The admin UI requires login — configure `ADMIN_USER`/`ADMIN_PASS` in `.env` before
+  exposing to the internet. A static `API_KEY` can also be configured for programmatic
+  access without Basic Auth.
 
 ## License
 
