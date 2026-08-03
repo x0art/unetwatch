@@ -81,13 +81,13 @@ async def update_pattern(pattern_id: int, data: UrlPatternUpdate, db=Depends(get
     if not updates:
         raise HTTPException(400, "No fields to update")
 
+    # Always refresh updated_at; set_clause has zero user-controlled identifiers.
     updates["updated_at"] = "CURRENT_TIMESTAMP"
-
     set_clause = ", ".join(
-        f"{k} = {v}" if v == "CURRENT_TIMESTAMP" else f"{k} = ?"
+        f"{k} = {v}" if k == "updated_at" else f"{k} = ?"
         for k, v in updates.items()
     )
-    values = [v for v in updates.values() if v != "CURRENT_TIMESTAMP"]
+    values = [v for k, v in updates.items() if k != "updated_at"]
 
     try:
         await db.execute(
