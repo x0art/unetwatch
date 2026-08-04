@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
+import { SearchX } from "lucide-react"
 import { type Finding, getFindings } from "../api"
+import { Button, EmptyState } from "./ui"
 
 export function FindingsPage() {
   const [findings, setFindings] = useState<Finding[]>([])
@@ -33,45 +35,22 @@ export function FindingsPage() {
 
   if (findings.length === 0) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5">
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="28"
-            height="28"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-muted-foreground"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-        </div>
-        <div className="text-center">
-          <h3 className="text-base font-semibold">No findings yet</h3>
-          <p className="mt-1.5 max-w-xs text-sm text-muted-foreground leading-relaxed">
-            Findings appear here when the ES poll detects log entries matching your
-            block patterns.
-          </p>
-        </div>
-      </div>
+      <EmptyState
+        icon={SearchX}
+        title="No findings yet"
+        description="Findings appear here when the ES poll detects matching log entries."
+        action={<Button variant="outline">Refresh</Button>}
+      />
     )
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Findings</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {findings.length} finding{findings.length !== 1 ? "s" : ""} detected
-          </p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">Findings</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {findings.length} finding{findings.length !== 1 ? "s" : ""} detected
+        </p>
       </div>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm">
@@ -85,10 +64,7 @@ export function FindingsPage() {
           </thead>
           <tbody>
             {findings.map((f) => (
-              <tr
-                key={f.id}
-                className="border-b border-border transition-colors hover:bg-muted/30"
-              >
+              <tr key={f.id} className="border-b border-border transition-colors hover:bg-muted/30">
                 <td className="px-4 py-3 text-muted-foreground">{f.id}</td>
                 <td className="px-4 py-3 font-mono text-sm">{f.pattern}</td>
                 <td className="px-4 py-3 font-mono text-sm text-muted-foreground">{f.client_ip}</td>
