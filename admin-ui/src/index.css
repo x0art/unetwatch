@@ -1,33 +1,175 @@
+/* ── Fonts (must precede @import "tailwindcss" per CSS spec) ──── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
+/* ── Dark mode: class-based ────────────────────────────────────── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Design System tokens (dark-mode-first) ──────────────────── */
 @theme {
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.145 0 0);
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.145 0 0);
-  --color-primary: oklch(0.205 0.042 265.755);
-  --color-primary-foreground: oklch(0.985 0 0);
-  --color-secondary: oklch(0.965 0.001 286.375);
-  --color-secondary-foreground: oklch(0.205 0.042 265.755);
-  --color-muted: oklch(0.965 0.001 286.375);
-  --color-muted-foreground: oklch(0.556 0.018 286.321);
-  --color-accent: oklch(0.965 0.001 286.375);
-  --color-accent-foreground: oklch(0.205 0.042 265.755);
-  --color-destructive: oklch(0.577 0.245 27.325);
-  --color-destructive-foreground: oklch(0.985 0 0);
-  --color-border: oklch(0.922 0.004 286.32);
-  --color-input: oklch(0.922 0.004 286.32);
-  --color-ring: oklch(0.205 0.042 265.755);
-  --radius: 0.625rem;
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Surface & text */
+  --color-background: oklch(0.147 0.02 260);
+  --color-foreground: oklch(0.925 0.012 260);
+  --color-card: oklch(0.185 0.024 260);
+  --color-card-foreground: oklch(0.925 0.012 260);
+  --color-popover: oklch(0.185 0.024 260);
+  --color-popover-foreground: oklch(0.925 0.012 260);
+
+  /* Interactive */
+  --color-primary: oklch(0.68 0.16 235);
+  --color-primary-foreground: oklch(0.15 0.02 260);
+
+  --color-secondary: oklch(0.24 0.028 260);
+  --color-secondary-foreground: oklch(0.85 0.02 260);
+
+  --color-accent: oklch(0.68 0.16 235);
+  --color-accent-foreground: oklch(0.15 0.02 260);
+
+  --color-muted: oklch(0.24 0.028 260);
+  --color-muted-foreground: oklch(0.58 0.03 260);
+
+  /* Semantic */
+  --color-success: oklch(0.65 0.18 145);
+  --color-success-foreground: oklch(0.12 0.02 145);
+  --color-warning: oklch(0.75 0.16 75);
+  --color-warning-foreground: oklch(0.12 0.02 260);
+  --color-danger: oklch(0.55 0.24 25);
+  --color-danger-foreground: oklch(0.95 0.01 260);
+  --color-info: oklch(0.62 0.12 235);
+  --color-info-foreground: oklch(0.12 0.02 260);
+
+  /* Borders & inputs */
+  --color-border: oklch(0.26 0.028 260);
+  --color-input: oklch(0.26 0.028 260);
+  --color-ring: oklch(0.68 0.16 235);
+
+  /* Sidebar (dark even in light mode) */
+  --color-sidebar: oklch(0.12 0.015 260);
+  --color-sidebar-foreground: oklch(0.85 0.02 260);
+  --color-sidebar-muted: oklch(0.52 0.03 260);
+  --color-sidebar-active: oklch(0.68 0.16 235);
+  --color-sidebar-hover: oklch(0.22 0.028 260);
+  --color-sidebar-border: oklch(0.18 0.02 260);
+
+  /* Radii */
+  --radius: 0.5rem;
 }
 
+/* ── Light override ───────────────────────────────────────────── */
+.light {
+  --color-background: oklch(0.968 0.005 260);
+  --color-foreground: oklch(0.15 0.02 260);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.15 0.02 260);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.15 0.02 260);
+
+  --color-primary: oklch(0.52 0.14 235);
+  --color-primary-foreground: oklch(1 0 0);
+
+  --color-secondary: oklch(0.93 0.008 260);
+  --color-secondary-foreground: oklch(0.12 0.02 260);
+
+  --color-accent: oklch(0.52 0.14 235);
+  --color-accent-foreground: oklch(1 0 0);
+
+  --color-muted: oklch(0.93 0.008 260);
+  --color-muted-foreground: oklch(0.48 0.02 260);
+
+  --color-success: oklch(0.52 0.18 145);
+  --color-success-foreground: oklch(1 0 0);
+  --color-warning: oklch(0.65 0.16 75);
+  --color-warning-foreground: oklch(1 0 0);
+  --color-danger: oklch(0.48 0.24 25);
+  --color-danger-foreground: oklch(1 0 0);
+  --color-info: oklch(0.52 0.14 235);
+  --color-info-foreground: oklch(1 0 0);
+
+  --color-border: oklch(0.87 0.01 260);
+  --color-input: oklch(0.87 0.01 260);
+  --color-ring: oklch(0.52 0.14 235);
+
+  /* Sidebar stays dark */
+  --color-sidebar: oklch(0.12 0.015 260);
+  --color-sidebar-foreground: oklch(0.85 0.02 260);
+  --color-sidebar-muted: oklch(0.52 0.03 260);
+  --color-sidebar-active: oklch(0.68 0.16 235);
+  --color-sidebar-hover: oklch(0.22 0.028 260);
+  --color-sidebar-border: oklch(0.18 0.02 260);
+}
+
+/* ── Base layer ───────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border;
   }
-  body {
+
+  html {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
     margin: 0;
   }
+
+  /* Focus-visible ring */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(0.3 0.03 260);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(0.4 0.04 260);
+  }
+}
+
+/* ── Transition utilities for Radix animations ────────────────── */
+@utility animate-in {
+  animation: animate-in 0.2s ease-out;
+}
+@utility animate-out {
+  animation: animate-out 0.15s ease-in;
+}
+@keyframes animate-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes animate-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(4px) scale(0.98); }
+}
+
+/* Slide-from-bottom for toast */
+@utility slide-in-from-bottom {
+  animation: slide-in-from-bottom 0.25s ease-out;
+}
+@keyframes slide-in-from-bottom {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Fade-in utility */
+@utility fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
