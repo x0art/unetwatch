@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { login, setToken } from "../api"
-import { Button, Input } from "./ui"
+import { Button, Input, Label } from "./ui"
 
 export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("")
@@ -27,15 +27,24 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
     <div className="min-h-screen grid place-items-center bg-background">
       <div className="w-full max-w-sm rounded-lg border border-border bg-card p-8 shadow-sm">
         <div className="text-center mb-6">
-          <span className="text-4xl">🔍</span>
+          <span
+            className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </span>
           <h1 className="text-xl font-bold mt-2">ELK Monitoring</h1>
           <p className="text-sm text-muted-foreground mt-1">Sign in to continue</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-sm font-medium mb-1 block">Username</label>
+            <Label htmlFor="login-username">Username</Label>
             <Input
+              id="login-username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="admin"
@@ -43,8 +52,9 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
             />
           </div>
           <div>
-            <label className="text-sm font-medium mb-1 block">Password</label>
+            <Label htmlFor="login-password">Password</Label>
             <Input
+              id="login-password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

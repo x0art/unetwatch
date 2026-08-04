@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { SearchX } from "lucide-react"
 import { type Finding, getFindings } from "../api"
 import { Button, EmptyState } from "./ui"
@@ -7,7 +7,7 @@ export function FindingsPage() {
   const [findings, setFindings] = useState<Finding[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const refetch = useCallback(() => {
     let cancelled = false
     setLoading(true)
     getFindings()
@@ -21,6 +21,11 @@ export function FindingsPage() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    const cancel = refetch()
+    return cancel
+  }, [refetch])
 
   if (loading) {
     return (
@@ -39,7 +44,7 @@ export function FindingsPage() {
         icon={SearchX}
         title="No findings yet"
         description="Findings appear here when the ES poll detects matching log entries."
-        action={<Button variant="outline">Refresh</Button>}
+        action={<Button variant="outline" onClick={refetch}>Refresh</Button>}
       />
     )
   }

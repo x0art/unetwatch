@@ -6,6 +6,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="URL pattern monitoring for Elasticsearch logs" />
     <title>ELK Monitoring</title>
+    <script>
+      // Apply theme before paint to avoid FOUC. Defaults to dark.
+      (function () {
+        try {
+          var t = localStorage.getItem("elk-theme");
+          if (t === "light") {
+            document.documentElement.classList.add("light");
+          } else {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

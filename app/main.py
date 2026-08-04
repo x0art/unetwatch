@@ -1,9 +1,10 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,11 +40,33 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[
+        "http://localhost:5173",  # vite dev server
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=False,  # token is in a header, not a cookie
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Defense-in-depth security response headers."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "connect-src 'self'; "
+        "img-src 'self' data:; "
+        "frame-ancestors 'none'"
+    )
+    return response
 
 app.include_router(patterns.router, dependencies=[Depends(verify_admin)])
 app.include_router(monitor.router, dependencies=[Depends(verify_admin)])
@@ -57,6 +80,7 @@ async def health():
 
 # ── Admin UI (served from built assets) ───────────────────────────────────
 _ADMIN_DIST = os.path.join(os.path.dirname(__file__), "..", "admin-ui", "dist")
+_ADMIN_DIST_PATH = Path(_ADMIN_DIST).resolve()
 
 if os.path.isdir(_ADMIN_DIST):
     app.mount(
@@ -67,14 +91,17 @@ if os.path.isdir(_ADMIN_DIST):
 
     @app.get("/")
     async def admin_index():
-        return FileResponse(os.path.join(_ADMIN_DIST, "index.html"))
+        return FileResponse(_ADMIN_DIST_PATH / "index.html")
 
     @app.get("/{full_path:path}")
     async def admin_spa(full_path: str):
-        candidate = os.path.join(_ADMIN_DIST, full_path)
-        if full_path and os.path.isfile(candidate):
+        if not full_path:
+            return FileResponse(_ADMIN_DIST_PATH / "index.html")
+        candidate = (_ADMIN_DIST_PATH / full_path).resolve()
+        # Prevent path traversal outside the dist directory
+        if _ADMIN_DIST_PATH in candidate.parents and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(os.path.join(_ADMIN_DIST, "index.html"))
+        return FileResponse(_ADMIN_DIST_PATH / "index.html")
 
 
 if __name__ == "__main__":

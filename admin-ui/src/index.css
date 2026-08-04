@@ -41,6 +41,10 @@
   --color-info: oklch(0.62 0.12 235);
   --color-info-foreground: oklch(0.12 0.02 260);
 
+  /* destructive alias (kept for compatibility with shadcn-style raw utilities) */
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: var(--color-danger-foreground);
+
   /* Borders & inputs */
   --color-border: oklch(0.26 0.028 260);
   --color-input: oklch(0.26 0.028 260);
@@ -87,6 +91,10 @@
   --color-danger-foreground: oklch(1 0 0);
   --color-info: oklch(0.52 0.14 235);
   --color-info-foreground: oklch(1 0 0);
+
+  /* destructive alias */
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: var(--color-danger-foreground);
 
   --color-border: oklch(0.87 0.01 260);
   --color-input: oklch(0.87 0.01 260);

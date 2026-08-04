@@ -466,15 +466,16 @@ export function Select({
 export type ToastVariant = "default" | "success" | "error" | "info"
 
 export interface ToastInput {
-  title: string
+  title?: string
   description?: string
   variant?: ToastVariant
   /** Override auto-dismiss (ms). Default 4000. */
   duration?: number
 }
 
-interface ToastRecord extends Required<Omit<ToastInput, "description">> {
+interface ToastRecord extends Required<Omit<ToastInput, "description" | "title">> {
   id: string
+  title: string
   description?: string
 }
 
@@ -515,7 +516,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           }
         : {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            title: input.title,
+            title: input.title ?? input.description ?? "Notification",
             description: input.description,
             variant: input.variant ?? "default",
             duration: input.duration ?? 4000,
