@@ -30,7 +30,7 @@ export function PatternTable() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebounce(search, 300)
-  const [filterType, setFilterType] = useState("")
+  const [filterType, setFilterType] = useState("all")
   const [page, setPage] = useState(0)
 
   // ── Edit dialog ──
@@ -69,7 +69,7 @@ export function PatternTable() {
     setError(null)
     try {
       const data = await listPatterns({
-        pattern_type: filterType || undefined,
+        pattern_type: filterType === "all" ? undefined : filterType,
         search: debouncedSearch || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
@@ -103,11 +103,11 @@ export function PatternTable() {
     if (deleteTarget === null) return
     try {
       await deletePattern(deleteTarget)
-      toast({ variant: "success", description: "Pattern deleted" })
+      toast({ title: "Pattern deleted", variant: "success" })
       setDeleteTarget(null)
       fetchPatterns()
     } catch (e) {
-      toast({ variant: "error", description: (e as Error).message })
+      toast({ title: "Error", description: (e as Error).message, variant: "error" })
     }
   }
 
@@ -127,11 +127,11 @@ export function PatternTable() {
         pattern: editValue,
         pattern_type: editType,
       })
-      toast({ variant: "success", description: "Pattern updated" })
+      toast({ title: "Pattern updated", variant: "success" })
       setEditOpen(false)
       fetchPatterns()
     } catch (e) {
-      toast({ variant: "error", description: (e as Error).message })
+      toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
       setEditSaving(false)
     }
@@ -143,12 +143,12 @@ export function PatternTable() {
     setCreateSaving(true)
     try {
       await createPattern({ pattern: createValue, pattern_type: createType })
-      toast({ variant: "success", description: "Pattern created" })
+      toast({ title: "Pattern created", variant: "success" })
       setCreateOpen(false)
       setCreateValue("")
       fetchPatterns()
     } catch (e) {
-      toast({ variant: "error", description: (e as Error).message })
+      toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
       setCreateSaving(false)
     }
@@ -164,12 +164,12 @@ export function PatternTable() {
         .map((l) => l.trim())
         .filter(Boolean)
       const result = await bulkImport({ patterns: lines, pattern_type: bulkType })
-      toast({ variant: "success", description: `Imported ${result.length} patterns` })
+      toast({ title: `Imported ${result.length} patterns`, variant: "success" })
       setBulkOpen(false)
       setBulkValue("")
       fetchPatterns()
     } catch (e) {
-      toast({ variant: "error", description: (e as Error).message })
+      toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
       setBulkImporting(false)
     }
@@ -177,7 +177,7 @@ export function PatternTable() {
 
   /* ── Shared options ─────────────────────────────────────────────── */
   const typeOptions = [
-    { value: "", label: "All types" },
+    { value: "all", label: "All types" },
     { value: "block", label: "Block" },
     { value: "whitelist", label: "Whitelist" },
   ]
@@ -318,11 +318,10 @@ export function PatternTable() {
 
       {/* ── Pagination (unknown total — prev/next only) ── */}
       <Pagination
-        page={page + 1}
+        page={page}
         pageSize={PAGE_SIZE}
-        total={null}
         hasNext={patterns.length === PAGE_SIZE}
-        onPageChange={(p: number) => setPage(p - 1)}
+        onPageChange={setPage}
       />
 
       {/* ── Confirm Delete Dialog ── */}
