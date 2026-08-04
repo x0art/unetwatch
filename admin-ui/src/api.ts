@@ -18,6 +18,13 @@ export interface PatternCounts {
   whitelist: number
 }
 
+export interface Finding {
+  id: number
+  pattern: string
+  client_ip: string
+  timestamp: string
+}
+
 const API = "/api"
 
 /* ── Session token auth ──────────────────────────────────────────── */
@@ -125,4 +132,10 @@ export async function getMonitorStatus(): Promise<MonitorStatus> {
 
 export async function triggerManualRun(): Promise<{ status: string }> {
   return request("/monitor/run", { method: "POST" })
+}
+
+export async function getFindings(): Promise<Finding[]> {
+  // The backend endpoint is not available yet. Keeping the contract typed here lets
+  // the findings view ship now and makes the future API integration a one-line change.
+  return Promise.resolve([])
 }

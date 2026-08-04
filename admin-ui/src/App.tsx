@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import {
   type MonitorStatus,
   type PatternCounts,
@@ -10,35 +10,63 @@ import {
 } from "./api"
 import { PatternTable } from "./components/PatternTable"
 import { LoginPage } from "./components/LoginPage"
-import { Button, Card, CardContent, CardHeader, CardTitle } from "./components/ui"
+import { DashboardPage } from "./components/DashboardPage"
+import { FindingsPage } from "./components/FindingsPage"
+
+type View = "dashboard" | "patterns" | "findings"
+
+const THEME_KEY = "elk-theme"
+
+function getStoredTheme(): "dark" | "light" {
+  const stored = localStorage.getItem(THEME_KEY)
+  if (stored === "light" || stored === "dark") return stored
+  return "dark"
+}
+
+function applyTheme(theme: "dark" | "light") {
+  document.documentElement.classList.toggle("dark", theme === "dark")
+}
 
 function App() {
+  const [view, setView] = useState<View>("dashboard")
   const [loggedIn, setLoggedIn] = useState(!!getToken())
-  const [tab, setTab] = useState<"patterns" | "dashboard">("dashboard")
   const [status, setStatus] = useState<MonitorStatus | null>(null)
   const [counts, setCounts] = useState<PatternCounts | null>(null)
   const [loadingRun, setLoadingRun] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState(Date.now())
+  const [theme, setTheme] = useState<"dark" | "light">(getStoredTheme)
 
   // Countdown timer
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
   const [remaining, setRemaining] = useState(intervalSec)
   const lastRunRef = useRef(Date.now())
 
-  const showToast = (msg: string) => {
+  // Theme
+  useEffect(() => {
+    applyTheme(theme)
+    localStorage.setItem(THEME_KEY, theme)
+  }, [theme])
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === "dark" ? "light" : "dark"))
+  }, [])
+
+  const showToast = useCallback((msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
-  }
+  }, [])
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const [s, c] = await Promise.all([getMonitorStatus(), getPatternCounts()])
       setStatus(s)
       setCounts(c)
+      setLastUpdated(Date.now())
     } catch (e) {
       console.error("Failed to fetch stats:", e)
     }
-  }
+  }, [])
 
   // Countdown ticker
   useEffect(() => {
@@ -57,13 +85,11 @@ function App() {
       })
     }, 1000)
     return () => clearInterval(tick)
-  }, [status, intervalSec])
+  }, [status, intervalSec, fetchStats])
 
   useEffect(() => {
-    if (loggedIn) {
-      fetchStats()
-    }
-  }, [loggedIn])
+    if (loggedIn) fetchStats()
+  }, [loggedIn, fetchStats])
 
   const handleManualRun = async () => {
     setLoadingRun(true)
@@ -85,162 +111,210 @@ function App() {
     setLoggedIn(false)
   }
 
-  const formatCountdown = (s: number) => {
-    const m = Math.floor(s / 60)
-    const sec = s % 60
-    return `${m}:${sec.toString().padStart(2, "0")}`
-  }
-
-  const countdownPct = status ? (remaining / intervalSec) * 100 : 0
-
   if (!loggedIn) {
     return <LoginPage onLogin={() => setLoggedIn(true)} />
   }
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Toast */}
       {toast && (
-        <div className="fixed bottom-4 right-4 z-50 rounded-md bg-primary text-primary-foreground px-4 py-3 text-sm shadow-lg animate-in slide-in-from-bottom-2 flex items-center gap-2">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md bg-primary px-4 py-3 text-sm text-primary-foreground shadow-lg animate-in slide-in-from-bottom-2">
+          <svg
+            className="h-4 w-4 shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
           {toast}
         </div>
       )}
 
-      {/* Header */}
-      <header className="border-b border-border bg-card">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-bold tracking-tight">ELK Monitoring</h1>
-            <nav className="flex gap-1">
-              <Button
-                variant={tab === "dashboard" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setTab("dashboard")}
-              >
-                Dashboard
-              </Button>
-              <Button
-                variant={tab === "patterns" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setTab("patterns")}
-              >
-                Patterns
-              </Button>
-            </nav>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-green-400" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-              </span>
-              Live
-            </span>
-            <Button variant="ghost" size="sm" onClick={handleLogout}>
-              Logout
-            </Button>
-          </div>
+      {/* Sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-border bg-card sm:flex">
+        {/* Logo */}
+        <div className="flex h-14 items-center gap-3 border-b border-border px-5">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0 text-primary"
+            aria-hidden="true"
+          >
+            <path d="M21.75 17.25A8.954 8.954 0 0 1 17.25 21M21.75 6.75v11.25" />
+            <path d="M12 3a9 9 0 1 0 9 9" />
+          </svg>
+          <span className="text-base font-semibold tracking-tight">ELK Monitor</span>
+        </div>
+
+        {/* Nav */}
+        <nav className="flex-1 space-y-1 p-3" role="navigation" aria-label="Main navigation">
+          {[
+            { id: "dashboard" as View, label: "Dashboard", icon: "layout-dashboard" },
+            { id: "patterns" as View, label: "Patterns", icon: "list-filter" },
+            { id: "findings" as View, label: "Findings", icon: "search" },
+          ].map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setView(item.id)}
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                view === item.id
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-accent-foreground"
+              }`}
+              aria-current={view === item.id ? "page" : undefined}
+            >
+              {item.icon === "layout-dashboard" && (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect width="7" height="9" x="3" y="3" rx="1" />
+                  <rect width="7" height="5" x="14" y="3" rx="1" />
+                  <rect width="7" height="9" x="14" y="12" rx="1" />
+                  <rect width="7" height="5" x="3" y="16" rx="1" />
+                </svg>
+              )}
+              {item.icon === "list-filter" && (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M11 18H3" />
+                  <path d="m15 18 2 2 4-4" />
+                  <path d="M16 12H3" />
+                  <path d="M16 6H3" />
+                </svg>
+              )}
+              {item.icon === "search" && (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="8" />
+                  <path d="m21 21-4.3-4.3" />
+                </svg>
+              )}
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="border-t border-border p-3">
+          {/* Theme toggle */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {theme === "dark" ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2" />
+                <path d="M12 20v2" />
+                <path d="m4.93 4.93 1.41 1.41" />
+                <path d="m17.66 17.66 1.41 1.41" />
+                <path d="M2 12h2" />
+                <path d="M20 12h2" />
+                <path d="m6.34 17.66-1.41 1.41" />
+                <path d="m19.07 4.93-1.41 1.41" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+              </svg>
+            )}
+            {theme === "dark" ? "Light Mode" : "Dark Mode"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" x2="9" y1="12" y2="12" />
+            </svg>
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      {/* Mobile header */}
+      <header className="flex h-14 items-center gap-3 border-b border-border bg-card px-4 sm:hidden">
+        <span className="text-base font-semibold tracking-tight">ELK Monitor</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2" />
+                <path d="M12 20v2" />
+                <path d="m4.93 4.93 1.41 1.41" />
+                <path d="m17.66 17.66 1.41 1.41" />
+                <path d="M2 12h2" />
+                <path d="M20 12h2" />
+                <path d="m6.34 17.66-1.41 1.41" />
+                <path d="m19.07 4.93-1.41 1.41" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+              </svg>
+            )}
+          </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
-        {tab === "dashboard" && (
-          <div className="space-y-6">
-            {/* Countdown + Stats grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Next Poll</CardTitle>
-                  <span className="text-2xl">⏱️</span>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold tabular-nums">
-                    {formatCountdown(remaining)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    until next ES query
-                  </p>
-                  {/* Progress bar */}
-                  <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all duration-1000 ease-linear"
-                      style={{ width: `${countdownPct}%` }}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
+      {/* Mobile nav tabs */}
+      <div className="flex border-b border-border bg-card sm:hidden">
+        {[
+          { id: "dashboard" as View, label: "Dashboard" },
+          { id: "patterns" as View, label: "Patterns" },
+          { id: "findings" as View, label: "Findings" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setView(tab.id)}
+            className={`flex-1 px-3 py-2.5 text-center text-sm font-medium transition-colors ${
+              view === tab.id
+                ? "border-b-2 border-primary text-foreground"
+                : "text-muted-foreground"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Block Patterns</CardTitle>
-                  <span className="text-2xl">🚫</span>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{counts?.block ?? "—"}</div>
-                  <p className="text-xs text-muted-foreground">URL patterns to flag</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Whitelist Patterns</CardTitle>
-                  <span className="text-2xl">✅</span>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{counts?.whitelist ?? "—"}</div>
-                  <p className="text-xs text-muted-foreground">URL patterns to allow</p>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Manual Run</CardTitle>
-                  <span className="text-2xl">▶️</span>
-                </CardHeader>
-                <CardContent>
-                  <Button
-                    onClick={handleManualRun}
-                    disabled={loadingRun}
-                    className="w-full"
-                  >
-                    {loadingRun ? "Running…" : "Trigger Now"}
-                  </Button>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Config */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Configuration</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <dt className="text-muted-foreground">Status</dt>
-                    <dd className="font-medium">{status?.status ?? "Unknown"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Poll Interval</dt>
-                    <dd className="font-medium">{status?.poll_interval_minutes ?? "?"} min</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Block Patterns</dt>
-                    <dd className="font-medium">{status?.block_patterns ?? "?"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-muted-foreground">Whitelist Patterns</dt>
-                    <dd className="font-medium">{status?.whitelist_patterns ?? "?"}</dd>
-                  </div>
-                </dl>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {tab === "patterns" && <PatternTable />}
+      {/* Main content */}
+      <main className="min-h-[calc(100vh-3.5rem)] sm:ml-60">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+          {view === "dashboard" && (
+            <DashboardPage
+              remaining={remaining}
+              intervalSec={intervalSec}
+              status={status}
+              counts={counts}
+              loadingRun={loadingRun}
+              lastUpdated={lastUpdated}
+              onRefresh={fetchStats}
+              onManualRun={handleManualRun}
+            />
+          )}
+          {view === "patterns" && <PatternTable />}
+          {view === "findings" && <FindingsPage />}
+        </div>
       </main>
     </div>
   )
