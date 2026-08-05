@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from "react"
-import { Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
-import { type Finding, clearFindings, createPattern, deleteFinding, getFindings } from "../api"
+import { CheckCircle2, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import {
+  type Finding,
+  clearFindings,
+  createPattern,
+  deleteFinding,
+  getFindings,
+  listPatterns,
+  type Pattern,
+} from "../api"
 import { Button, ConfirmDialog, EmptyState, Input, Pagination, Skeleton, useToast } from "./ui"
 import { useDebounce } from "../lib/utils"
 
@@ -22,6 +30,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [patternIndex, setPatternIndex] = useState<Record<string, "block" | "whitelist">>({})
   const debouncedSearch = useDebounce(search, 300)
 
   // Allow the Graph view to deep-link into findings filtered by an IP/URL.
@@ -66,6 +75,23 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     const cancel = refetch()
     return cancel
   }, [refetch])
+
+  useEffect(() => {
+    let cancelled = false
+    listPatterns({ limit: 5000 })
+      .then((items: Pattern[]) => {
+        if (cancelled) return
+        const next: Record<string, "block" | "whitelist"> = {}
+        for (const p of items) next[p.pattern] = p.pattern_type
+        setPatternIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setPatternIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value)
@@ -233,7 +259,31 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                           {f.url}
                         </td>
                         <td className="px-4 py-3 font-mono text-sm text-muted-foreground">
-                          {f.base_url}
+                          <div className="flex items-center gap-2">
+                            <span className="truncate">{f.base_url}</span>
+                            {patternIndex[f.base_url] ? (
+                              <span
+                                className={
+                                  patternIndex[f.base_url] === "whitelist"
+                                    ? "inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+                                    : "inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+                                }
+                                title={
+                                  patternIndex[f.base_url] === "whitelist"
+                                    ? "Already in whitelist"
+                                    : "Already in blocklist"
+                                }
+                                aria-label={
+                                  patternIndex[f.base_url] === "whitelist"
+                                    ? "Already in whitelist"
+                                    : "Already in blocklist"
+                                }
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                                {patternIndex[f.base_url]}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                           {formatDetected(f.log_timestamp)}
@@ -245,7 +295,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-foreground"
                               onClick={() => handleAddBaseUrl("whitelist", f.base_url)}
-                              disabled={busy}
+                              disabled={busy || patternIndex[f.base_url] === "whitelist"}
                               aria-label={`Add base URL ${f.base_url} to whitelist`}
                             >
                               <span className="text-[10px] font-semibold">W</span>
@@ -255,7 +305,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               onClick={() => handleAddBaseUrl("block", f.base_url)}
-                              disabled={busy}
+                              disabled={busy || patternIndex[f.base_url] === "block"}
                               aria-label={`Add base URL ${f.base_url} to blocklist`}
                             >
                               <span className="text-[10px] font-semibold">B</span>
