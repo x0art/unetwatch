@@ -12,6 +12,7 @@ import { PatternTable } from "./components/PatternTable"
 import { LoginPage } from "./components/LoginPage"
 import { DashboardPage } from "./components/DashboardPage"
 import { FindingsPage } from "./components/FindingsPage"
+import { GraphPage } from "./components/GraphPage"
 import { AppShell } from "./components/AppShell"
 import { type View } from "./components/Sidebar"
 import { Button, ToastProvider, useToast } from "./components/ui"
@@ -20,6 +21,7 @@ import { RotateCcw } from "lucide-react"
 function AppRoutes() {
   const { toast } = useToast()
   const [view, setView] = useState<View>("dashboard")
+  const [findingsSearch, setFindingsSearch] = useState("")
   const [loggedIn, setLoggedIn] = useState(!!getToken())
   const [status, setStatus] = useState<MonitorStatus | null>(null)
   const [counts, setCounts] = useState<PatternCounts | null>(null)
@@ -85,6 +87,14 @@ function AppRoutes() {
     setLoggedIn(false)
   }
 
+  // Navigation that can optionally pre-filter the Findings page
+  // (used by the Graph view when a node is clicked). Any other navigation
+  // resets the filter so a stale graph filter never leaks back in.
+  const handleNavigate = useCallback((next: View, search?: string) => {
+    setFindingsSearch(search ?? "")
+    setView(next)
+  }, [])
+
   if (!loggedIn) {
     return <LoginPage onLogin={() => setLoggedIn(true)} />
   }
@@ -92,7 +102,7 @@ function AppRoutes() {
   return (
     <AppShell
       currentView={view}
-      onNavigate={setView}
+      onNavigate={handleNavigate}
       onLogout={handleLogout}
       title="ELK Monitoring"
       description="Pattern console"
@@ -122,7 +132,8 @@ function AppRoutes() {
         />
       )}
       {view === "patterns" && <PatternTable />}
-      {view === "findings" && <FindingsPage />}
+      {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
+      {view === "graph" && <GraphPage onNavigate={handleNavigate} />}
     </AppShell>
   )
 }

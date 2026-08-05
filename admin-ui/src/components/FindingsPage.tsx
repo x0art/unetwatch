@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
-import { SearchX, Search, RefreshCcw } from "lucide-react"
-import { type Finding, getFindings } from "../api"
-import { Button, EmptyState, Input, Pagination, Skeleton } from "./ui"
+import { Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import { type Finding, clearFindings, deleteFinding, getFindings } from "../api"
+import { Button, ConfirmDialog, EmptyState, Input, Pagination, Skeleton, useToast } from "./ui"
 import { useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
@@ -12,13 +12,28 @@ function formatDetected(ts: string) {
   return date.toLocaleString()
 }
 
-export function FindingsPage() {
+export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
+  const { toast } = useToast()
   const [findings, setFindings] = useState<Finding[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(initialSearch ?? "")
+  const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [busy, setBusy] = useState(false)
   const debouncedSearch = useDebounce(search, 300)
+
+  // Allow the Graph view to deep-link into findings filtered by an IP/URL.
+  // `search` is intentionally excluded from deps: including it would reset
+  // the user's typing back to the initial filter on every keystroke.
+  useEffect(() => {
+    if (initialSearch !== undefined && initialSearch !== search) {
+      setSearch(initialSearch)
+      setPage(0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSearch])
 
   const refetch = useCallback(() => {
     let cancelled = false
@@ -57,6 +72,45 @@ export function FindingsPage() {
     setPage(0)
   }
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    const target = deleteTarget
+    // Close the dialog immediately so a double-click can't fire twice.
+    setDeleteTarget(null)
+    setBusy(true)
+    try {
+      await deleteFinding(target.id)
+      toast({
+        title: "Finding deleted",
+        description: `${target.client_ip} → ${target.url}`,
+        variant: "success",
+      })
+      // If we just removed the last row on this page, step back a page.
+      if (findings.length === 1 && page > 0) setPage(page - 1)
+      else refetch()
+    } catch (e) {
+      toast({ title: "Delete failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleClearAll = async () => {
+    // Close the dialog immediately so a double-click can't fire twice.
+    setConfirmClear(false)
+    setBusy(true)
+    try {
+      await clearFindings()
+      toast({ title: "All findings cleared", variant: "success" })
+      setPage(0)
+      refetch()
+    } catch (e) {
+      toast({ title: "Clear failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -77,7 +131,17 @@ export function FindingsPage() {
               aria-label="Search findings"
             />
           </div>
-          <Button variant="outline" size="sm" onClick={refetch}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={total === 0 || loading || busy}
+            onClick={() => setConfirmClear(true)}
+            className="text-destructive hover:text-destructive"
+          >
+            <Eraser className="h-4 w-4" />
+            Clear all
+          </Button>
+          <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
             <RefreshCcw className="h-4 w-4" />
             Refresh
           </Button>
@@ -111,6 +175,9 @@ export function FindingsPage() {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">URL</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Base URL</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Detected</th>
+                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -119,9 +186,11 @@ export function FindingsPage() {
                       <tr key={i} className="border-b border-border">
                         <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
+                        <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-56" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
+                        <td className="px-4 py-3" />
                       </tr>
                     ))
                   : findings.map((f) => (
@@ -144,6 +213,18 @@ export function FindingsPage() {
                         <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                           {formatDetected(f.log_timestamp)}
                         </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => setDeleteTarget(f)}
+                            disabled={busy}
+                            aria-label={`Delete finding ${f.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </td>
                       </tr>
                     ))}
               </tbody>
@@ -158,6 +239,30 @@ export function FindingsPage() {
           />
         </>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete finding?"
+        description={
+          deleteTarget
+            ? `Finding #${deleteTarget.id} (${deleteTarget.client_ip} → ${deleteTarget.url}) will be permanently removed. This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear all findings?"
+        description={`All ${total.toLocaleString()} persisted findings will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Clear all"
+        variant="destructive"
+        onConfirm={handleClearAll}
+        onCancel={() => setConfirmClear(false)}
+      />
     </div>
   )
 }

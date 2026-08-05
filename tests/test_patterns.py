@@ -241,6 +241,229 @@ async def test_findings_list_and_search(client):
     assert len(data["items"]) == 1
 
 
+async def _insert_findings(db, rows):
+    """Insert findings rows directly, returning their ids."""
+    ids = []
+    for r in rows:
+        cursor = await db.execute(
+            "INSERT OR IGNORE INTO findings"
+            " (client_ip, server_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (r["client_ip"], r["server_ip"], r["url"], r["base_url"], r["ts"]),
+        )
+        ids.append(cursor.lastrowid)
+    await db.commit()
+    return ids
+
+
+async def test_findings_delete(client):
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        ids = await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "9.9.9.9",
+                    "server_ip": "10.0.0.9",
+                    "url": "http://delete-me.example/x",
+                    "base_url": "delete-me.example",
+                    "ts": "2026-08-05T02:00:00Z",
+                }
+            ],
+        )
+    finally:
+        await db.close()
+
+    fid = ids[0]
+    resp = client.delete(f"/api/findings/{fid}")
+    assert resp.status_code == 204
+
+    resp = client.get("/api/findings/")
+    assert resp.json()["total"] == 0
+
+    # Deleting again yields 404
+    resp = client.delete(f"/api/findings/{fid}")
+    assert resp.status_code == 404
+
+
+def test_findings_delete_not_found(client):
+    resp = client.delete("/api/findings/99999")
+    assert resp.status_code == 404
+
+
+async def test_findings_clear_all(client):
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://a.example/x",
+                    "base_url": "a.example",
+                    "ts": "2026-08-05T03:00:00Z",
+                },
+                {
+                    "client_ip": "2.2.2.2",
+                    "server_ip": "10.0.0.2",
+                    "url": "http://b.example/y",
+                    "base_url": "b.example",
+                    "ts": "2026-08-05T03:01:00Z",
+                },
+            ],
+        )
+    finally:
+        await db.close()
+
+    assert client.get("/api/findings/").json()["total"] == 2
+    resp = client.delete("/api/findings/")
+    assert resp.status_code == 204
+    assert client.get("/api/findings/").json()["total"] == 0
+
+
+def test_findings_graph_empty(client):
+    resp = client.get("/api/findings/graph")
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "links": []}
+
+
+def test_findings_graph_invalid_limit(client):
+    resp = client.get("/api/findings/graph?limit=0")
+    assert resp.status_code == 422
+    resp = client.get("/api/findings/graph?limit=9999")
+    assert resp.status_code == 422
+
+
+async def test_findings_graph_shape(client):
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "1.2.3.4",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://evil.example/a",
+                    "base_url": "evil.example",
+                    "ts": "2026-08-05T04:00:00Z",
+                },
+                {
+                    "client_ip": "1.2.3.4",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://evil.example/b",
+                    "base_url": "evil.example",
+                    "ts": "2026-08-05T04:01:00Z",
+                },
+                {
+                    "client_ip": "5.6.7.8",
+                    "server_ip": "10.0.0.2",
+                    "url": "http://bad.example/c",
+                    "base_url": "bad.example",
+                    "ts": "2026-08-05T04:02:00Z",
+                },
+                {
+                    "client_ip": "9.9.9.9",
+                    "server_ip": "",
+                    "url": "http://nohost.example/d",
+                    "base_url": "nohost.example",
+                    "ts": "2026-08-05T04:03:00Z",
+                },
+            ],
+        )
+    finally:
+        await db.close()
+
+    data = client.get("/api/findings/graph").json()
+    assert set(data.keys()) == {"nodes", "links"}
+
+    kinds = {n["kind"] for n in data["nodes"]}
+    assert kinds == {"ip", "server", "url"}
+
+    # Client IP node carries its total access count (2 accesses).
+    ip_node = next(n for n in data["nodes"] if n["kind"] == "ip" and n["label"] == "1.2.3.4")
+    assert ip_node["count"] == 2
+    assert ip_node["id"] == "ip:1.2.3.4"
+
+    # Layered flow links: ip -> server -> url, aggregated with counts.
+    assert {
+        "source": "ip:1.2.3.4", "target": "server:10.0.0.1", "count": 2
+    } in data["links"]
+    assert {
+        "source": "server:10.0.0.1", "target": "url:http://evil.example/a", "count": 1
+    } in data["links"]
+    assert {
+        "source": "server:10.0.0.1", "target": "url:http://evil.example/b", "count": 1
+    } in data["links"]
+
+    # Rows without a server_ip link straight to the URL.
+    assert {
+        "source": "ip:9.9.9.9", "target": "url:http://nohost.example/d", "count": 1
+    } in data["links"]
+
+
+async def test_findings_graph_limit_no_dangling_servers(client):
+    """Nodes that miss the per-layer cut must not appear disconnected."""
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        # top.example/a is hit twice, so with limit=1 it is the only URL
+        # that survives the cut; dropped.example/b falls off.
+        await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://top.example/a",
+                    "base_url": "top.example",
+                    "ts": "2026-08-05T05:00:00Z",
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://top.example/a",
+                    "base_url": "top.example",
+                    "ts": "2026-08-05T05:00:30Z",
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.2",
+                    "url": "http://dropped.example/b",
+                    "base_url": "dropped.example",
+                    "ts": "2026-08-05T05:01:00Z",
+                },
+            ],
+        )
+    finally:
+        await db.close()
+
+    # limit=1 keeps only the top URL (http://top.example/a), so the server
+    # behind the dropped URL must not show up as an isolated node.
+    data = client.get("/api/findings/graph?limit=1").json()
+    server_labels = [n["label"] for n in data["nodes"] if n["kind"] == "server"]
+    assert server_labels == ["10.0.0.1"]
+
+    url_labels = [n["label"] for n in data["nodes"] if n["kind"] == "url"]
+    assert "http://dropped.example/b" not in url_labels
+    # Every server node has at least one link.
+    node_ids = {n["id"] for n in data["nodes"]}
+    linked_ids = {l["source"] for l in data["links"]} | {l["target"] for l in data["links"]}
+    assert linked_ids <= node_ids
+    assert {n["id"] for n in data["nodes"] if n["kind"] == "server"} <= linked_ids
+
+
 def test_validation_invalid_type(client):
     resp = client.post("/api/patterns/", json={"pattern": "test", "pattern_type": "invalid"})
     assert resp.status_code == 422

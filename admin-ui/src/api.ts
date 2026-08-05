@@ -35,6 +35,26 @@ export interface FindingsResponse {
   total: number
 }
 
+export type GraphNodeKind = "ip" | "server" | "url"
+
+export interface GraphNode {
+  id: string
+  label: string
+  kind: GraphNodeKind
+  count: number
+}
+
+export interface GraphLink {
+  source: string
+  target: string
+  count: number
+}
+
+export interface FindingsGraph {
+  nodes: GraphNode[]
+  links: GraphLink[]
+}
+
 export interface MetricsPoint {
   count: number
 }
@@ -178,4 +198,16 @@ export async function getFindings(params?: {
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
   return request(`/findings/?${qs}`)
+}
+
+export async function deleteFinding(id: number): Promise<void> {
+  return request(`/findings/${id}`, { method: "DELETE" })
+}
+
+export async function clearFindings(): Promise<void> {
+  return request("/findings/", { method: "DELETE" })
+}
+
+export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
+  return request(`/findings/graph?limit=${limit}`)
 }

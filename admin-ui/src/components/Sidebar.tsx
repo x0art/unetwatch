@@ -6,6 +6,7 @@ import {
   LogOut,
   Menu,
   Moon,
+  Network,
   Radar,
   Sun,
   X,
@@ -63,7 +64,7 @@ export function useTheme() {
  * Navigation model
  * ════════════════════════════════════════════════════════════════ */
 
-export type View = "dashboard" | "patterns" | "findings"
+export type View = "dashboard" | "patterns" | "findings" | "graph"
 
 export interface NavItem {
   view: View
@@ -75,6 +76,7 @@ export const DEFAULT_NAV: NavItem[] = [
   { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { view: "patterns", label: "Patterns", icon: ListFilter },
   { view: "findings", label: "Findings", icon: Radar },
+  { view: "graph", label: "Graph", icon: Network },
 ]
 
 /* ════════════════════════════════════════════════════════════════
