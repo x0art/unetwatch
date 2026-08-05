@@ -122,6 +122,98 @@ def test_monitor_status(client):
     assert data["status"] == "active"
     assert "block_patterns" in data
     assert "whitelist_patterns" in data
+    assert "es_online" in data
+    assert "findings_count" in data
+
+
+def test_monitor_status_poll_interval_from_settings(client):
+    resp = client.get("/api/monitor/status")
+    data = resp.json()
+    assert data["poll_interval_minutes"] == 10
+
+
+def test_manual_run_minutes_validation(client):
+    resp = client.post("/api/monitor/run?minutes=0")
+    assert resp.status_code == 422
+    resp = client.post("/api/monitor/run?minutes=11")
+    assert resp.status_code == 422
+
+
+def test_monitor_metrics_shape(client):
+    resp = client.get("/api/monitor/metrics?minutes=60")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["window_minutes"] == 60
+    assert "es_online" in data
+    assert "total_requests" in data
+    assert "unique_ips" in data
+    assert "top_urls" in data
+    assert "top_ips" in data
+
+
+def test_list_patterns_sort(client):
+    client.post("/api/patterns/", json={"pattern": "*zzz*", "pattern_type": "block"})
+    client.post("/api/patterns/", json={"pattern": "*aaa*", "pattern_type": "block"})
+    resp = client.get("/api/patterns/?sort_by=pattern&sort_order=asc")
+    assert resp.status_code == 200
+    names = [p["pattern"] for p in resp.json()]
+    assert names == sorted(names)
+    resp = client.get("/api/patterns/?sort_by=pattern&sort_order=desc")
+    names = [p["pattern"] for p in resp.json()]
+    assert names == sorted(names, reverse=True)
+
+
+def test_list_patterns_invalid_sort(client):
+    resp = client.get("/api/patterns/?sort_by=evil")
+    assert resp.status_code == 422
+    resp = client.get("/api/patterns/?sort_order=sideways")
+    assert resp.status_code == 422
+
+
+def test_findings_list_empty(client):
+    resp = client.get("/api/findings/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data == {"items": [], "total": 0}
+
+
+async def test_findings_list_and_search(client):
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?)",
+            ("1.2.3.4", "http://evil.example/x", "evil.example", "2026-08-05T00:00:00Z"),
+        )
+        await db.execute(
+            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?)",
+            ("5.6.7.8", "http://other.example/y", "other.example", "2026-08-05T01:00:00Z"),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    resp = client.get("/api/findings/")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    # Newest first (id DESC)
+    assert data["items"][0]["client_ip"] == "5.6.7.8"
+
+    resp = client.get("/api/findings/?search=evil")
+    assert resp.json()["total"] == 1
+    assert resp.json()["items"][0]["client_ip"] == "1.2.3.4"
+
+    resp = client.get("/api/findings/?search=nomatch")
+    assert resp.json()["total"] == 0
+
+    resp = client.get("/api/findings/?limit=1&offset=1")
+    data = resp.json()
+    assert data["total"] == 2
+    assert len(data["items"]) == 1
 
 
 def test_validation_invalid_type(client):

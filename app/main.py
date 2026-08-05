@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
 from app.routes import auth as auth_routes
-from app.routes import monitor, patterns
+from app.routes import findings, monitor, patterns
 
 scheduler = AsyncIOScheduler()
 
@@ -25,7 +25,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     from app.services.monitor import fetch_logs
 
-    scheduler.add_job(fetch_logs, "interval", minutes=settings.poll_interval_minutes)
+    scheduler.add_job(
+        fetch_logs,
+        "interval",
+        minutes=settings.poll_interval_minutes,
+        kwargs={"minutes": settings.poll_interval_minutes},
+    )
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -70,6 +75,7 @@ async def security_headers(request: Request, call_next):
 
 app.include_router(patterns.router, dependencies=[Depends(verify_admin)])
 app.include_router(monitor.router, dependencies=[Depends(verify_admin)])
+app.include_router(findings.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 
 

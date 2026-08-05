@@ -181,3 +181,11 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* Metric bar grow-from-zero animation (dashboard URL metrics) */
+.metric-bar {
+  animation: metric-bar-grow 0.7s ease-out;
+}
+@keyframes metric-bar-grow {
+  from { width: 0; }
+}

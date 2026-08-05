@@ -34,6 +34,19 @@ async def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Detected log matches persisted per poll/manual run. The UNIQUE constraint
+    # (combined with INSERT OR IGNORE) dedupes overlapping poll windows.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS findings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_ip TEXT NOT NULL,
+            url TEXT NOT NULL,
+            base_url TEXT NOT NULL,
+            log_timestamp TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (client_ip, url, log_timestamp)
+        )
+    """)
     await db.commit()
     await db.close()
 

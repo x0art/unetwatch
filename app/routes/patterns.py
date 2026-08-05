@@ -21,6 +21,8 @@ async def list_patterns(
     search: str | None = Query(None, max_length=200),
     limit: int = Query(100, ge=1, le=5000),
     offset: int = Query(0, ge=0),
+    sort_by: str = Query("id", pattern="^(id|pattern|pattern_type|created_at)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
 ):
     where = []
     params: list = []
@@ -32,8 +34,9 @@ async def list_patterns(
         params.append(f"%{search}%")
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
+    order = f"ORDER BY {sort_by} {sort_order.upper()}"
     cursor = await db.execute(
-        f"SELECT * FROM url_patterns {clause} ORDER BY id DESC LIMIT ? OFFSET ?",
+        f"SELECT * FROM url_patterns {clause} {order} LIMIT ? OFFSET ?",
         (*params, limit, offset),
     )
     rows = await cursor.fetchall()

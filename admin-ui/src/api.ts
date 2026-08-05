@@ -11,6 +11,8 @@ export interface MonitorStatus {
   block_patterns: number
   whitelist_patterns: number
   poll_interval_minutes: number
+  es_online: boolean
+  findings_count: number
 }
 
 export interface PatternCounts {
@@ -20,9 +22,29 @@ export interface PatternCounts {
 
 export interface Finding {
   id: number
-  pattern: string
   client_ip: string
-  timestamp: string
+  url: string
+  base_url: string
+  log_timestamp: string
+  created_at: string | null
+}
+
+export interface FindingsResponse {
+  items: Finding[]
+  total: number
+}
+
+export interface MetricsPoint {
+  count: number
+}
+
+export interface MonitorMetrics {
+  window_minutes: number
+  es_online: boolean
+  total_requests: number
+  unique_ips: number
+  top_urls: (MetricsPoint & { url: string })[]
+  top_ips: (MetricsPoint & { client_ip: string })[]
 }
 
 const API = "/api"
@@ -88,12 +110,16 @@ export async function listPatterns(params?: {
   search?: string
   limit?: number
   offset?: number
+  sort_by?: "id" | "pattern" | "pattern_type" | "created_at"
+  sort_order?: "asc" | "desc"
 }): Promise<Pattern[]> {
   const qs = new URLSearchParams()
   if (params?.pattern_type) qs.set("pattern_type", params.pattern_type)
   if (params?.search) qs.set("search", params.search)
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
+  if (params?.sort_by) qs.set("sort_by", params.sort_by)
+  if (params?.sort_order) qs.set("sort_order", params.sort_order)
   return request(`/patterns/?${qs}`)
 }
 
@@ -130,12 +156,25 @@ export async function getMonitorStatus(): Promise<MonitorStatus> {
   return request("/monitor/status")
 }
 
-export async function triggerManualRun(): Promise<{ status: string }> {
-  return request("/monitor/run", { method: "POST" })
+export async function triggerManualRun(
+  minutes?: number,
+): Promise<{ status: string; minutes: number }> {
+  const qs = minutes !== undefined ? `?minutes=${minutes}` : ""
+  return request(`/monitor/run${qs}`, { method: "POST" })
 }
 
-export async function getFindings(): Promise<Finding[]> {
-  // The backend endpoint is not available yet. Keeping the contract typed here lets
-  // the findings view ship now and makes the future API integration a one-line change.
-  return Promise.resolve([])
+export async function getMonitorMetrics(minutes: number): Promise<MonitorMetrics> {
+  return request(`/monitor/metrics?minutes=${minutes}`)
+}
+
+export async function getFindings(params?: {
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<FindingsResponse> {
+  const qs = new URLSearchParams()
+  if (params?.search) qs.set("search", params.search)
+  if (params?.limit) qs.set("limit", String(params.limit))
+  if (params?.offset) qs.set("offset", String(params.offset))
+  return request(`/findings/?${qs}`)
 }

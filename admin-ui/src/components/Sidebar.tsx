@@ -187,7 +187,7 @@ function SidebarContent({
 export function Sidebar(props: SidebarContentProps) {
   return (
     <aside
-      className="hidden md:flex md:w-[260px] md:shrink-0 md:flex-col"
+      className="hidden md:sticky md:top-0 md:flex md:h-screen md:w-[260px] md:shrink-0 md:flex-col"
       aria-label="Sidebar"
     >
       <SidebarContent {...props} />

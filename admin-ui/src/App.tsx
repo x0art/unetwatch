@@ -65,10 +65,10 @@ function AppRoutes() {
     if (loggedIn) fetchStats()
   }, [loggedIn, fetchStats])
 
-  const handleManualRun = async () => {
+  const handleManualRun = async (minutes: number) => {
     setLoadingRun(true)
     try {
-      await triggerManualRun()
+      await triggerManualRun(minutes)
       toast({ title: "Manual run completed successfully", variant: "success" })
       lastRunRef.current = Date.now()
       setRemaining(intervalSec)
@@ -118,6 +118,7 @@ function AppRoutes() {
           lastUpdated={lastUpdated}
           onRefresh={fetchStats}
           onManualRun={handleManualRun}
+          onNavigate={setView}
         />
       )}
       {view === "patterns" && <PatternTable />}

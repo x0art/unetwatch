@@ -20,9 +20,59 @@ import {
   useToast,
 } from "./ui"
 import { useDebounce } from "../lib/utils"
-import { Search, Plus, Upload, Pencil, Trash2, Loader2 } from "lucide-react"
+import {
+  Search,
+  Plus,
+  Upload,
+  Pencil,
+  Trash2,
+  Loader2,
+  ArrowUpDown,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react"
 
 const PAGE_SIZE = 50
+
+type SortKey = "id" | "pattern" | "pattern_type" | "created_at"
+type SortOrder = "asc" | "desc"
+
+function SortableHeader({
+  label,
+  sortKey,
+  sortBy,
+  sortOrder,
+  onSort,
+}: {
+  label: string
+  sortKey: SortKey
+  sortBy: SortKey
+  sortOrder: SortOrder
+  onSort: (key: SortKey) => void
+}) {
+  const active = sortBy === sortKey
+  return (
+    <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+        aria-label={`Sort by ${label}${active && sortOrder === "asc" ? " (descending)" : " (ascending)"}`}
+      >
+        {label}
+        {active ? (
+          sortOrder === "desc" ? (
+            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3.5 w-3.5 opacity-50" aria-hidden="true" />
+        )}
+      </button>
+    </th>
+  )
+}
 
 export function PatternTable() {
   const [patterns, setPatterns] = useState<Pattern[]>([])
@@ -32,6 +82,8 @@ export function PatternTable() {
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
   const [page, setPage] = useState(0)
+  const [sortBy, setSortBy] = useState<SortKey>("id")
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
 
   // ── Edit dialog ──
   const [editOpen, setEditOpen] = useState(false)
@@ -73,6 +125,8 @@ export function PatternTable() {
         search: debouncedSearch || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
+        sort_by: sortBy,
+        sort_order: sortOrder,
       })
       setPatterns(data)
     } catch (e) {
@@ -80,7 +134,7 @@ export function PatternTable() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, filterType, page])
+  }, [debouncedSearch, filterType, page, sortBy, sortOrder])
 
   useEffect(() => {
     fetchPatterns()
@@ -95,6 +149,12 @@ export function PatternTable() {
 
   const handleFilterChange = (val: string) => {
     setFilterType(val)
+    setPage(0)
+  }
+
+  const handleSort = (key: SortKey) => {
+    setSortBy(key)
+    setSortOrder((prev) => (sortBy === key && prev === "asc" ? "desc" : "asc"))
     setPage(0)
   }
 
@@ -228,10 +288,10 @@ export function PatternTable() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/50">
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">ID</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Pattern</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Type</th>
-                <th className="text-left px-4 py-3 font-medium text-muted-foreground">Created</th>
+                <SortableHeader label="ID" sortKey="id" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <SortableHeader label="Pattern" sortKey="pattern" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <SortableHeader label="Type" sortKey="pattern_type" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                <SortableHeader label="Created" sortKey="created_at" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                 <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
               </tr>
             </thead>
