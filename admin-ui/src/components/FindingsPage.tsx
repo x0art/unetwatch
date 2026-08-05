@@ -239,7 +239,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       // Refresh findings so the row disappears once the new whitelist filter
       // hides it from the graph, and so the W/B button reflects updated state.
       refetch()
-      const next = { ...whitelistIndex, [baseUrl]: true }
+      const next: Record<string, true> = { ...whitelistIndex, [baseUrl]: true }
       setWhitelistIndex(next)
     } catch (e) {
       const message = (e as Error).message

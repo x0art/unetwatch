@@ -89,6 +89,7 @@ export function Input({
   className,
   value,
   onChange,
+  onKeyDown,
   placeholder,
   type = "text",
   autoFocus,
@@ -98,6 +99,7 @@ export function Input({
   className?: string
   value?: string
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
   placeholder?: string
   type?: string
   autoFocus?: boolean
@@ -120,6 +122,7 @@ export function Input({
       )}
       value={value}
       onChange={onChange}
+      onKeyDown={onKeyDown}
       placeholder={placeholder}
     />
   )
