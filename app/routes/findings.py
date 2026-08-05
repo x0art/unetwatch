@@ -16,16 +16,35 @@ async def findings_graph(
     aggregated access relationships (client → server → URL). `limit` caps
     the number of top client IPs and top URLs included per layer so the
     graph stays readable.
+
+    Findings whose URL or base_url matches an active whitelist pattern are
+    excluded so the graph never shows whitelisted destinations (defends
+    against legacy findings captured before the user whitelisted a URL).
     """
     cursor = await db.execute(
         """
-        SELECT client_ip, server_ip, url, COUNT(*) AS count
+        SELECT client_ip, server_ip, url, base_url, COUNT(*) AS count
         FROM findings
         WHERE client_ip != '' AND url != ''
-        GROUP BY client_ip, server_ip, url
+        GROUP BY client_ip, server_ip, url, base_url
         """
     )
-    rows = await cursor.fetchall()
+    wl_cursor = await db.execute(
+        "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
+    )
+    wl_rows = await wl_cursor.fetchall()
+    whitelist_patterns = [r[0] for r in wl_rows]
+    if whitelist_patterns:
+        rows = [
+            r
+            for r in await cursor.fetchall()
+            if not any(
+                pat and (pat in str(r["url"]) or pat in str(r["base_url"]))
+                for pat in whitelist_patterns
+            )
+        ]
+    else:
+        rows = await cursor.fetchall()
 
     ip_total: dict[str, int] = {}
     url_total: dict[str, int] = {}

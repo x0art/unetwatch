@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react"
-import { CheckCircle2, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import { CheckCircle2, Copy, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
 import {
   type Finding,
   clearFindings,
@@ -146,6 +146,9 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         description: baseUrl,
         variant: "success",
       })
+      // Refresh findings so the row disappears once the new whitelist filter
+      // hides it from the graph, and so the W/B button reflects updated state.
+      refetch()
     } catch (e) {
       const message = (e as Error).message
       if (message.includes("already exists")) {
@@ -159,6 +162,28 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleCopyUrl = async (url: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+      } else {
+        // Fallback for older browsers / non-secure contexts.
+        const ta = document.createElement("textarea")
+        ta.value = url
+        ta.setAttribute("readonly", "")
+        ta.style.position = "fixed"
+        ta.style.opacity = "0"
+        document.body.appendChild(ta)
+        ta.select()
+        document.execCommand("copy")
+        document.body.removeChild(ta)
+      }
+      toast({ title: "URL copied", description: url, variant: "success" })
+    } catch (e) {
+      toast({ title: "Copy failed", description: (e as Error).message, variant: "error" })
     }
   }
 
@@ -252,11 +277,25 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                         <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{f.id}</td>
                         <td className="px-4 py-3 font-mono text-sm">{f.client_ip}</td>
                         <td className="px-4 py-3 font-mono text-sm">{f.server_ip}</td>
-                        <td
-                          className="px-4 py-3 font-mono text-xs max-w-[320px] truncate"
-                          title={f.url}
-                        >
-                          {f.url}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2 max-w-[320px]">
+                            <span
+                              className="font-mono text-xs truncate"
+                              title={f.url}
+                            >
+                              {f.url}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleCopyUrl(f.url)}
+                              disabled={busy}
+                              aria-label={`Copy URL ${f.url}`}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </td>
                         <td className="px-4 py-3 font-mono text-sm text-muted-foreground">
                           <div className="flex items-center gap-2">
