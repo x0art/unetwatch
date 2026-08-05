@@ -138,8 +138,10 @@ async def list_findings(
     where = []
     params: list = []
     if search:
-        where.append("(client_ip LIKE ? OR url LIKE ? OR base_url LIKE ?)")
-        params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        where.append(
+            "(client_ip LIKE ? OR server_ip LIKE ? OR url LIKE ? OR base_url LIKE ?)"
+        )
+        params.extend([f"%{search}%"] * 4)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
 

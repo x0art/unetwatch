@@ -232,6 +232,12 @@ async def test_findings_list_and_search(client):
     assert resp.json()["items"][0]["client_ip"] == "1.2.3.4"
     assert resp.json()["items"][0]["server_ip"] == "10.0.0.1"
 
+    # server_ip is searchable too.
+    resp = client.get("/api/findings/?search=10.0.0.2")
+    assert resp.json()["total"] == 1
+    assert resp.json()["items"][0]["server_ip"] == "10.0.0.2"
+    assert resp.json()["items"][0]["client_ip"] == "5.6.7.8"
+
     resp = client.get("/api/findings/?search=nomatch")
     assert resp.json()["total"] == 0
 
@@ -459,9 +465,118 @@ async def test_findings_graph_limit_no_dangling_servers(client):
     assert "http://dropped.example/b" not in url_labels
     # Every server node has at least one link.
     node_ids = {n["id"] for n in data["nodes"]}
-    linked_ids = {l["source"] for l in data["links"]} | {l["target"] for l in data["links"]}
+    linked_ids = {lnk["source"] for lnk in data["links"]} | {
+        lnk["target"] for lnk in data["links"]
+    }
     assert linked_ids <= node_ids
     assert {n["id"] for n in data["nodes"] if n["kind"] == "server"} <= linked_ids
+
+
+async def test_store_findings_uses_es_timestamp(client):
+    """ES @timestamp is authoritative; blank/NaT/epoch values are normalized."""
+    from datetime import UTC, datetime
+
+    import pandas as pd
+
+    from app.database import get_db
+    from app.services.monitor import store_findings
+
+    epoch_ms = 1785906000000  # 2026-08-05T05:00:00Z
+    epoch_s = 1785906000
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        df = pd.DataFrame(
+            [
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/a",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": "2026-08-05T11:22:33.000Z",
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/b",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": "",
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/c",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": float("nan"),
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/d",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": epoch_ms,
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/e",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": pd.Timestamp("2026-08-05T12:00:00Z"),
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/f",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": pd.NaT,
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/g",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": epoch_s,  # epoch seconds
+                },
+                {
+                    "client_ip": "1.1.1.1",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://ts.example/h",
+                    "base_url": "ts.example",
+                    "action": "ALLOW",
+                    "@timestamp": float("inf"),  # unusable, must not crash
+                },
+            ]
+        )
+        await store_findings(db, df)
+
+        cursor = await db.execute("SELECT url, log_timestamp FROM findings ORDER BY id")
+        rows = {r["url"]: r["log_timestamp"] for r in await cursor.fetchall()}
+    finally:
+        await db.close()
+
+    # Real ES timestamps are stored verbatim.
+    assert rows["http://ts.example/a"] == "2026-08-05T11:22:33.000Z"
+    # Empty / NaN / NaT / inf timestamps fall back to the poll time — never
+    # blank, "NaT" or a crash.
+    for url in ("http://ts.example/b", "http://ts.example/c", "http://ts.example/f", "http://ts.example/h"):
+        value = rows[url]
+        assert value not in ("", "NaT")
+        datetime.fromisoformat(value)  # must be a parseable ISO timestamp
+    # Epoch millis and seconds are converted to ISO-8601 UTC.
+    assert rows["http://ts.example/d"] == datetime.fromtimestamp(epoch_ms / 1000, UTC).isoformat()
+    assert rows["http://ts.example/g"] == datetime.fromtimestamp(epoch_s, UTC).isoformat()
+    # pandas Timestamp values are normalized to ISO.
+    assert rows["http://ts.example/e"] == "2026-08-05T12:00:00+00:00"
+    assert "NaT" not in rows.values()
+    assert "" not in rows.values()
 
 
 def test_validation_invalid_type(client):

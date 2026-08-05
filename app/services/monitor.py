@@ -1,4 +1,6 @@
+import math
 from datetime import UTC, datetime
+from numbers import Integral, Real
 
 import pandas as pd
 from elasticsearch import AsyncElasticsearch
@@ -77,6 +79,42 @@ def _extract_base_url(url: str) -> str:
     return parts[2]
 
 
+def _normalize_timestamp(ts, fallback: str) -> str:
+    """Return a usable ISO-8601 timestamp for a finding.
+
+    The ES ``@timestamp`` is the source of truth; ``fallback`` (the poll
+    time) is only used when the document has no usable value. Handles ISO
+    strings, datetime/pandas Timestamp objects, numeric epoch values
+    (seconds/milliseconds) and missing markers (None, NaN, NaT, empty
+    string) so a log entry can never be stored with a blank or "NaT" time.
+    """
+    if ts is None:
+        return fallback
+    if isinstance(ts, str):
+        ts = ts.strip()
+        return ts or fallback
+    try:
+        if bool(pd.isna(ts)):
+            return fallback
+    except (TypeError, ValueError):
+        pass
+    # numbers.Integral/Real also catch numpy scalar types (np.int64, np.float64).
+    if isinstance(ts, (Integral, Real)):
+        try:
+            if not math.isfinite(float(ts)):
+                return fallback
+            if ts > 1e12:  # epoch milliseconds
+                return datetime.fromtimestamp(ts / 1000, UTC).isoformat()
+            if ts > 1e9:  # epoch seconds
+                return datetime.fromtimestamp(ts, UTC).isoformat()
+        except (TypeError, ValueError, OverflowError):
+            return fallback
+    if isinstance(ts, datetime):
+        return ts.isoformat()
+    rendered = str(ts).strip()
+    return rendered or fallback
+
+
 def apply_filters(df: pd.DataFrame, whitelist_regex: str) -> pd.DataFrame:
     """Apply whitelist + ALLOW filters and derive base_url.
 
@@ -102,16 +140,14 @@ async def store_findings(db, df: pd.DataFrame):
     rows = []
     now = datetime.now(UTC).isoformat()
     for _, row in df.iterrows():
-        ts = row.get("@timestamp")
-        if ts is None or (isinstance(ts, float) and pd.isna(ts)):
-            ts = now
+        ts = _normalize_timestamp(row.get("@timestamp"), now)
         rows.append(
             (
                 str(row.get("client_ip") or ""),
                 str(row.get("server_ip") or ""),
                 str(row.get("url") or ""),
                 str(row.get("base_url") or ""),
-                str(ts),
+                ts,
             )
         )
     if not rows:
