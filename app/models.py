@@ -48,3 +48,20 @@ class UrlWhitelistResponse(UrlWhitelistBase):
 class PatternBulkImport(BaseModel):
     patterns: list[str] = Field(..., min_length=1, max_length=1000)
     pattern_type: str = Field(default="block", pattern="^(block|whitelist)$")
+
+
+class BlacklistEntryCreate(BaseModel):
+    value: str = Field(..., min_length=1, max_length=500)
+    source: str = Field(default="manual", pattern="^(manual|finding)$")
+    finding_id: int | None = None
+
+
+class BlacklistEntryResponse(BaseModel):
+    id: int
+    kind: str
+    value: str
+    source: str
+    finding_id: int | None = None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}

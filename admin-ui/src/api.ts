@@ -68,6 +68,11 @@ export interface MonitorMetrics {
   top_ips: (MetricsPoint & { client_ip: string })[]
 }
 
+export interface BlacklistSet {
+  urls: string[]
+  ips: string[]
+}
+
 const API = "/api"
 
 /* ── Session token auth ──────────────────────────────────────────── */
@@ -230,4 +235,24 @@ export async function getBlacklistIps(): Promise<string> {
   if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.text()
+}
+
+export async function addBaseUrlToBlacklist(value: string): Promise<{ added: string[] }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+  const res = await fetch(`${API}/blacklist/`, { method: "POST", headers, body: JSON.stringify({ value }) })
+  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.json()
+}
+
+export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[] }> {
+  const headers: Record<string, string> = {}
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+  const res = await fetch(`${API}/blacklist/entries`, { headers })
+  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.json()
 }

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowDown, ArrowUp, CheckCircle2, Copy, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
 import {
   type Finding,
+  addBaseUrlToBlacklist,
   clearFindings,
   createPattern,
   deleteFinding,
   getFindings,
+  getBlacklistSet,
   listPatterns,
   type Pattern,
 } from "../api"
@@ -75,7 +77,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [patternIndex, setPatternIndex] = useState<Record<string, "block" | "whitelist">>({})
+  const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
+  const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const debouncedSearch = useDebounce(search, 300)
@@ -125,20 +128,43 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
 
   useEffect(() => {
     let cancelled = false
-    listPatterns({ limit: 5000 })
+    listPatterns({ pattern_type: "whitelist", limit: 5000 })
       .then((items: Pattern[]) => {
         if (cancelled) return
-        const next: Record<string, "block" | "whitelist"> = {}
-        for (const p of items) next[p.pattern] = p.pattern_type
-        setPatternIndex(next)
+        const next: Record<string, true> = {}
+        for (const p of items) next[p.pattern] = true
+        setWhitelistIndex(next)
       })
       .catch(() => {
-        if (!cancelled) setPatternIndex({})
+        if (!cancelled) setWhitelistIndex({})
       })
     return () => {
       cancelled = true
     }
   }, [])
+
+  const refetchBlacklist = useCallback(() => {
+    let cancelled = false
+    getBlacklistSet()
+      .then((data) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const url of data.urls) next[url] = true
+        for (const ip of data.ips) next[ip] = true
+        setBlacklistIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setBlacklistIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    const cancel = refetchBlacklist()
+    return cancel
+  }, [refetchBlacklist])
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value)
@@ -201,18 +227,20 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     }
   }
 
-  const handleAddBaseUrl = async (patternType: "block" | "whitelist", baseUrl: string) => {
+  const handleAddBaseUrl = async (baseUrl: string) => {
     setBusy(true)
     try {
-      await createPattern({ pattern: baseUrl, pattern_type: patternType })
+      await createPattern({ pattern: baseUrl, pattern_type: "whitelist" })
       toast({
-        title: `${patternType === "block" ? "Block" : "Whitelist"} pattern added`,
+        title: "Whitelist pattern added",
         description: baseUrl,
         variant: "success",
       })
       // Refresh findings so the row disappears once the new whitelist filter
       // hides it from the graph, and so the W/B button reflects updated state.
       refetch()
+      const next = { ...whitelistIndex, [baseUrl]: true }
+      setWhitelistIndex(next)
     } catch (e) {
       const message = (e as Error).message
       if (message.includes("already exists")) {
@@ -224,6 +252,23 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       } else {
         toast({ title: "Add pattern failed", description: message, variant: "error" })
       }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleAddToBlacklist = async (baseUrl: string) => {
+    setBusy(true)
+    try {
+      const res = await addBaseUrlToBlacklist(baseUrl)
+      toast({
+        title: res.added.length ? "Added to blacklist" : "Already in blacklist",
+        description: baseUrl,
+        variant: res.added.length ? "success" : "info",
+      })
+      refetchBlacklist()
+    } catch (e) {
+      toast({ title: "Add to blacklist failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBusy(false)
     }
@@ -400,26 +445,23 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                         <td className="px-4 py-3 font-mono text-sm text-muted-foreground">
                           <div className="flex items-center gap-2">
                             <span className="truncate">{f.base_url}</span>
-                            {patternIndex[f.base_url] ? (
+                            {whitelistIndex[f.base_url] ? (
                               <span
-                                className={
-                                  patternIndex[f.base_url] === "whitelist"
-                                    ? "inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
-                                    : "inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
-                                }
-                                title={
-                                  patternIndex[f.base_url] === "whitelist"
-                                    ? "Already in whitelist"
-                                    : "Already in blacklist"
-                                }
-                                aria-label={
-                                  patternIndex[f.base_url] === "whitelist"
-                                    ? "Already in whitelist"
-                                    : "Already in blacklist"
-                                }
+                                className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+                                title="Already in whitelist"
+                                aria-label="Already in whitelist"
                               >
                                 <CheckCircle2 className="h-3 w-3" />
-                                {patternIndex[f.base_url]}
+                                whitelist
+                              </span>
+                            ) : blacklistIndex[f.base_url] ? (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+                                title="In blacklist"
+                                aria-label="In blacklist"
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                                In blacklist
                               </span>
                             ) : null}
                           </div>
@@ -433,8 +475,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => handleAddBaseUrl("whitelist", f.base_url)}
-                              disabled={busy || patternIndex[f.base_url] === "whitelist"}
+                              onClick={() => handleAddBaseUrl(f.base_url)}
+                              disabled={busy || whitelistIndex[f.base_url]}
                               aria-label={`Add base URL ${f.base_url} to whitelist`}
                             >
                               <span className="text-[10px] font-semibold">W</span>
@@ -443,8 +485,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={() => handleAddBaseUrl("block", f.base_url)}
-                              disabled={busy || patternIndex[f.base_url] === "block"}
+                              onClick={() => handleAddToBlacklist(f.base_url)}
+                              disabled={busy || blacklistIndex[f.base_url]}
                               aria-label={`Add base URL ${f.base_url} to blacklist`}
                             >
                               <span className="text-[10px] font-semibold">B</span>

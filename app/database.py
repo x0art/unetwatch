@@ -1,4 +1,3 @@
-
 import aiosqlite
 
 from app.config import get_settings
@@ -55,6 +54,18 @@ async def init_db():
         await db.execute(
             "ALTER TABLE findings ADD COLUMN server_ip TEXT NOT NULL DEFAULT ''"
         )
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS blacklist_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL CHECK (kind IN ('url', 'ip')),
+            value TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'finding'
+            finding_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (kind, value)
+        )
+    """)
 
     # One-time purge of any demo seed rows left over from a prior version.
     # These are the documentation-only IPs used by the old sample seed

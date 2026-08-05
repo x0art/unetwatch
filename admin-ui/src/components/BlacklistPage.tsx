@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { Ban, Copy, Link2, RefreshCcw } from "lucide-react"
-import { getBlacklistUrls, getBlacklistIps } from "../api"
-import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Skeleton, useToast } from "./ui"
+import { addBaseUrlToBlacklist, getBlacklistUrls, getBlacklistIps } from "../api"
+import { Button, Card, CardContent, CardHeader, CardTitle, EmptyState, Input, Skeleton, useToast } from "./ui"
 
 interface FeedCardProps {
   title: string
@@ -53,6 +53,8 @@ export function BlacklistPage() {
   const [ips, setIps] = useState<string>("")
   const [loading, setLoading] = useState(true)
   const [, setError] = useState<string | null>(null)
+  const [addValue, setAddValue] = useState("")
+  const [adding, setAdding] = useState(false)
   const { toast } = useToast()
 
   const load = useCallback(async () => {
@@ -87,6 +89,22 @@ export function BlacklistPage() {
     [toast],
   )
 
+  const add = useCallback(async () => {
+    const value = addValue.trim()
+    if (!value) return
+    setAdding(true)
+    try {
+      const res = await addBaseUrlToBlacklist(value)
+      setAddValue("")
+      toast({ title: "Added to blacklist", description: res.added.join(", "), variant: "success" })
+      await load()
+    } catch (e) {
+      toast({ title: "Failed to add blacklist entry", description: (e as Error).message, variant: "error" })
+    } finally {
+      setAdding(false)
+    }
+  }, [addValue, load, toast])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2.5">
@@ -94,9 +112,23 @@ export function BlacklistPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Blacklist</h1>
           <p className="text-sm text-muted-foreground">
-            URL and IP blacklists exposed as plain text for external integrations.
+            Concrete URLs and IPs blacklisted from findings. Plain text endpoints for external integrations.
           </p>
         </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Input
+          value={addValue}
+          onChange={(e) => setAddValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add()
+          }}
+          placeholder="Add base URL"
+        />
+        <Button onClick={add} disabled={adding || !addValue.trim()}>
+          Add
+        </Button>
       </div>
 
       <div className="space-y-4">
