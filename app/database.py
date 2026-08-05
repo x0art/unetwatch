@@ -55,6 +55,20 @@ async def init_db():
         await db.execute(
             "ALTER TABLE findings ADD COLUMN server_ip TEXT NOT NULL DEFAULT ''"
         )
+
+    # One-time purge of any demo seed rows left over from a prior version.
+    # These are the documentation-only IPs used by the old sample seed
+    # (RFC 5737 ranges 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24). They
+    # never appear in real traffic, so removing them is safe.
+    await db.execute(
+        "DELETE FROM findings WHERE client_ip IN ("
+        "'192.0.2.77', '198.51.100.9', '198.51.100.42',"
+        " '203.0.113.10', '203.0.113.210'"
+        ") OR server_ip IN ("
+        "'10.0.0.4', '10.0.0.5', '10.0.0.6', '10.0.0.7', '10.0.0.8'"
+        ")"
+    )
+
     await db.commit()
     await db.close()
 
