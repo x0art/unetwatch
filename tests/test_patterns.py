@@ -184,17 +184,6 @@ def test_findings_list_empty(client):
     assert isinstance(data["total"], int)
 
 
-async def test_findings_seeded_on_startup(client):
-    from app.services.seed import seed_findings
-
-    await seed_findings()
-    resp = client.get("/api/findings/")
-    data = resp.json()
-    assert data["total"] == 5
-    assert data["items"][0]["client_ip"] == "198.51.100.9"
-    assert data["items"][0]["server_ip"] == "10.0.0.8"
-
-
 async def test_findings_list_and_search(client):
     from app.database import get_db
 

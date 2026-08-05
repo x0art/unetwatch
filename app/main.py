@@ -13,7 +13,6 @@ from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
 from app.routes import auth as auth_routes
 from app.routes import findings, monitor, patterns
-from app.services.seed import seed_findings
 
 scheduler = AsyncIOScheduler()
 
@@ -22,7 +21,6 @@ scheduler = AsyncIOScheduler()
 async def lifespan(app: FastAPI):
     await init_db()
     await seed_defaults()
-    await seed_findings()
 
     settings = get_settings()
     from app.services.monitor import fetch_logs
