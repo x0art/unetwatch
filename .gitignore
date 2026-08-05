@@ -28,3 +28,6 @@ dist/
 htmlcov/
 .coverage
 .claude/worktrees/
+
+# graphify skill output
+graphify-out/

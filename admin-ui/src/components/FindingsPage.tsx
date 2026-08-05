@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import { Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
-import { type Finding, clearFindings, deleteFinding, getFindings } from "../api"
+import { type Finding, clearFindings, createPattern, deleteFinding, getFindings } from "../api"
 import { Button, ConfirmDialog, EmptyState, Input, Pagination, Skeleton, useToast } from "./ui"
 import { useDebounce } from "../lib/utils"
 
@@ -111,6 +111,31 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     }
   }
 
+  const handleAddBaseUrl = async (patternType: "block" | "whitelist", baseUrl: string) => {
+    setBusy(true)
+    try {
+      await createPattern({ pattern: baseUrl, pattern_type: patternType })
+      toast({
+        title: `${patternType === "block" ? "Block" : "Whitelist"} pattern added`,
+        description: baseUrl,
+        variant: "success",
+      })
+    } catch (e) {
+      const message = (e as Error).message
+      if (message.includes("already exists")) {
+        toast({
+          title: "Pattern already exists",
+          description: baseUrl,
+          variant: "info",
+        })
+      } else {
+        toast({ title: "Add pattern failed", description: message, variant: "error" })
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -214,16 +239,38 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                           {formatDetected(f.log_timestamp)}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => setDeleteTarget(f)}
-                            disabled={busy}
-                            aria-label={`Delete finding ${f.id}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleAddBaseUrl("whitelist", f.base_url)}
+                              disabled={busy}
+                              aria-label={`Add base URL ${f.base_url} to whitelist`}
+                            >
+                              <span className="text-[10px] font-semibold">W</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleAddBaseUrl("block", f.base_url)}
+                              disabled={busy}
+                              aria-label={`Add base URL ${f.base_url} to blocklist`}
+                            >
+                              <span className="text-[10px] font-semibold">B</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => setDeleteTarget(f)}
+                              disabled={busy}
+                              aria-label={`Delete finding ${f.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
