@@ -23,6 +23,7 @@ export interface PatternCounts {
 export interface Finding {
   id: number
   client_ip: string
+  server_ip: string
   url: string
   base_url: string
   log_timestamp: string

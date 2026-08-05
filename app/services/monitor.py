@@ -108,6 +108,7 @@ async def store_findings(db, df: pd.DataFrame):
         rows.append(
             (
                 str(row.get("client_ip") or ""),
+                str(row.get("server_ip") or ""),
                 str(row.get("url") or ""),
                 str(row.get("base_url") or ""),
                 str(ts),
@@ -116,8 +117,9 @@ async def store_findings(db, df: pd.DataFrame):
     if not rows:
         return
     await db.executemany(
-        "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
-        " VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO findings"
+        " (client_ip, server_ip, url, base_url, log_timestamp)"
+        " VALUES (?, ?, ?, ?, ?)",
         rows,
     )
     await db.commit()

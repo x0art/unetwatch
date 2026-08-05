@@ -192,6 +192,7 @@ async def test_findings_seeded_on_startup(client):
     data = resp.json()
     assert data["total"] == 5
     assert data["items"][0]["client_ip"] == "198.51.100.9"
+    assert data["items"][0]["server_ip"] == "10.0.0.8"
 
 
 async def test_findings_list_and_search(client):
@@ -202,14 +203,28 @@ async def test_findings_list_and_search(client):
         # Isolate this test from any findings the startup seed inserted.
         await db.execute("DELETE FROM findings")
         await db.execute(
-            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
-            " VALUES (?, ?, ?, ?)",
-            ("1.2.3.4", "http://evil.example/x", "evil.example", "2026-08-05T00:00:00Z"),
+            "INSERT OR IGNORE INTO findings"
+            " (client_ip, server_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                "1.2.3.4",
+                "10.0.0.1",
+                "http://evil.example/x",
+                "evil.example",
+                "2026-08-05T00:00:00Z",
+            ),
         )
         await db.execute(
-            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
-            " VALUES (?, ?, ?, ?)",
-            ("5.6.7.8", "http://other.example/y", "other.example", "2026-08-05T01:00:00Z"),
+            "INSERT OR IGNORE INTO findings"
+            " (client_ip, server_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                "5.6.7.8",
+                "10.0.0.2",
+                "http://other.example/y",
+                "other.example",
+                "2026-08-05T01:00:00Z",
+            ),
         )
         await db.commit()
     finally:
@@ -221,10 +236,12 @@ async def test_findings_list_and_search(client):
     assert data["total"] == 2
     # Newest first (id DESC)
     assert data["items"][0]["client_ip"] == "5.6.7.8"
+    assert data["items"][0]["server_ip"] == "10.0.0.2"
 
     resp = client.get("/api/findings/?search=evil")
     assert resp.json()["total"] == 1
     assert resp.json()["items"][0]["client_ip"] == "1.2.3.4"
+    assert resp.json()["items"][0]["server_ip"] == "10.0.0.1"
 
     resp = client.get("/api/findings/?search=nomatch")
     assert resp.json()["total"] == 0

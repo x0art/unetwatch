@@ -40,6 +40,7 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS findings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_ip TEXT NOT NULL,
+            server_ip TEXT NOT NULL DEFAULT '',
             url TEXT NOT NULL,
             base_url TEXT NOT NULL,
             log_timestamp TEXT NOT NULL,
@@ -47,6 +48,13 @@ async def init_db():
             UNIQUE (client_ip, url, log_timestamp)
         )
     """)
+    # Migration: add server_ip to existing databases that predate the column.
+    cursor = await db.execute("PRAGMA table_info(findings)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "server_ip" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN server_ip TEXT NOT NULL DEFAULT ''"
+        )
     await db.commit()
     await db.close()
 

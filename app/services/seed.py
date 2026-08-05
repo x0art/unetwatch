@@ -35,30 +35,35 @@ URL_WHITELIST = [
 SAMPLE_FINDINGS = [
     (
         "203.0.113.10",
+        "10.0.0.4",
         "http://evil.example/uncensored/stream?id=1",
         "evil.example",
         "2026-08-05T09:15:00Z",
     ),
     (
         "198.51.100.42",
+        "10.0.0.5",
         "https://mirror.example/lk21/page/7",
         "mirror.example",
         "2026-08-05T08:47:00Z",
     ),
     (
         "192.0.2.77",
+        "10.0.0.6",
         "http://streams.example/film21/1080p",
         "streams.example",
         "2026-08-05T07:30:00Z",
     ),
     (
         "203.0.113.210",
+        "10.0.0.7",
         "https://portal.example/indoxxi/home",
         "portal.example",
         "2026-08-05T06:05:00Z",
     ),
     (
         "198.51.100.9",
+        "10.0.0.8",
         "http://cdn.example/rebahin/asset.mp4",
         "cdn.example",
         "2026-08-05T05:22:00Z",
@@ -94,8 +99,9 @@ async def seed_findings():
         if total > 0:
             return
         await db.executemany(
-            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
-            " VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO findings"
+            " (client_ip, server_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?, ?)",
             SAMPLE_FINDINGS,
         )
         await db.commit()

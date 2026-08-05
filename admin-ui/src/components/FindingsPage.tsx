@@ -107,6 +107,7 @@ export function FindingsPage() {
                 <tr className="border-b border-border bg-muted/50">
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">ID</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Client IP</th>
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Server IP</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">URL</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Base URL</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Detected</th>
@@ -130,6 +131,7 @@ export function FindingsPage() {
                       >
                         <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{f.id}</td>
                         <td className="px-4 py-3 font-mono text-sm">{f.client_ip}</td>
+                        <td className="px-4 py-3 font-mono text-sm">{f.server_ip}</td>
                         <td
                           className="px-4 py-3 font-mono text-xs max-w-[320px] truncate"
                           title={f.url}
