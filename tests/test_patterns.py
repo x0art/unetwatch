@@ -171,10 +171,27 @@ def test_list_patterns_invalid_sort(client):
 
 
 def test_findings_list_empty(client):
+    """Before the app starts, findings table is empty (lifespan runs after client setup).
+
+    This test asserts the schema-level behavior: GET /api/findings/ works and
+    returns the documented shape. The seeded startup population is exercised
+    in `test_findings_seeded_on_startup` below."""
     resp = client.get("/api/findings/")
     assert resp.status_code == 200
     data = resp.json()
-    assert data == {"items": [], "total": 0}
+    assert set(data.keys()) == {"items", "total"}
+    assert isinstance(data["items"], list)
+    assert isinstance(data["total"], int)
+
+
+async def test_findings_seeded_on_startup(client):
+    from app.services.seed import seed_findings
+
+    await seed_findings()
+    resp = client.get("/api/findings/")
+    data = resp.json()
+    assert data["total"] == 5
+    assert data["items"][0]["client_ip"] == "198.51.100.9"
 
 
 async def test_findings_list_and_search(client):
@@ -182,6 +199,8 @@ async def test_findings_list_and_search(client):
 
     db = await get_db()
     try:
+        # Isolate this test from any findings the startup seed inserted.
+        await db.execute("DELETE FROM findings")
         await db.execute(
             "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
             " VALUES (?, ?, ?, ?)",

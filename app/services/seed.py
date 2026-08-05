@@ -29,6 +29,43 @@ URL_WHITELIST = [
 ]
 
 
+# Sample findings so the Findings page has data to display on a fresh install.
+# These are only inserted when the findings table is empty; they never overwrite
+# or duplicate rows produced by real ES polls.
+SAMPLE_FINDINGS = [
+    (
+        "203.0.113.10",
+        "http://evil.example/uncensored/stream?id=1",
+        "evil.example",
+        "2026-08-05T09:15:00Z",
+    ),
+    (
+        "198.51.100.42",
+        "https://mirror.example/lk21/page/7",
+        "mirror.example",
+        "2026-08-05T08:47:00Z",
+    ),
+    (
+        "192.0.2.77",
+        "http://streams.example/film21/1080p",
+        "streams.example",
+        "2026-08-05T07:30:00Z",
+    ),
+    (
+        "203.0.113.210",
+        "https://portal.example/indoxxi/home",
+        "portal.example",
+        "2026-08-05T06:05:00Z",
+    ),
+    (
+        "198.51.100.9",
+        "http://cdn.example/rebahin/asset.mp4",
+        "cdn.example",
+        "2026-08-05T05:22:00Z",
+    ),
+]
+
+
 async def seed_patterns():
     db = await get_db()
     try:
@@ -43,6 +80,24 @@ async def seed_patterns():
                 " VALUES (?, 'whitelist')",
                 (p,),
             )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def seed_findings():
+    """Populate sample findings only when the findings table is empty."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT COUNT(*) AS total FROM findings")
+        total = (await cursor.fetchone())["total"]
+        if total > 0:
+            return
+        await db.executemany(
+            "INSERT OR IGNORE INTO findings (client_ip, url, base_url, log_timestamp)"
+            " VALUES (?, ?, ?, ?)",
+            SAMPLE_FINDINGS,
+        )
         await db.commit()
     finally:
         await db.close()
