@@ -410,12 +410,12 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                                 title={
                                   patternIndex[f.base_url] === "whitelist"
                                     ? "Already in whitelist"
-                                    : "Already in blocklist"
+                                    : "Already in blacklist"
                                 }
                                 aria-label={
                                   patternIndex[f.base_url] === "whitelist"
                                     ? "Already in whitelist"
-                                    : "Already in blocklist"
+                                    : "Already in blacklist"
                                 }
                               >
                                 <CheckCircle2 className="h-3 w-3" />
@@ -445,7 +445,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
                               onClick={() => handleAddBaseUrl("block", f.base_url)}
                               disabled={busy || patternIndex[f.base_url] === "block"}
-                              aria-label={`Add base URL ${f.base_url} to blocklist`}
+                              aria-label={`Add base URL ${f.base_url} to blacklist`}
                             >
                               <span className="text-[10px] font-semibold">B</span>
                             </Button>

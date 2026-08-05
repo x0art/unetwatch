@@ -13,6 +13,7 @@ import { LoginPage } from "./components/LoginPage"
 import { DashboardPage } from "./components/DashboardPage"
 import { FindingsPage } from "./components/FindingsPage"
 import { GraphPage } from "./components/GraphPage"
+import { BlacklistPage } from "./components/BlacklistPage"
 import { AppShell } from "./components/AppShell"
 import { type View } from "./components/Sidebar"
 import { Button, ToastProvider, useToast } from "./components/ui"
@@ -134,6 +135,7 @@ function AppRoutes() {
       {view === "patterns" && <PatternTable />}
       {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
       {view === "graph" && <GraphPage onNavigate={handleNavigate} />}
+      {view === "blacklist" && <BlacklistPage />}
     </AppShell>
   )
 }

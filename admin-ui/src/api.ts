@@ -211,3 +211,23 @@ export async function clearFindings(): Promise<void> {
 export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
   return request(`/findings/graph?limit=${limit}`)
 }
+
+/* ── Blacklist plain-text feeds (for external integrations) ──────── */
+
+export async function getBlacklistUrls(): Promise<string> {
+  const res = await fetch(`${API}/blacklist/urls`, {
+    headers: getToken() ? { "X-API-Key": getToken()! } : {},
+  })
+  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.text()
+}
+
+export async function getBlacklistIps(): Promise<string> {
+  const res = await fetch(`${API}/blacklist/ips`, {
+    headers: getToken() ? { "X-API-Key": getToken()! } : {},
+  })
+  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.text()
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import {
   Activity,
+  Ban,
   LayoutDashboard,
   ListFilter,
   LogOut,
@@ -64,7 +65,7 @@ export function useTheme() {
  * Navigation model
  * ════════════════════════════════════════════════════════════════ */
 
-export type View = "dashboard" | "patterns" | "findings" | "graph"
+export type View = "dashboard" | "patterns" | "findings" | "graph" | "blacklist"
 
 export interface NavItem {
   view: View
@@ -77,6 +78,7 @@ export const DEFAULT_NAV: NavItem[] = [
   { view: "patterns", label: "Patterns", icon: ListFilter },
   { view: "findings", label: "Findings", icon: Radar },
   { view: "graph", label: "Graph", icon: Network },
+  { view: "blacklist", label: "Blacklist", icon: Ban },
 ]
 
 /* ════════════════════════════════════════════════════════════════
