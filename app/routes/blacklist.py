@@ -41,17 +41,47 @@ async def list_blacklist_entries(db=Depends(get_db_conn)):
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_blacklist_entry(payload: BlacklistEntryCreate, db=Depends(get_db_conn)):
     value = payload.value.strip()
+    kind = "url"
+    host = ""
+
     if value.startswith(("http://", "https://")):
-        kind = "url"
+        host = value.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
     else:
         try:
             ipaddress.IPv4Address(value)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail="value must be a URL (http://...) or IPv4 address",
-            ) from exc
-        kind = "ip"
+        except ValueError:
+            if " " in value or "." not in value:
+                raise HTTPException(
+                    status_code=400,
+                    detail="value must be a URL (http://...) or IPv4 address",
+                )
+            host = value
+        else:
+            kind = "ip"
+            host = value
+
+    if not value:
+        raise HTTPException(status_code=400, detail="value must not be empty")
+
+    if " " in value:
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a URL (http://...) or IPv4 address",
+        )
+
+    if kind == "url" and host == "":
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a URL (http://...) or IPv4 address",
+        )
+
+    if kind == "url" and "." not in host:
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a URL (http://...) or IPv4 address",
+        )
+
+
 
     added: list[str] = []
     cursor = await db.execute(
@@ -62,8 +92,7 @@ async def add_blacklist_entry(payload: BlacklistEntryCreate, db=Depends(get_db_c
     if cursor.rowcount:
         added.append(value)
 
-    if kind == "url":
-        host = value.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
+    if kind == "url" and host:
         try:
             ipaddress.IPv4Address(host)
         except ValueError:

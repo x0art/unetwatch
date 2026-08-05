@@ -261,6 +261,10 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     setBusy(true)
     try {
       const res = await addBaseUrlToBlacklist(baseUrl)
+      if (res.added.length) {
+        const next: Record<string, true> = { ...blacklistIndex, [baseUrl]: true }
+        setBlacklistIndex(next)
+      }
       toast({
         title: res.added.length ? "Added to blacklist" : "Already in blacklist",
         description: baseUrl,
@@ -483,13 +487,13 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                             </Button>
                             <Button
                               variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              size="sm"
+                              className="h-8 px-2 text-muted-foreground hover:text-destructive"
                               onClick={() => handleAddToBlacklist(f.base_url)}
                               disabled={busy || blacklistIndex[f.base_url]}
                               aria-label={`Add base URL ${f.base_url} to blacklist`}
                             >
-                              <span className="text-[10px] font-semibold">B</span>
+                              <span className="text-[10px] font-semibold">Blacklist</span>
                             </Button>
                             <Button
                               variant="ghost"
