@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { CheckCircle2, Copy, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { ArrowDown, ArrowUp, CheckCircle2, Copy, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
 import {
   type Finding,
   clearFindings,
@@ -14,10 +14,55 @@ import { useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
 
+type SortKey = "id" | "client_ip" | "server_ip" | "url" | "base_url" | "log_timestamp"
+type SortDir = "asc" | "desc"
+
 function formatDetected(ts: string) {
   const date = new Date(ts)
   if (Number.isNaN(date.getTime())) return ts
   return date.toLocaleString()
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0
+  if (a === undefined || a === null || a === "") return 1
+  if (b === undefined || b === null || b === "") return -1
+  if (typeof a === "number" && typeof b === "number") return a - b
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sortBy,
+  sortDir,
+  onSort,
+}: {
+  label: string
+  sortKey: SortKey
+  sortBy: SortKey | null
+  sortDir: SortDir
+  onSort: (key: SortKey) => void
+}) {
+  const active = sortBy === sortKey
+  const Icon = active && sortDir === "asc" ? ArrowUp : ArrowDown
+  return (
+    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        {label}
+        <Icon
+          className={active ? "h-3 w-3 opacity-100" : "h-3 w-3 opacity-30"}
+          aria-hidden="true"
+        />
+      </button>
+    </th>
+  )
 }
 
 export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
@@ -31,6 +76,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
   const [patternIndex, setPatternIndex] = useState<Record<string, "block" | "whitelist">>({})
+  const [sortBy, setSortBy] = useState<SortKey | null>("id")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
   const debouncedSearch = useDebounce(search, 300)
 
   // Allow the Graph view to deep-link into findings filtered by an IP/URL.
@@ -97,6 +144,23 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     setSearch(e.target.value)
     setPage(0)
   }
+
+  const handleSort = (key: SortKey) => {
+    if (sortBy === key) {
+      // Toggle direction on repeat click.
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortBy(key)
+      setSortDir(key === "id" ? "desc" : "asc")
+    }
+    setPage(0)
+  }
+
+  const sortedFindings = useMemo(() => {
+    if (!sortBy) return findings
+    const dir = sortDir === "asc" ? 1 : -1
+    return [...findings].sort((a, b) => dir * compareValues(a[sortBy], b[sortBy]))
+  }, [findings, sortBy, sortDir])
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -245,12 +309,48 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Client IP</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Server IP</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">URL</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Base URL</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">Detected</th>
+                  <SortableTh
+                    label="ID"
+                    sortKey="id"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableTh
+                    label="Client IP"
+                    sortKey="client_ip"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableTh
+                    label="Server IP"
+                    sortKey="server_ip"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableTh
+                    label="URL"
+                    sortKey="url"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableTh
+                    label="Base URL"
+                    sortKey="base_url"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
+                  <SortableTh
+                    label="Detected"
+                    sortKey="log_timestamp"
+                    sortBy={sortBy}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                  />
                   <th className="px-4 py-3 text-right font-medium text-muted-foreground">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -269,7 +369,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                         <td className="px-4 py-3" />
                       </tr>
                     ))
-                  : findings.map((f) => (
+                  : sortedFindings.map((f) => (
                       <tr
                         key={f.id}
                         className="border-b border-border transition-colors hover:bg-muted/30"
