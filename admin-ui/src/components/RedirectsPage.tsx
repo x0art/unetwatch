@@ -204,6 +204,7 @@ export function RedirectsPage() {
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [addUrl, setAddUrl] = useState("")
   const [busy, setBusy] = useState(false)
+  const [busyUrl, setBusyUrl] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TrackedUrl | null>(null)
   const [historyTarget, setHistoryTarget] = useState<TrackedUrl | null>(null)
   const [history, setHistory] = useState<UrlRedirectHistory | null>(null)
@@ -321,6 +322,35 @@ export function RedirectsPage() {
       toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBusy(false)
+    }
+  }
+
+  const handleCheckOne = async (item: TrackedUrl) => {
+    setBusyUrl(item.url)
+    try {
+      const res = await checkRedirects(item.url)
+      const result = res.updated[0]
+      toast({
+        title: `Checked ${item.url}`,
+        description: result
+          ? `${STATUS_META[result.status].label}${
+              result.final_url && result.final_url !== item.url
+                ? ` → ${result.final_url}`
+                : ""
+            }`
+          : "No result",
+        variant:
+          result?.status === "error"
+            ? "error"
+            : result?.status === "redirect"
+              ? "info"
+              : "success",
+      })
+      reload()
+    } catch (e) {
+      toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusyUrl(null)
     }
   }
 
@@ -724,9 +754,23 @@ export function RedirectsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                                onClick={() => handleCheckOne(item)}
+                                disabled={busy || busyUrl !== null}
+                                aria-label={`Check redirects for ${item.url}`}
+                              >
+                                {busyUrl === item.url ? (
+                                  <RefreshCcw className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Zap className="h-4 w-4" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-muted-foreground hover:text-destructive"
                                 onClick={() => setDeleteTarget(item)}
-                                disabled={busy}
+                                disabled={busy || busyUrl !== null}
                                 aria-label={`Stop tracking ${item.url}`}
                               >
                                 <Trash2 className="h-4 w-4" />

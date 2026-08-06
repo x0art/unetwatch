@@ -254,6 +254,24 @@ def test_redirects_check_one_untracked_404(client):
     assert resp.status_code == 404
 
 
+async def test_redirects_check_one_url(client, monkeypatch):
+    from app.services import redirects as svc
+
+    client.post("/api/redirects/", json={"url": "http://one.example/a"})
+    client.post("/api/redirects/", json={"url": "http://two.example/b"})
+
+    async def fake_check(session, url):
+        return [], 200, url, None
+
+    monkeypatch.setattr(svc, "check_url", fake_check)
+
+    resp = client.post("/api/redirects/check", json={"url": "http://one.example/a"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["checked"] == 1
+    assert data["updated"][0]["url"] == "http://one.example/a"
+
+
 def test_redirects_graph_empty(client):
     resp = client.get("/api/redirects/graph")
     assert resp.status_code == 200
