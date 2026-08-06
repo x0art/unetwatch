@@ -73,6 +73,69 @@ export interface BlacklistSet {
   ips: string[]
 }
 
+export interface TrackedUrl {
+  id: number
+  url: string
+  source: "manual" | "finding" | "auto"
+  status: "unknown" | "ok" | "redirect" | "error"
+  http_status: number | null
+  final_url: string | null
+  last_checked_at: string | null
+  last_error: string | null
+  created_at: string | null
+  history_count: number
+}
+
+export interface TrackedUrlsResponse {
+  items: TrackedUrl[]
+  total: number
+}
+
+export interface RedirectLink {
+  source: string
+  target: string
+  http_status: number
+  active: boolean
+}
+
+export interface RedirectGraphNode {
+  id: string
+  label: string
+  status: TrackedUrl["status"]
+  final_url: string | null
+  history_count: number
+}
+
+export interface RedirectGraph {
+  nodes: RedirectGraphNode[]
+  links: RedirectLink[]
+}
+
+export interface RedirectCheckResult {
+  url: string
+  status: TrackedUrl["status"]
+  http_status: number | null
+  final_url: string | null
+  error: string | null
+}
+
+export interface RedirectCheckResponse {
+  checked: number
+  updated: RedirectCheckResult[]
+}
+
+export interface UrlRedirectHistory {
+  url: string
+  status: TrackedUrl["status"]
+  edges: {
+    target_url: string
+    http_status: number
+    first_seen_at: string
+    last_seen_at: string
+    active: boolean
+  }[]
+}
+
 const API = "/api"
 
 /* ── Session token auth ──────────────────────────────────────────── */
@@ -262,4 +325,48 @@ export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[]
   if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
+}
+
+/* ── Redirect tracker ──────────────────────────────────────────── */
+
+export async function listTrackedUrls(params?: {
+  search?: string
+  limit?: number
+  offset?: number
+  sort_by?: "id" | "url" | "source" | "status" | "last_checked_at"
+  sort_order?: "asc" | "desc"
+}): Promise<TrackedUrlsResponse> {
+  const qs = new URLSearchParams()
+  if (params?.search) qs.set("search", params.search)
+  if (params?.limit) qs.set("limit", String(params.limit))
+  if (params?.offset) qs.set("offset", String(params.offset))
+  if (params?.sort_by) qs.set("sort_by", params.sort_by)
+  if (params?.sort_order) qs.set("sort_order", params.sort_order)
+  return request(`/redirects/?${qs}`)
+}
+
+export async function addTrackedUrl(data: {
+  url: string
+  source?: "manual" | "finding"
+}): Promise<TrackedUrl> {
+  return request("/redirects/", { method: "POST", body: JSON.stringify(data) })
+}
+
+export async function deleteTrackedUrl(id: number): Promise<void> {
+  return request(`/redirects/${id}`, { method: "DELETE" })
+}
+
+export async function checkRedirects(url?: string): Promise<RedirectCheckResponse> {
+  return request("/redirects/check", {
+    method: "POST",
+    body: JSON.stringify(url ? { url } : {}),
+  })
+}
+
+export async function getRedirectGraph(): Promise<RedirectGraph> {
+  return request("/redirects/graph")
+}
+
+export async function getUrlRedirectHistory(id: number): Promise<UrlRedirectHistory> {
+  return request(`/redirects/${id}/history`)
 }

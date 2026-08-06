@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, CheckCircle2, Copy, Eraser, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import { ArrowDown, ArrowUp, CheckCircle2, Copy, CornerUpRight, Eraser, History, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
 import {
   type Finding,
   addBaseUrlToBlacklist,
+  addTrackedUrl,
   bulkDeleteFindings,
   clearFindings,
   createPattern,
@@ -10,6 +11,7 @@ import {
   getFindings,
   getBlacklistSet,
   listPatterns,
+  listTrackedUrls,
   type Pattern,
 } from "../api"
 import { Button, ConfirmDialog, EmptyState, Input, Pagination, Skeleton, useToast } from "./ui"
@@ -82,6 +84,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [busy, setBusy] = useState(false)
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
+  const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const debouncedSearch = useDebounce(search, 300)
@@ -140,6 +143,24 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       })
       .catch(() => {
         if (!cancelled) setWhitelistIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Tracked-for-redirects index (for the Track button state).
+  useEffect(() => {
+    let cancelled = false
+    listTrackedUrls({ limit: 5000 })
+      .then((data) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const t of data.items) next[t.url] = true
+        setTrackedIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setTrackedIndex({})
       })
     return () => {
       cancelled = true
@@ -326,6 +347,25 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       refetchBlacklist()
     } catch (e) {
       toast({ title: "Add to blacklist failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleTrackRedirect = async (url: string) => {
+    setBusy(true)
+    try {
+      await addTrackedUrl({ url, source: "finding" })
+      toast({ title: "URL added to redirect tracking", description: url, variant: "success" })
+      setTrackedIndex((prev) => ({ ...prev, [url]: true }))
+    } catch (e) {
+      const message = (e as Error).message
+      if (message.includes("already tracked")) {
+        setTrackedIndex((prev) => ({ ...prev, [url]: true }))
+        toast({ title: "Already tracked", description: url, variant: "info" })
+      } else {
+        toast({ title: "Track redirect failed", description: message, variant: "error" })
+      }
     } finally {
       setBusy(false)
     }
@@ -588,6 +628,20 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                               aria-label={`Add base URL ${f.base_url} to blacklist`}
                             >
                               <span className="text-[10px] font-semibold">Blacklist</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              onClick={() => handleTrackRedirect(f.url)}
+                              disabled={busy || trackedIndex[f.url]}
+                              aria-label={`Track redirects for ${f.url}`}
+                            >
+                              {trackedIndex[f.url] ? (
+                                <History className="h-4 w-4" />
+                              ) : (
+                                <CornerUpRight className="h-4 w-4" />
+                              )}
                             </Button>
                             <Button
                               variant="ghost"

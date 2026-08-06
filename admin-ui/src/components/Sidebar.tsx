@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import {
   Activity,
   Ban,
+  GitBranch,
   LayoutDashboard,
   ListFilter,
   LogOut,
@@ -65,7 +66,7 @@ export function useTheme() {
  * Navigation model
  * ════════════════════════════════════════════════════════════════ */
 
-export type View = "dashboard" | "patterns" | "findings" | "graph" | "blacklist"
+export type View = "dashboard" | "patterns" | "findings" | "graph" | "blacklist" | "redirects"
 
 export interface NavItem {
   view: View
@@ -79,6 +80,7 @@ export const DEFAULT_NAV: NavItem[] = [
   { view: "findings", label: "Findings", icon: Radar },
   { view: "graph", label: "Graph", icon: Network },
   { view: "blacklist", label: "Blacklist", icon: Ban },
+  { view: "redirects", label: "Redirects", icon: GitBranch },
 ]
 
 /* ════════════════════════════════════════════════════════════════
