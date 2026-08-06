@@ -67,6 +67,37 @@ async def init_db():
         )
     """)
 
+    # URLs under redirect watch. `source` is 'manual' | 'finding' for user
+    # additions and 'auto' for targets discovered while following a chain.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS tracked_urls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'finding' | 'auto'
+            status TEXT NOT NULL DEFAULT 'unknown', -- 'unknown' | 'ok' | 'redirect' | 'error'
+            http_status INTEGER,
+            final_url TEXT,
+            last_checked_at TIMESTAMP,
+            last_error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Every redirect hop ever observed, with history. `active` marks the
+    # currently-live edge; old edges are kept so target changes are visible.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS redirect_edges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL,
+            target_url TEXT NOT NULL,
+            http_status INTEGER NOT NULL,
+            first_seen_at TIMESTAMP NOT NULL,
+            last_seen_at TIMESTAMP NOT NULL,
+            active INTEGER NOT NULL DEFAULT 1,
+            UNIQUE (source_url, target_url)
+        )
+    """)
+
     # One-time purge of any demo seed rows left over from a prior version.
     # These are the documentation-only IPs used by the old sample seed
     # (RFC 5737 ranges 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24). They

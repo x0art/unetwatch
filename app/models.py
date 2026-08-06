@@ -65,3 +65,12 @@ class BlacklistEntryResponse(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class RedirectTrackCreate(BaseModel):
+    url: str = Field(..., min_length=1, max_length=500)
+    source: str = Field(default="manual", pattern="^(manual|finding)$")
+
+
+class RedirectCheckRequest(BaseModel):
+    url: str | None = Field(None, max_length=500)

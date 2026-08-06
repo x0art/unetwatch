@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     webhook_url: str = "https://n8n.example.com/webhook/your-webhook-id"
     poll_interval_minutes: int = 10
     es_query_size: int = 5000
+    redirect_check_interval_minutes: int = 60
+    redirect_timeout_seconds: int = 10
+    redirect_max_hops: int = 10
     database_url: str = "sqlite:///./elk_monitoring.db"
     api_key: str = ""
     admin_user: str = "admin"
