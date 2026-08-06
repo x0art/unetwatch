@@ -239,3 +239,33 @@ def test_redirects_requires_auth(db_path):
             c.post("/api/redirects/", json={"url": "http://x.example/y"}).status_code
             == 401
         )
+
+
+def test_redirects_history_404(client):
+    assert client.get("/api/redirects/9999/history").status_code == 404
+
+
+def test_redirects_delete_404(client):
+    assert client.delete("/api/redirects/9999").status_code == 404
+
+
+def test_redirects_check_one_untracked_404(client):
+    resp = client.post("/api/redirects/check", json={"url": "http://nope.example/x"})
+    assert resp.status_code == 404
+
+
+def test_redirects_graph_empty(client):
+    resp = client.get("/api/redirects/graph")
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "links": []}
+
+
+def test_classify_status_redirect_without_location():
+    from app.services.redirects import _classify_status
+
+    # A 3xx that resolved to no hop must not be classified as OK.
+    assert _classify_status([], 301, None) == "redirect"
+    assert _classify_status([], 200, None) == "ok"
+    assert _classify_status([], 404, None) == "error"
+    assert _classify_status([("a", "b", 301)], 200, None) == "redirect"
+    assert _classify_status([], 0, "timeout") == "error"

@@ -133,5 +133,14 @@ async def url_history(tracked_id: int, db=Depends(get_db_conn)):
     return {
         "url": row["url"],
         "status": row["status"],
-        "edges": [dict(e) for e in edges],
+        "edges": [
+            {
+                "target_url": e["target_url"],
+                "http_status": e["http_status"],
+                "first_seen_at": e["first_seen_at"],
+                "last_seen_at": e["last_seen_at"],
+                "active": bool(e["active"]),
+            }
+            for e in edges
+        ],
     }

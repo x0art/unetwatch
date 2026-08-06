@@ -69,6 +69,8 @@ async def check_url(session: aiohttp.ClientSession, url: str):
             target = urljoin(current, location)
             if not target.startswith(("http://", "https://")):
                 return hops, status, current, "invalid redirect location"
+            if target == current:
+                return hops, status, current, "redirect loop detected"
             hops.append((current, target, status))
             current = target
             continue
@@ -82,6 +84,10 @@ def _classify_status(hops: list, final_status: int, error: str | None) -> str:
     if error:
         return "error"
     if hops:
+        return "redirect"
+    if final_status and 300 <= final_status < 400:
+        # A 3xx that resolved to no hop (e.g. redirect without Location)
+        # is still a redirect, not a healthy final response.
         return "redirect"
     if final_status and 200 <= final_status < 400:
         return "ok"

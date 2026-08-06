@@ -136,10 +136,13 @@ interface LayoutNode {
   height: number
 }
 
-function buildLayout(graph: RedirectGraph) {
-  const active = graph.links.filter((l) => l.active)
-  const sourceSet = new Set(active.map((l) => l.source))
-  const targetSet = new Set(active.map((l) => l.target))
+function buildLayout(graph: RedirectGraph, showHistory: boolean) {
+  // When historical edges are shown, place every node they touch so the
+  // dashed edges (e.g. url1→url2 before url2 stopped being a destination)
+  // actually render. Otherwise columns only contain active-relation nodes.
+  const relevant = showHistory ? graph.links : graph.links.filter((l) => l.active)
+  const sourceSet = new Set(relevant.map((l) => l.source))
+  const targetSet = new Set(relevant.map((l) => l.target))
   const left = graph.nodes.filter((n) => sourceSet.has(n.id))
   const right = graph.nodes.filter((n) => targetSet.has(n.id))
 
@@ -367,7 +370,10 @@ export function RedirectsPage() {
   }, [graph])
 
   /* Graph interactivity */
-  const layout = useMemo(() => (graph ? buildLayout(graph) : null), [graph])
+  const layout = useMemo(
+    () => (graph ? buildLayout(graph, showHistory) : null),
+    [graph, showHistory],
+  )
   const layoutById = useMemo(
     () => new Map((layout?.nodes ?? []).map((n) => [n.id, n])),
     [layout],
