@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ArrowDown,
   ArrowUp,
+  Ban,
   CornerUpRight,
   GitBranch,
   History,
@@ -13,9 +14,9 @@ import {
 } from "lucide-react"
 import {
   type RedirectGraph,
-  type RedirectLink,
   type TrackedUrl,
   type UrlRedirectHistory,
+  addBaseUrlToBlacklist,
   addTrackedUrl,
   checkRedirects,
   deleteTrackedUrl,
@@ -26,6 +27,9 @@ import {
 import {
   Badge,
   Button,
+  Card,
+  CardContent,
+  CardHeader,
   ConfirmDialog,
   Dialog,
   EmptyState,
@@ -60,12 +64,17 @@ const SOURCE_META: Record<
 
 type SortKey = "id" | "url" | "source" | "status" | "last_checked_at"
 type SortDir = "asc" | "desc"
+type GroupNode = RedirectGraph["nodes"][number]
 
 function formatWhen(ts: string | null) {
   if (!ts) return "—"
   const date = new Date(ts)
   if (Number.isNaN(date.getTime())) return ts
   return date.toLocaleString()
+}
+
+function truncate(s: string, max: number) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
 }
 
 function SortableTh({
@@ -99,154 +108,6 @@ function SortableTh({
   )
 }
 
-/* ── Depth-layered graph (Traffic Graph style) ──────────────────────── */
-
-const COLUMN_WIDTH = 380
-const COLUMN_GAP = 40
-const START_X = 24
-
-const NODE_HEIGHT = 40
-const TOP_PAD = 84
-const BOTTOM_PAD = 32
-const MAX_CANVAS_HEIGHT = 640
-
-const STATUS_NODE_STYLE: Record<TrackedUrl["status"], string> = {
-  ok: "fill-success/15 stroke-success",
-  redirect: "fill-warning/15 stroke-warning",
-  error: "fill-danger/15 stroke-danger",
-  unknown: "fill-muted/30 stroke-muted-foreground/50",
-}
-
-const STATUS_LABEL_STYLE: Record<TrackedUrl["status"], string> = {
-  ok: "fill-success",
-  redirect: "fill-warning",
-  error: "fill-danger",
-  unknown: "fill-muted-foreground",
-}
-
-interface LayoutNode {
-  id: string
-  depth: number
-  url: string
-  status: TrackedUrl["status"]
-  history_count: number
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-/**
- * Longest-path layering: a node's depth is 1 + the max depth of its
- * incoming neighbours; nodes with no incoming edges sit at depth 0, so
- * chains like url1 → url2 → url3 flow left to right across columns.
- * Cycles (rare) are parked in a fallback column instead of looping.
- */
-function computeDepths(nodeIds: Set<string>, links: RedirectLink[]): Map<string, number> {
-  const preds = new Map<string, string[]>()
-  for (const id of nodeIds) preds.set(id, [])
-  for (const l of links) {
-    if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) continue
-    preds.get(l.target)!.push(l.source)
-  }
-
-  const depth = new Map<string, number>()
-  const remaining = new Set(nodeIds)
-  let fallback = 0
-  while (remaining.size > 0) {
-    const frontier = [...remaining].filter((n) =>
-      preds.get(n)!.every((p) => depth.has(p)),
-    )
-    if (frontier.length === 0) {
-      // Cycle: park the rest in one fallback column.
-      for (const n of remaining) depth.set(n, fallback)
-      break
-    }
-    for (const n of frontier) {
-      const predDepths = preds.get(n)!.map((p) => depth.get(p)!)
-      depth.set(n, predDepths.length === 0 ? 0 : 1 + Math.max(...predDepths))
-      remaining.delete(n)
-    }
-    fallback += 1
-  }
-  return depth
-}
-
-function buildLayout(graph: RedirectGraph, showHistory: boolean) {
-  // When historical edges are shown, include the nodes they touch so the
-  // dashed edges (e.g. url1→url2 before url2 stopped being a destination)
-  // actually render. Otherwise only active relations are placed.
-  const links = showHistory ? graph.links : graph.links.filter((l) => l.active)
-  const nodeIds = new Set<string>()
-  for (const l of links) {
-    nodeIds.add(l.source)
-    nodeIds.add(l.target)
-  }
-  const depths = computeDepths(nodeIds, links)
-  const relevantNodes = graph.nodes.filter((n) => nodeIds.has(n.id))
-
-  const byDepth = new Map<number, RedirectGraph["nodes"]>()
-  for (const n of relevantNodes) {
-    const d = depths.get(n.id) ?? 0
-    const list = byDepth.get(d) ?? []
-    list.push(n)
-    byDepth.set(d, list)
-  }
-
-  const maxRows = Math.max(1, ...[...byDepth.values()].map((l) => l.length))
-  const slot = Math.max(
-    52,
-    Math.min(64, Math.floor((MAX_CANVAS_HEIGHT - TOP_PAD - BOTTOM_PAD) / maxRows)),
-  )
-  const height = Math.max(320, TOP_PAD + maxRows * slot + BOTTOM_PAD)
-  const maxDepth = byDepth.size > 0 ? Math.max(...byDepth.keys()) : 0
-
-  const nodes: LayoutNode[] = []
-  for (const [d, list] of [...byDepth.entries()].sort((a, b) => a[0] - b[0])) {
-    list.sort((a, b) => a.label.localeCompare(b.label))
-    const x = START_X + d * (COLUMN_WIDTH + COLUMN_GAP)
-    list.forEach((n, i) => {
-      nodes.push({
-        id: n.id,
-        depth: d,
-        url: n.id,
-        status: n.status,
-        history_count: n.history_count,
-        x,
-        y: TOP_PAD + i * slot + (slot - NODE_HEIGHT) / 2,
-        width: COLUMN_WIDTH,
-        height: NODE_HEIGHT,
-      })
-    })
-  }
-
-  const columns = Array.from({ length: maxDepth + 1 }, (_, d) => ({
-    depth: d,
-    x: START_X + d * (COLUMN_WIDTH + COLUMN_GAP),
-    label: d === 0 ? "Sources" : `Hop ${d}`,
-  }))
-
-  return {
-    nodes,
-    columns,
-    width: START_X + maxDepth * (COLUMN_WIDTH + COLUMN_GAP) + COLUMN_WIDTH + 16,
-    height,
-  }
-}
-
-function truncate(s: string, max: number) {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s
-}
-
-function edgePath(a: LayoutNode, b: LayoutNode) {
-  const sx = a.x + a.width
-  const sy = a.y + a.height / 2
-  const tx = b.x
-  const ty = b.y + b.height / 2
-  const dx = Math.max(40, (tx - sx) / 2)
-  return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`
-}
-
 /* ── Page ───────────────────────────────────────────────────────────── */
 
 export function RedirectsPage() {
@@ -264,15 +125,13 @@ export function RedirectsPage() {
   const [busy, setBusy] = useState(false)
   const [busyUrl, setBusyUrl] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<TrackedUrl | null>(null)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [historyTarget, setHistoryTarget] = useState<TrackedUrl | null>(null)
   const [history, setHistory] = useState<UrlRedirectHistory | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
-  const [showHistory, setShowHistory] = useState(true)
-  const [hovered, setHovered] = useState<string | null>(null)
-  const [focused, setFocused] = useState<string | null>(null)
 
   const debouncedSearch = useDebounce(search, 300)
-  const activeUrl = focused ?? hovered
 
   const loadTable = useCallback(() => {
     let cancelled = false
@@ -344,6 +203,99 @@ export function RedirectsPage() {
     setPage(0)
   }
 
+  /* ── Selection (bulk actions) ─────────────────────────────────────── */
+
+  // Drop selections for rows no longer present after a refetch/page change.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(items.map((i) => i.id))
+      const next = new Set([...prev].filter((id) => visible.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [items])
+
+  const allSelected = items.length > 0 && selectedIds.size === items.length
+  const someSelected = selectedIds.size > 0 && !allSelected
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(items.map((i) => i.id)))
+  }
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectedUrls = items.filter((i) => selectedIds.has(i.id)).map((i) => i.url)
+
+  const handleBulkCheck = async () => {
+    const urls = [...selectedUrls]
+    if (!urls.length) return
+    setBusy(true)
+    try {
+      const res = await checkRedirects(urls)
+      const changed = res.updated.filter((u) => u.error || u.status === "redirect").length
+      toast({
+        title: `Checked ${res.checked} URL${res.checked === 1 ? "" : "s"}`,
+        description: `${changed} changed or errored`,
+        variant: changed ? "info" : "success",
+      })
+      reload()
+    } catch (e) {
+      toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleBulkBlacklist = async () => {
+    const urls = [...selectedUrls]
+    if (!urls.length) return
+    setBusy(true)
+    try {
+      const results = await Promise.all(urls.map((u) => addBaseUrlToBlacklist(u)))
+      const added = results.reduce((n, r) => n + r.added.length, 0)
+      toast({
+        title: added
+          ? `${added} URL${added === 1 ? "" : "s"} added to blacklist`
+          : "Already in blacklist",
+        variant: added ? "success" : "info",
+      })
+    } catch (e) {
+      toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    setConfirmBulkDelete(false)
+    const ids = [...selectedIds]
+    if (!ids.length) return
+    setBusy(true)
+    try {
+      await Promise.all(ids.map((id) => deleteTrackedUrl(id)))
+      toast({
+        title: `Removed ${ids.length} URL${ids.length === 1 ? "" : "s"} from tracking`,
+        variant: "success",
+      })
+      setSelectedIds(new Set())
+      if (ids.length >= items.length && page > 0) setPage(page - 1)
+      else reload()
+    } catch (e) {
+      toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /* ── Single-row actions ───────────────────────────────────────────── */
+
   const handleAdd = async () => {
     const url = addUrl.trim()
     if (!url) return
@@ -386,7 +338,7 @@ export function RedirectsPage() {
   const handleCheckOne = async (item: TrackedUrl) => {
     setBusyUrl(item.url)
     try {
-      const res = await checkRedirects(item.url)
+      const res = await checkRedirects([item.url])
       const result = res.updated[0]
       toast({
         title: `Checked ${item.url}`,
@@ -446,7 +398,54 @@ export function RedirectsPage() {
     }
   }
 
-  /* Stats from the full node set (graph endpoint returns every tracked URL) */
+  /* ── Grouped-by-current-target visualization ──────────────────────── */
+
+  const groups = useMemo(() => {
+    const links = (graph?.links ?? []).filter((l) => l.active)
+    const byId = new Map((graph?.nodes ?? []).map((n) => [n.id, n]))
+    const members = new Map<string, GroupNode[]>()
+    const edgeStatus = new Map<string, number>()
+    for (const l of links) {
+      const source = byId.get(l.source)
+      const target = byId.get(l.target)
+      if (!source || !target) continue
+      const list = members.get(l.target) ?? []
+      list.push(source)
+      members.set(l.target, list)
+      edgeStatus.set(l.source, l.http_status)
+    }
+    const ordered = [...members.entries()]
+      .map(([targetId, sources]) => ({
+        target: byId.get(targetId)!,
+        sources: [...sources].sort((a, b) => a.label.localeCompare(b.label)),
+      }))
+      .sort(
+        (a, b) =>
+          b.sources.length - a.sources.length ||
+          a.target.label.localeCompare(b.target.label),
+      )
+    return { groups: ordered, edgeStatus }
+  }, [graph])
+
+  // Tracked URLs that neither point anywhere nor are pointed at.
+  const isolated = useMemo(() => {
+    if (!graph) return []
+    const links = graph.links.filter((l) => l.active)
+    const sources = new Set(links.map((l) => l.source))
+    const targets = new Set(links.map((l) => l.target))
+    return graph.nodes
+      .filter((n) => !sources.has(n.id) && !targets.has(n.id))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [graph])
+
+  const focusTable = (url: string) => {
+    setSearch(url)
+    setPage(0)
+    toast({ title: "Filtering table", description: url, variant: "info" })
+  }
+
+  /* ── Stats from the full node set ─────────────────────────────────── */
+
   const stats = useMemo(() => {
     const nodes = graph?.nodes ?? []
     return {
@@ -457,41 +456,8 @@ export function RedirectsPage() {
     }
   }, [graph])
 
-  /* Graph interactivity */
-  const layout = useMemo(
-    () => (graph ? buildLayout(graph, showHistory) : null),
-    [graph, showHistory],
-  )
-  const layoutById = useMemo(
-    () => new Map((layout?.nodes ?? []).map((n) => [n.id, n])),
-    [layout],
-  )
-  const visibleLinks = useMemo(
-    () => (graph?.links ?? []).filter((l) => showHistory || l.active),
-    [graph, showHistory],
-  )
-
-  const isNodeActive = (url: string) =>
-    activeUrl === null ||
-    url === activeUrl ||
-    !!graph?.links.some(
-      (l) =>
-        (l.source === activeUrl && l.target === url) ||
-        (l.source === url && l.target === activeUrl),
-    )
-
-  const isLinkActive = (l: { source: string; target: string }) =>
-    activeUrl === null || l.source === activeUrl || l.target === activeUrl
-
-  const focusNode = (url: string) => {
-    setSearch(url)
-    setPage(0)
-    toast({ title: "Filtering table", description: url, variant: "info" })
-  }
-
+  const graphEmpty = !graphLoading && (!graph || graph.nodes.length === 0)
   const tableEmpty = !loading && total === 0
-  const graphEmpty =
-    !graphLoading && (!graph || graph.nodes.length === 0 || (layout?.nodes.length ?? 0) === 0)
 
   return (
     <div className="space-y-6">
@@ -540,162 +506,98 @@ export function RedirectsPage() {
         <StatCard icon={SearchX} label="Errors" value={stats.error.toLocaleString()} tone="danger" hint="Unreachable or failed check" />
       </div>
 
-      {/* Graph */}
+      {/* Visualization: grouped by current target */}
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <div>
-            <h3 className="text-sm font-semibold tracking-tight">URL relations</h3>
-            <p className="text-xs text-muted-foreground">
-              Current redirect flow between tracked URLs. Click a node to filter the table.
-            </p>
-          </div>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={showHistory}
-              onChange={(e) => setShowHistory(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
-            Show historical edges
-          </label>
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-sm font-semibold tracking-tight">Grouped by current target</h3>
+          <p className="text-xs text-muted-foreground">
+            One card per destination URL, listing every tracked URL currently redirecting into
+            it. Click a source to filter the table.
+          </p>
         </div>
-
         {graphLoading ? (
           <div className="space-y-3 p-4" aria-busy="true">
-            <Skeleton className="h-48 w-full rounded-lg" />
+            <Skeleton className="h-40 w-full rounded-lg" />
           </div>
         ) : graphEmpty ? (
           <EmptyState
             icon={GitBranch}
             title="No relations yet"
-            description="Track a URL and run “Check now” — redirect chains will appear here as nodes and edges."
+            description="Track a URL and run “Check now” — redirect targets will appear here as groups."
             className="border-0"
           />
-        ) : layout && graph ? (
-          <div className="overflow-auto p-2">
-            <svg
-              width={layout.width}
-              height={layout.height}
-              viewBox={`0 0 ${layout.width} ${layout.height}`}
-              role="img"
-              aria-label="URL redirect relations graph"
-              className="block"
-            >
-              <defs>
-                <marker
-                  id="redirect-arrow"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
-                </marker>
-              </defs>
+        ) : (
+          <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {groups.groups.map(({ target, sources }) => (
+              <Card key={target.id} className="overflow-hidden">
+                <CardHeader className="gap-1 border-b border-border bg-muted/30 p-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 font-mono text-xs font-semibold" title={target.label}>
+                      {truncate(target.label, 44)}
+                    </p>
+                    <Badge variant={STATUS_META[target.status].variant} className="shrink-0">
+                      {STATUS_META[target.status].label}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {sources.length} source{sources.length === 1 ? "" : "s"} redirect here
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-2 p-3">
+                  {sources.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => focusTable(s.label)}
+                      className="group flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left transition-colors hover:border-info/40 hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={`${s.label} → ${target.label}`}
+                      aria-label={`Filter table by ${s.label}`}
+                    >
+                      <CornerUpRight
+                        className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-info"
+                        aria-hidden="true"
+                      />
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{s.label}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                        HTTP {groups.edgeStatus.get(s.id) ?? "?"}
+                      </span>
+                      <Badge variant={STATUS_META[s.status].variant} className="shrink-0">
+                        {STATUS_META[s.status].label}
+                      </Badge>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
 
-              {layout.columns.map((c) => (
-                <text
-                  key={c.depth}
-                  x={c.x + COLUMN_WIDTH / 2}
-                  y={TOP_PAD - 30}
-                  textAnchor="middle"
-                  fontSize={10}
-                  letterSpacing="0.14em"
-                  className="fill-muted-foreground font-medium uppercase"
-                >
-                  {c.label}
-                </text>
-              ))}
-
-              {visibleLinks.map((l, i) => {
-                const src = layoutById.get(l.source)
-                const dst = layoutById.get(l.target)
-                if (!src || !dst) return null
-                const active = isLinkActive(l)
-                return (
-                  <path
-                    key={i}
-                    d={edgePath(src, dst)}
-                    fill="none"
-                    strokeDasharray={l.active ? undefined : "6 5"}
-                    className={cn(
-                      "transition-opacity duration-150",
-                      active && activeUrl
-                        ? l.active
-                          ? "stroke-warning"
-                          : "stroke-muted-foreground/70"
-                        : "stroke-muted",
-                    )}
-                    style={{
-                      strokeWidth: l.active ? 1.8 : 1,
-                      opacity: active ? (activeUrl ? 1 : 0.55) : 0.12,
-                    }}
-                    markerEnd="url(#redirect-arrow)"
-                  >
-                    <title>
-                      {`${l.source} → ${l.target} · HTTP ${l.http_status}${l.active ? "" : " (historical)"}`}
-                    </title>
-                  </path>
-                )
-              })}
-
-              {layout.nodes.map((n) => (
-                <g
-                  key={n.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${n.url} — ${n.history_count} targets seen. Filter table.`}
-                  onClick={() => focusNode(n.url)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      focusNode(n.url)
-                    }
-                  }}
-                  onMouseEnter={() => setHovered(n.url)}
-                  onMouseLeave={() => setHovered(null)}
-                  onFocus={() => setFocused(n.url)}
-                  onBlur={() => setFocused(null)}
-                  className="cursor-pointer transition-opacity duration-150"
-                  style={{ opacity: isNodeActive(n.url) ? 1 : 0.25 }}
-                >
-                  <rect
-                    x={n.x}
-                    y={n.y}
-                    width={n.width}
-                    height={n.height}
-                    rx={9}
-                    strokeWidth={activeUrl === n.url ? 2 : 1.2}
-                    className={cn(STATUS_NODE_STYLE[n.status], "transition-all duration-150")}
-                  />
-                  <text
-                    x={n.x + n.width / 2}
-                    y={n.y + n.height / 2 - 5}
-                    textAnchor="middle"
-                    fontSize={11}
-                    className={cn(STATUS_LABEL_STYLE[n.status], "font-mono")}
-                  >
-                    {truncate(n.url, 46)}
-                  </text>
-                  <text
-                    x={n.x + n.width / 2}
-                    y={n.y + n.height / 2 + 10}
-                    textAnchor="middle"
-                    fontSize={9.5}
-                    className="fill-muted-foreground"
-                  >
-                    {n.history_count === 0
-                      ? "no target seen"
-                      : `${n.history_count} target${n.history_count === 1 ? "" : "s"} seen`}
-                  </text>
-                  <title>{`${n.url} — ${n.history_count} target${n.history_count === 1 ? "" : "s"} seen`}</title>
-                </g>
-              ))}
-            </svg>
+            {isolated.length > 0 && (
+              <Card className="border-dashed">
+                <CardHeader className="gap-1 border-b border-border bg-muted/30 p-3.5">
+                  <p className="font-mono text-xs font-semibold">Not redirecting</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {isolated.length} tracked URL{isolated.length === 1 ? "" : "s"} with no
+                    current redirect
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-2 p-3">
+                  {isolated.map((n) => (
+                    <div
+                      key={n.id}
+                      className="flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={n.label}>
+                        {n.label}
+                      </span>
+                      <Badge variant={STATUS_META[n.status].variant} className="shrink-0">
+                        {STATUS_META[n.status].label}
+                      </Badge>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
           </div>
-        ) : null}
+        )}
       </div>
 
       {/* Table */}
@@ -716,6 +618,30 @@ export function RedirectsPage() {
           </div>
         </div>
 
+        {selectedIds.size > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+            <span className="font-medium">{selectedIds.size} selected</span>
+            <Button size="sm" variant="outline" onClick={handleBulkCheck} disabled={busy}>
+              <Zap className="h-3.5 w-3.5" />
+              Check
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleBulkBlacklist} disabled={busy}>
+              <Ban className="h-3.5 w-3.5" />
+              Add to blacklist
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={busy}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </Button>
+          </div>
+        )}
+
         {tableEmpty ? (
           <EmptyState
             icon={SearchX}
@@ -732,6 +658,22 @@ export function RedirectsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      <label className="inline-flex items-center gap-2 uppercase tracking-wide">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected
+                          }}
+                          onChange={toggleSelectAll}
+                          disabled={busy || items.length === 0}
+                          aria-label="Select all tracked URLs"
+                          className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        />
+                        <span className="sr-only">Select</span>
+                      </label>
+                    </th>
                     <SortableTh label="ID" sortKey="id" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <SortableTh label="URL" sortKey="url" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <SortableTh label="Status" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
@@ -752,6 +694,7 @@ export function RedirectsPage() {
                   {loading
                     ? Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="border-b border-border">
+                          <td className="px-4 py-3"><Skeleton className="h-4 w-4" /></td>
                           <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
                           <td className="px-4 py-3"><Skeleton className="h-4 w-56" /></td>
                           <td className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
@@ -763,7 +706,23 @@ export function RedirectsPage() {
                         </tr>
                       ))
                     : items.map((item) => (
-                        <tr key={item.id} className="border-b border-border transition-colors hover:bg-muted/30">
+                        <tr
+                          key={item.id}
+                          className={cn(
+                            "border-b border-border transition-colors hover:bg-muted/30",
+                            selectedIds.has(item.id) && "bg-muted/40",
+                          )}
+                        >
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(item.id)}
+                              onChange={() => toggleSelectOne(item.id)}
+                              disabled={busy}
+                              aria-label={`Select ${item.url}`}
+                              className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            />
+                          </td>
                           <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{item.id}</td>
                           <td className="px-4 py-3">
                             <span className="font-mono text-xs" title={item.url}>
@@ -785,7 +744,7 @@ export function RedirectsPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                            <span className="max-w-[280px] block truncate" title={item.final_url ?? undefined}>
+                            <span className="block max-w-[280px] truncate" title={item.final_url ?? undefined}>
                               {item.final_url ?? "—"}
                             </span>
                           </td>
@@ -898,7 +857,7 @@ export function RedirectsPage() {
         )}
       </Dialog>
 
-      {/* Delete confirm */}
+      {/* Single delete confirm */}
       <ConfirmDialog
         open={!!deleteTarget}
         title="Stop tracking this URL?"
@@ -911,6 +870,19 @@ export function RedirectsPage() {
         variant="destructive"
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Stop tracking selected URLs?"
+        description={`${selectedIds.size} selected URL${
+          selectedIds.size !== 1 ? "s" : ""
+        } will be removed from redirect monitoring. Their redirect history is kept.`}
+        confirmLabel="Stop tracking"
+        variant="destructive"
+        onConfirm={handleBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
       />
     </div>
   )

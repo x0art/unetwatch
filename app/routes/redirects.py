@@ -81,12 +81,24 @@ async def run_redirect_check(
     payload: RedirectCheckRequest | None = None,
     db=Depends(get_db_conn),
 ):
-    url = payload.url.strip() if payload and payload.url else None
-    if url is not None:
-        cursor = await db.execute("SELECT id FROM tracked_urls WHERE url = ?", (url,))
-        if not await cursor.fetchone():
-            raise HTTPException(404, "URL is not being tracked")
-    return await check_all(url)
+    """Re-check all tracked URLs, or a specific set via ``{url}`` / ``{urls}``."""
+    urls: list[str] | None = None
+    if payload:
+        if payload.urls is not None:
+            urls = [u.strip() for u in payload.urls if u.strip()]
+        elif payload.url:
+            urls = [payload.url.strip()]
+
+    if urls:
+        placeholders = ", ".join("?" * len(urls))
+        cursor = await db.execute(
+            f"SELECT url FROM tracked_urls WHERE url IN ({placeholders})", urls
+        )
+        known = {r[0] for r in await cursor.fetchall()}
+        missing = [u for u in urls if u not in known]
+        if missing:
+            raise HTTPException(404, f"URL is not being tracked: {missing[0]}")
+    return await check_all(urls)
 
 
 @router.get("/graph")

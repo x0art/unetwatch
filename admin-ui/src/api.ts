@@ -356,10 +356,10 @@ export async function deleteTrackedUrl(id: number): Promise<void> {
   return request(`/redirects/${id}`, { method: "DELETE" })
 }
 
-export async function checkRedirects(url?: string): Promise<RedirectCheckResponse> {
+export async function checkRedirects(urls?: string[]): Promise<RedirectCheckResponse> {
   return request("/redirects/check", {
     method: "POST",
-    body: JSON.stringify(url ? { url } : {}),
+    body: JSON.stringify(urls && urls.length ? { urls } : {}),
   })
 }
 

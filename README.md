@@ -89,7 +89,6 @@ optional and have sensible defaults.
 | `API_KEY`               | _(empty)_               | Static API key for programmatic use  |
 | `REDIRECT_CHECK_INTERVAL_MINUTES` | `60`          | How often to re-check tracked URLs   |
 | `REDIRECT_TIMEOUT_SECONDS` | `10`               | HTTP timeout per redirect hop        |
-| `REDIRECT_MAX_HOPS`     | `10`                    | Max hops followed per URL            |
 
 ## API
 
@@ -167,8 +166,8 @@ curl -X POST http://localhost:8000/api/patterns/ \
 2. APScheduler runs `check_all()` every `REDIRECT_CHECK_INTERVAL_MINUTES` — the same
    job is triggered on demand by the "Check now" button.
 3. Each URL is requested with `HEAD` (falling back to `GET` when the server rejects it)
-   and redirects are followed hop-by-hop (bounded by `REDIRECT_MAX_HOPS`, with loop
-   protection).
+   and redirects are followed hop-by-hop with no hop cap — loop detection (a seen-URL set)
+   terminates self-loops and cycles.
 4. Every observed hop is stored as a `redirect_edges` row. When a URL's target changes
    (e.g. url1 used to point at url2, now points at url3), the old edge is marked
    inactive and kept for history; the new edge becomes active.

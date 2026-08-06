@@ -39,16 +39,18 @@ async def check_url(session: aiohttp.ClientSession, url: str):
     Returns ``(hops, final_status, final_url, error)`` where ``hops`` is a
     list of ``(source_url, target_url, http_status)`` tuples. HEAD first,
     GET fallback when the server rejects HEAD (405/501).
+
+    There is no hop-count cap: the ``seen`` URL set terminates any redirect
+    loop (self-loops and cycles), and real-world chains are always finite.
     """
     settings = get_settings()
-    max_hops = settings.redirect_max_hops
     timeout = settings.redirect_timeout_seconds
 
     hops: list[tuple[str, str, int]] = []
     current = url
     seen: set[str] = set()
 
-    for _ in range(max_hops):
+    while True:
         if current in seen:
             return hops, 0, current, "redirect loop detected"
         seen.add(current)
@@ -76,8 +78,6 @@ async def check_url(session: aiohttp.ClientSession, url: str):
             continue
 
         return hops, status, current, None
-
-    return hops, 0, current, "max hops exceeded"
 
 
 def _classify_status(hops: list, final_status: int, error: str | None) -> str:
@@ -147,14 +147,17 @@ async def _check_one(db, session: aiohttp.ClientSession, row) -> dict | None:
     }
 
 
-async def check_all(url: str | None = None) -> dict:
-    """Re-check every tracked URL (or a single one). Used by scheduler + /check."""
+async def check_all(urls: list[str] | None = None) -> dict:
+    """Re-check tracked URLs (a specific set, or all). Used by scheduler + /check."""
     from app.database import get_db
 
     db = await get_db()
     try:
-        if url:
-            cursor = await db.execute("SELECT * FROM tracked_urls WHERE url = ?", (url,))
+        if urls:
+            placeholders = ", ".join("?" * len(urls))
+            cursor = await db.execute(
+                f"SELECT * FROM tracked_urls WHERE url IN ({placeholders})", urls
+            )
         else:
             cursor = await db.execute("SELECT * FROM tracked_urls")
         rows = await cursor.fetchall()

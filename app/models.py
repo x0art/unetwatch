@@ -74,3 +74,6 @@ class RedirectTrackCreate(BaseModel):
 
 class RedirectCheckRequest(BaseModel):
     url: str | None = Field(None, max_length=500)
+    urls: list[str] | None = Field(None, max_length=100)
+
+    model_config = {"extra": "forbid"}
