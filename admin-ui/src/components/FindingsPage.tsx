@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, CheckCircle2, Copy, Eraser, SearchX, Search, Refres
 import {
   type Finding,
   addBaseUrlToBlacklist,
+  bulkDeleteFindings,
   clearFindings,
   createPattern,
   deleteFinding,
@@ -76,6 +77,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [search, setSearch] = useState(initialSearch ?? "")
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
@@ -187,6 +190,56 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     const dir = sortDir === "asc" ? 1 : -1
     return [...findings].sort((a, b) => dir * compareValues(a[sortBy], b[sortBy]))
   }, [findings, sortBy, sortDir])
+
+  // Drop selections for rows no longer present after a refetch/page change so
+  // the bulk bar count never references stale ids.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(findings.map((f) => f.id))
+      const next = new Set([...prev].filter((id) => visible.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [findings])
+
+  const allSelected = findings.length > 0 && selectedIds.size === findings.length
+  const someSelected = selectedIds.size > 0 && !allSelected
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(findings.map((f) => f.id)))
+  }
+
+  const toggleSelectOne = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds]
+    // Close the dialog immediately so a double-click can't fire twice.
+    setConfirmBulkDelete(false)
+    if (ids.length === 0) return
+    setBusy(true)
+    try {
+      const res = await bulkDeleteFindings(ids)
+      toast({
+        title: `${res.deleted} finding${res.deleted !== 1 ? "s" : ""} deleted`,
+        variant: "success",
+      })
+      setSelectedIds(new Set())
+      // If we just emptied the current page, step back a page.
+      if (ids.length >= findings.length && page > 0) setPage(page - 1)
+      else refetch()
+    } catch (e) {
+      toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -320,6 +373,18 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
               aria-label="Search findings"
             />
           </div>
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirmBulkDelete(true)}
+              className="text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete selected ({selectedIds.size})
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -358,6 +423,22 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
+                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                    <label className="inline-flex items-center gap-2 uppercase tracking-wide">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someSelected
+                        }}
+                        onChange={toggleSelectAll}
+                        disabled={busy || findings.length === 0}
+                        aria-label="Select all findings"
+                        className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      />
+                      <span className="sr-only">Select</span>
+                    </label>
+                  </th>
                   <SortableTh
                     label="ID"
                     sortKey="id"
@@ -409,6 +490,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                 {loading
                   ? Array.from({ length: 8 }).map((_, i) => (
                       <tr key={i} className="border-b border-border">
+                        <td className="px-4 py-3"><Skeleton className="h-4 w-4" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
                         <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
@@ -421,8 +503,20 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
                   : sortedFindings.map((f) => (
                       <tr
                         key={f.id}
-                        className="border-b border-border transition-colors hover:bg-muted/30"
+                        className={`border-b border-border transition-colors hover:bg-muted/30 ${
+                          selectedIds.has(f.id) ? "bg-muted/40" : ""
+                        }`}
                       >
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(f.id)}
+                            onChange={() => toggleSelectOne(f.id)}
+                            disabled={busy}
+                            aria-label={`Select finding ${f.id}`}
+                            className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                          />
+                        </td>
                         <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{f.id}</td>
                         <td className="px-4 py-3 font-mono text-sm">{f.client_ip}</td>
                         <td className="px-4 py-3 font-mono text-sm">{f.server_ip}</td>
@@ -544,6 +638,18 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         variant="destructive"
         onConfirm={handleClearAll}
         onCancel={() => setConfirmClear(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Delete selected findings?"
+        description={`${selectedIds.size} selected finding${
+          selectedIds.size !== 1 ? "s" : ""
+        } will be permanently removed. This cannot be undone.`}
+        confirmLabel="Delete selected"
+        variant="destructive"
+        onConfirm={handleBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
       />
     </div>
   )

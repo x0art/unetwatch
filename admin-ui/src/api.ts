@@ -213,6 +213,13 @@ export async function clearFindings(): Promise<void> {
   return request("/findings/", { method: "DELETE" })
 }
 
+export async function bulkDeleteFindings(ids: number[]): Promise<{ deleted: number }> {
+  return request("/findings/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  })
+}
+
 export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
   return request(`/findings/graph?limit=${limit}`)
 }

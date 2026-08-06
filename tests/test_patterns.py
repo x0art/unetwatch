@@ -334,6 +334,58 @@ async def test_findings_clear_all(client):
     assert client.get("/api/findings/").json()["total"] == 0
 
 
+async def test_findings_bulk_delete(client):
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        ids = await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "3.3.3.3",
+                    "server_ip": "10.0.0.3",
+                    "url": "http://c.example/x",
+                    "base_url": "c.example",
+                    "ts": "2026-08-05T05:00:00Z",
+                },
+                {
+                    "client_ip": "4.4.4.4",
+                    "server_ip": "10.0.0.4",
+                    "url": "http://d.example/y",
+                    "base_url": "d.example",
+                    "ts": "2026-08-05T05:01:00Z",
+                },
+                {
+                    "client_ip": "5.5.5.5",
+                    "server_ip": "10.0.0.5",
+                    "url": "http://e.example/z",
+                    "base_url": "e.example",
+                    "ts": "2026-08-05T05:02:00Z",
+                },
+            ],
+        )
+    finally:
+        await db.close()
+
+    assert client.get("/api/findings/").json()["total"] == 3
+
+    # Delete a subset; count reflects only rows actually removed.
+    resp = client.post("/api/findings/bulk-delete", json={"ids": [ids[0], ids[1], 99999]})
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+    assert client.get("/api/findings/").json()["total"] == 1
+
+    # Empty id list is rejected.
+    resp = client.post("/api/findings/bulk-delete", json={"ids": []})
+    assert resp.status_code == 422
+
+    # Missing body is rejected.
+    resp = client.post("/api/findings/bulk-delete", json={})
+    assert resp.status_code == 422
+
+
 def test_findings_graph_empty(client):
     resp = client.get("/api/findings/graph")
     assert resp.status_code == 200

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.database import get_db_conn
 
@@ -135,6 +135,22 @@ async def clear_findings(db=Depends(get_db_conn)):
     """Delete every persisted finding (admin reset of the findings table)."""
     await db.execute("DELETE FROM findings")
     await db.commit()
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_findings(
+    ids: list[int] = Body(..., embed=True),
+    db=Depends(get_db_conn),
+):
+    """Delete the given findings by id, returning how many rows were removed."""
+    if not ids:
+        raise HTTPException(422, "At least one id is required")
+    placeholders = ",".join("?" * len(ids))
+    cursor = await db.execute(
+        f"DELETE FROM findings WHERE id IN ({placeholders})", ids
+    )
+    await db.commit()
+    return {"deleted": cursor.rowcount}
 
 
 @router.delete("/{finding_id}", status_code=204)
