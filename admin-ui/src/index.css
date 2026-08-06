@@ -189,3 +189,17 @@
 @keyframes metric-bar-grow {
   from { width: 0; }
 }
+
+/* Edge flow animation (Traffic Graph) — moving dashes show traffic direction */
+.edge-flow {
+  stroke-dasharray: 3 8;
+  animation: dash-flow 0.9s linear infinite;
+}
+@keyframes dash-flow {
+  to { stroke-dashoffset: -22; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .edge-flow {
+    animation: none;
+  }
+}

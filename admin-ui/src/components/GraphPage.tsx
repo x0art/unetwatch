@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { MousePointerClick, Network, RefreshCcw, SearchX } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Maximize,
+  MousePointerClick,
+  Network,
+  RefreshCcw,
+  Search,
+  SearchX,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react"
 import {
   type FindingsGraph,
   type GraphLink,
   type GraphNode,
   getFindingsGraph,
 } from "../api"
-import { Button, EmptyState, Select, Skeleton, useToast } from "./ui"
+import { Button, EmptyState, Input, Select, Skeleton, useToast } from "./ui"
 import { type View } from "./Sidebar"
-import { cn } from "../lib/utils"
+import { cn, useDebounce } from "../lib/utils"
 
 type Kind = GraphNode["kind"]
 
@@ -19,12 +29,30 @@ interface LayoutNode extends GraphNode {
   height: number
 }
 
+interface GraphTransform {
+  scale: number
+  tx: number
+  ty: number
+}
+
 /* ── Layer geometry (fixed 3-column flow: client IP → server IP → URL) ── */
 
 const KIND_COLUMN: Record<Kind, { x: number; width: number; label: string }> = {
   ip: { x: 24, width: 180, label: "Client IP" },
   server: { x: 268, width: 180, label: "Server IP" },
   url: { x: 512, width: 380, label: "URL" },
+}
+
+const KIND_LABEL: Record<Kind, string> = {
+  ip: "Client IP",
+  server: "Server IP",
+  url: "URL",
+}
+
+const KIND_PLURAL: Record<Kind, string> = {
+  ip: "client IPs",
+  server: "server IPs",
+  url: "URLs",
 }
 
 const NODE_HEIGHT = 40
@@ -50,6 +78,13 @@ const EDGE_STYLES: Record<Kind, string> = {
   ip: "stroke-info",
   server: "stroke-warning",
   url: "stroke-danger",
+}
+
+const MIN_SCALE = 0.2
+const MAX_SCALE = 3
+
+function clampScale(s: number) {
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
 }
 
 function kindOf(id: string): Kind {
@@ -118,12 +153,28 @@ export function GraphPage({
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [focused, setFocused] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [transform, setTransform] = useState<GraphTransform>({
+    scale: 1,
+    tx: 0,
+    ty: 0,
+  })
+  const [dragging, setDragging] = useState(false)
+  // Rich tooltip: content + cursor position (fixed coords, clamped to graph).
+  const [tip, setTip] = useState<{ node: LayoutNode; x: number; y: number } | null>(null)
+
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
+
+  const debouncedSearch = useDebounce(search, 200)
+  const q = debouncedSearch.trim().toLowerCase()
   // Spotlight target: keyboard focus takes precedence over hover.
   const activeId = focused ?? hovered
 
   const fetchGraph = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setTip(null) // drop a stale tooltip when the graph is replaced
     try {
       setGraph(await getFindingsGraph(Number(limit)))
     } catch (e) {
@@ -150,6 +201,36 @@ export function GraphPage({
     return c
   }, [graph])
 
+  // Total access count per layer — used for the tooltip share percentage.
+  const layerTotals = useMemo(() => {
+    const t: Record<Kind, number> = { ip: 0, server: 0, url: 0 }
+    for (const n of graph?.nodes ?? []) t[n.kind] += n.count
+    return t
+  }, [graph])
+
+  // Node ids that match the search query, plus their direct neighbours, so
+  // spotlighting a match reveals its connections.
+  const searchMatches = useMemo(() => {
+    const ids = new Set<string>()
+    if (!q) return ids
+    const links = graph?.links ?? []
+    for (const n of graph?.nodes ?? []) {
+      if (!n.label.toLowerCase().includes(q)) continue
+      ids.add(n.id)
+      for (const l of links) {
+        if (l.source === n.id) ids.add(l.target)
+        if (l.target === n.id) ids.add(l.source)
+      }
+    }
+    return ids
+  }, [q, graph])
+
+  const matchCount = useMemo(
+    () =>
+      q ? (graph?.nodes ?? []).filter((n) => n.label.toLowerCase().includes(q)).length : 0,
+    [q, graph],
+  )
+
   const isNodeActive = (id: string) =>
     activeId === null ||
     id === activeId ||
@@ -162,6 +243,18 @@ export function GraphPage({
   const isLinkActive = (l: GraphLink) =>
     activeId === null || l.source === activeId || l.target === activeId
 
+  // Hover/focus spotlight takes precedence; otherwise the search query dims
+  // everything that doesn't match (or isn't connected to a match).
+  const isNodeDimmed = (id: string) => {
+    if (activeId !== null) return !isNodeActive(id)
+    return q.length > 0 && !searchMatches.has(id)
+  }
+
+  const isEdgeDimmed = (l: GraphLink) => {
+    if (activeId !== null) return !isLinkActive(l)
+    return q.length > 0 && !(searchMatches.has(l.source) && searchMatches.has(l.target))
+  }
+
   const openFindings = (n: GraphNode) => {
     toast({
       title: "Viewing findings",
@@ -169,6 +262,102 @@ export function GraphPage({
       variant: "info",
     })
     onNavigate("findings", n.label)
+  }
+
+  /* ── Rich tooltip ────────────────────────────────────────────────── */
+
+  const showTooltip = (n: LayoutNode, cx: number, cy: number) => {
+    let x = cx + 14
+    let y = cy + 14
+    const vp = viewportRef.current
+    if (vp) {
+      const rect = vp.getBoundingClientRect()
+      x = Math.max(rect.left + 4, Math.min(x, rect.right - 276))
+      y = Math.max(rect.top + 4, Math.min(y, rect.bottom - 96))
+    }
+    setTip({ node: n, x, y })
+  }
+
+  const moveTooltip = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!tip) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = Math.max(rect.left + 4, Math.min(e.clientX + 14, rect.right - 276))
+    const y = Math.max(rect.top + 4, Math.min(e.clientY + 14, rect.bottom - 96))
+    setTip((prev) => (prev ? { ...prev, x, y } : prev))
+  }
+
+  /* ── Zoom & pan ──────────────────────────────────────────────────── */
+
+  const zoomBy = (factor: number) => {
+    const vp = viewportRef.current
+    const cx = vp ? vp.clientWidth / 2 : 0
+    const cy = vp ? vp.clientHeight / 2 : 0
+    setTransform((t) => {
+      const scale = clampScale(t.scale * factor)
+      const k = scale / t.scale
+      return { scale, tx: cx - (cx - t.tx) * k, ty: cy - (cy - t.ty) * k }
+    })
+  }
+
+  const fitView = useCallback(() => {
+    const vp = viewportRef.current
+    if (!vp || !layout) return
+    const pad = 32
+    const w = Math.max(200, vp.clientWidth - pad)
+    const h = Math.max(200, vp.clientHeight - pad)
+    const scale = clampScale(Math.min(w / layout.width, h / layout.height, 1))
+    const tx = Math.max(0, (vp.clientWidth - layout.width * scale) / 2)
+    const ty = Math.max(0, (vp.clientHeight - layout.height * scale) / 2)
+    setTransform({ scale, tx, ty })
+  }, [layout])
+
+  // Ctrl + wheel zooms around the cursor (non-passive so preventDefault works).
+  useEffect(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const rect = vp.getBoundingClientRect()
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      setTransform((t) => {
+        const scale = clampScale(t.scale * (e.deltaY < 0 ? 1.12 : 0.89))
+        const k = scale / t.scale
+        return { scale, tx: px - (px - t.tx) * k, ty: py - (py - t.ty) * k }
+      })
+    }
+    vp.addEventListener("wheel", onWheel, { passive: false })
+    return () => vp.removeEventListener("wheel", onWheel)
+  }, [])
+
+  // Drag to pan (background only — node presses keep their click behaviour).
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if ((e.target as Element).closest?.("[role='button']")) return
+    dragRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      tx: transform.tx,
+      ty: transform.ty,
+    }
+    setDragging(true)
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current
+    if (d) {
+      setTransform((t) => ({
+        ...t,
+        tx: d.tx + (e.clientX - d.x),
+        ty: d.ty + (e.clientY - d.y),
+      }))
+    }
+  }
+
+  const endDrag = () => {
+    dragRef.current = null
+    setDragging(false)
   }
 
   const empty = !loading && !error && (!graph || graph.nodes.length === 0)
@@ -182,7 +371,27 @@ export function GraphPage({
             Flow of flagged URLs being accessed by client IPs (from persisted findings)
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Highlight IP or URL..."
+              className="w-56 pl-8 pr-8"
+              aria-label="Highlight nodes matching text"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <Select
             value={limit}
             onChange={setLimit}
@@ -197,7 +406,7 @@ export function GraphPage({
         </div>
       </div>
 
-      {/* Legend + summary */}
+      {/* Legend + summary + zoom controls */}
       {graph && !empty && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
@@ -216,10 +425,49 @@ export function GraphPage({
             <Network className="h-3.5 w-3.5" aria-hidden="true" />
             {graph.links.length.toLocaleString()} access flow{graph.links.length === 1 ? "" : "s"}
           </span>
-          <span className="ml-auto inline-flex items-center gap-1.5 text-muted-foreground/70">
-            <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
-            Hover to highlight · Click a node to view its findings
-          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {q.length > 0 && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
+                {matchCount} match{matchCount === 1 ? "" : "es"}
+              </span>
+            )}
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground/70">
+              <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
+              Hover to highlight · Click a node to view findings · Ctrl+scroll zooms · drag pans
+            </span>
+            <div className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => zoomBy(1.2)}
+                aria-label="Zoom in"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </Button>
+              <span className="w-10 text-center text-[11px] tabular-nums text-muted-foreground">
+                {Math.round(transform.scale * 100)}%
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => zoomBy(0.8)}
+                aria-label="Zoom out"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={fitView}
+                aria-label="Fit graph to view"
+              >
+                <Maximize className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -252,30 +500,45 @@ export function GraphPage({
           }
         />
       ) : layout && graph ? (
-        <div className="overflow-auto rounded-lg border border-border bg-card shadow-sm">
-            <div className="min-w-fit p-2">
-              <svg
-                width={layout.width}
-                height={layout.height}
-                viewBox={`0 0 ${layout.width} ${layout.height}`}
-                role="img"
-                aria-label="IP to URL access flow graph"
-                className="block"
-              >
-                <defs>
-                  <marker
-                    id="flow-arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
-                  </marker>
-                </defs>
+        <div
+          ref={viewportRef}
+          className={cn(
+            "overflow-auto rounded-lg border border-border bg-card shadow-sm",
+            dragging ? "cursor-grabbing" : "cursor-grab",
+          )}
+          onMouseMove={moveTooltip}
+          onMouseLeave={() => setTip(null)}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+        >
+          <div className="min-w-fit p-2">
+            <svg
+              width={layout.width}
+              height={layout.height}
+              viewBox={`0 0 ${layout.width} ${layout.height}`}
+              role="img"
+              aria-label="IP to URL access flow graph"
+              className="block overflow-visible"
+            >
+              <defs>
+                <marker
+                  id="flow-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
+                </marker>
+              </defs>
 
+              <g
+                transform={`translate(${transform.tx} ${transform.ty}) scale(${transform.scale})`}
+              >
                 {/* Column headers */}
                 {(Object.keys(KIND_COLUMN) as Kind[]).map((k) => (
                   <text
@@ -297,23 +560,35 @@ export function GraphPage({
                   const dst = layoutById.get(l.target)
                   if (!src || !dst) return null
                   const active = isLinkActive(l)
+                  const dimmed = isEdgeDimmed(l)
+                  const strokeWidth = 1 + (l.count / layout.maxLinkCount) * 6
                   return (
-                    <path
-                      key={i}
-                      d={edgePath(src, dst)}
-                      fill="none"
-                      className={cn(
-                        "transition-opacity duration-150",
-                        active && activeId ? EDGE_STYLES[kindOf(l.target)] : "stroke-muted",
+                    <g key={i}>
+                      {!dimmed && !(activeId !== null && active) && (
+                        <path
+                          d={edgePath(src, dst)}
+                          fill="none"
+                          className={cn("edge-flow", EDGE_STYLES[kindOf(l.target)])}
+                          style={{ strokeWidth }}
+                          opacity={0.4}
+                        />
                       )}
-                      style={{
-                        strokeWidth: 1 + (l.count / layout.maxLinkCount) * 6,
-                        opacity: active ? (activeId ? 1 : 0.55) : 0.12,
-                      }}
-                      markerEnd="url(#flow-arrow)"
-                    >
-                      <title>{`${src.label} → ${dst.label} · ${l.count} access${l.count === 1 ? "" : "es"}`}</title>
-                    </path>
+                      <path
+                        d={edgePath(src, dst)}
+                        fill="none"
+                        className={cn(
+                          "transition-opacity duration-150",
+                          active && activeId ? EDGE_STYLES[kindOf(l.target)] : "stroke-muted",
+                        )}
+                        style={{
+                          strokeWidth,
+                          opacity: dimmed ? 0.12 : active && activeId !== null ? 1 : 0.55,
+                        }}
+                        markerEnd="url(#flow-arrow)"
+                      >
+                        <title>{`${src.label} → ${dst.label} · ${l.count} access${l.count === 1 ? "" : "es"}`}</title>
+                      </path>
+                    </g>
                   )
                 })}
 
@@ -324,6 +599,7 @@ export function GraphPage({
                     role="button"
                     tabIndex={0}
                     aria-label={`${n.label} — ${n.count} accesses. Open findings.`}
+                    aria-describedby="traffic-graph-tooltip"
                     onClick={() => openFindings(n)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -331,12 +607,19 @@ export function GraphPage({
                         openFindings(n)
                       }
                     }}
-                    onMouseEnter={() => setHovered(n.id)}
-                    onMouseLeave={() => setHovered(null)}
+                    onMouseEnter={(e) => {
+                      if (dragRef.current) return // ignore nodes under the cursor while panning
+                      setHovered(n.id)
+                      showTooltip(n, e.clientX, e.clientY)
+                    }}
+                    onMouseLeave={() => {
+                      setHovered(null)
+                      setTip(null)
+                    }}
                     onFocus={() => setFocused(n.id)}
                     onBlur={() => setFocused(null)}
                     className="cursor-pointer transition-opacity duration-150"
-                    style={{ opacity: isNodeActive(n.id) ? 1 : 0.25 }}
+                    style={{ opacity: isNodeDimmed(n.id) ? 0.15 : 1 }}
                   >
                     <rect
                       x={n.x}
@@ -365,13 +648,38 @@ export function GraphPage({
                     >
                       {n.count.toLocaleString()} access{n.count === 1 ? "" : "es"}
                     </text>
-                    <title>{`${n.label} — ${n.count} access${n.count === 1 ? "" : "es"}`}</title>
                   </g>
                 ))}
-              </svg>
+              </g>
+            </svg>
           </div>
         </div>
       ) : null}
+
+      {/* Rich tooltip (fixed-positioned outside the scroll container) */}
+      {tip && (
+        <div
+          id="traffic-graph-tooltip"
+          className="pointer-events-none fixed z-50 w-64 rounded-lg border border-border bg-popover/95 p-3 shadow-xl backdrop-blur"
+          style={{ left: tip.x, top: tip.y }}
+          role="tooltip"
+        >
+          <p className="font-mono text-xs leading-snug break-all">{tip.node.label}</p>
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            <span className="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {KIND_LABEL[tip.node.kind]}
+            </span>
+            <span className="text-sm font-bold tabular-nums">
+              {tip.node.count.toLocaleString()}
+              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                {layerTotals[tip.node.kind] > 0
+                  ? `${Math.round((tip.node.count / layerTotals[tip.node.kind]) * 100)}% of ${KIND_PLURAL[tip.node.kind]}`
+                  : ""}
+              </span>
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
