@@ -94,6 +94,8 @@ export function Input({
   type = "text",
   autoFocus,
   id,
+  name,
+  autoComplete,
   "aria-label": ariaLabel,
 }: {
   className?: string
@@ -104,6 +106,8 @@ export function Input({
   type?: string
   autoFocus?: boolean
   id?: string
+  name?: string
+  autoComplete?: string
   "aria-label"?: string
 }) {
   return (
@@ -111,6 +115,8 @@ export function Input({
       type={type}
       autoFocus={autoFocus}
       id={id}
+      name={name}
+      autoComplete={autoComplete}
       aria-label={ariaLabel}
       className={cn(
         "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",

@@ -70,7 +70,11 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self'; "
+        # The admin UI ships one inline theme script (anti-FOUC) in index.html;
+        # allow that exact script by hash instead of weakening script-src.
+        # WARNING: if the inline script in admin-ui/index.html ever changes,
+        # regenerate this sha256 (or it will be blocked with a CSP error).
+        "script-src 'self' 'sha256-vB8+06HUTvRqA0K16sI1Y4RIaqA1mPIMgTm9Hz7YjJ0='; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "connect-src 'self'; "
