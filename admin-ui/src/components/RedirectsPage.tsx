@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import {
   type RedirectGraph,
+  type RedirectLink,
   type TrackedUrl,
   type UrlRedirectHistory,
   addTrackedUrl,
@@ -98,12 +99,11 @@ function SortableTh({
   )
 }
 
-/* ── Layered two-column graph (Traffic Graph style) ─────────────────── */
+/* ── Depth-layered graph (Traffic Graph style) ──────────────────────── */
 
-const COLUMNS = [
-  { key: "source", x: 24, width: 380, label: "Redirect sources" },
-  { key: "target", x: 448, width: 380, label: "Destinations" },
-] as const
+const COLUMN_WIDTH = 380
+const COLUMN_GAP = 40
+const START_X = 24
 
 const NODE_HEIGHT = 40
 const TOP_PAD = 84
@@ -126,7 +126,7 @@ const STATUS_LABEL_STYLE: Record<TrackedUrl["status"], string> = {
 
 interface LayoutNode {
   id: string
-  column: "source" | "target"
+  depth: number
   url: string
   status: TrackedUrl["status"]
   history_count: number
@@ -136,44 +136,102 @@ interface LayoutNode {
   height: number
 }
 
-function buildLayout(graph: RedirectGraph, showHistory: boolean) {
-  // When historical edges are shown, place every node they touch so the
-  // dashed edges (e.g. url1→url2 before url2 stopped being a destination)
-  // actually render. Otherwise columns only contain active-relation nodes.
-  const relevant = showHistory ? graph.links : graph.links.filter((l) => l.active)
-  const sourceSet = new Set(relevant.map((l) => l.source))
-  const targetSet = new Set(relevant.map((l) => l.target))
-  const left = graph.nodes.filter((n) => sourceSet.has(n.id))
-  const right = graph.nodes.filter((n) => targetSet.has(n.id))
+/**
+ * Longest-path layering: a node's depth is 1 + the max depth of its
+ * incoming neighbours; nodes with no incoming edges sit at depth 0, so
+ * chains like url1 → url2 → url3 flow left to right across columns.
+ * Cycles (rare) are parked in a fallback column instead of looping.
+ */
+function computeDepths(nodeIds: Set<string>, links: RedirectLink[]): Map<string, number> {
+  const preds = new Map<string, string[]>()
+  for (const id of nodeIds) preds.set(id, [])
+  for (const l of links) {
+    if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) continue
+    preds.get(l.target)!.push(l.source)
+  }
 
-  const maxRows = Math.max(left.length, right.length, 1)
+  const depth = new Map<string, number>()
+  const remaining = new Set(nodeIds)
+  let fallback = 0
+  while (remaining.size > 0) {
+    const frontier = [...remaining].filter((n) =>
+      preds.get(n)!.every((p) => depth.has(p)),
+    )
+    if (frontier.length === 0) {
+      // Cycle: park the rest in one fallback column.
+      for (const n of remaining) depth.set(n, fallback)
+      break
+    }
+    for (const n of frontier) {
+      const predDepths = preds.get(n)!.map((p) => depth.get(p)!)
+      depth.set(n, predDepths.length === 0 ? 0 : 1 + Math.max(...predDepths))
+      remaining.delete(n)
+    }
+    fallback += 1
+  }
+  return depth
+}
+
+function buildLayout(graph: RedirectGraph, showHistory: boolean) {
+  // When historical edges are shown, include the nodes they touch so the
+  // dashed edges (e.g. url1→url2 before url2 stopped being a destination)
+  // actually render. Otherwise only active relations are placed.
+  const links = showHistory ? graph.links : graph.links.filter((l) => l.active)
+  const nodeIds = new Set<string>()
+  for (const l of links) {
+    nodeIds.add(l.source)
+    nodeIds.add(l.target)
+  }
+  const depths = computeDepths(nodeIds, links)
+  const relevantNodes = graph.nodes.filter((n) => nodeIds.has(n.id))
+
+  const byDepth = new Map<number, RedirectGraph["nodes"]>()
+  for (const n of relevantNodes) {
+    const d = depths.get(n.id) ?? 0
+    const list = byDepth.get(d) ?? []
+    list.push(n)
+    byDepth.set(d, list)
+  }
+
+  const maxRows = Math.max(1, ...[...byDepth.values()].map((l) => l.length))
   const slot = Math.max(
     52,
     Math.min(64, Math.floor((MAX_CANVAS_HEIGHT - TOP_PAD - BOTTOM_PAD) / maxRows)),
   )
   const height = Math.max(320, TOP_PAD + maxRows * slot + BOTTOM_PAD)
+  const maxDepth = byDepth.size > 0 ? Math.max(...byDepth.keys()) : 0
 
   const nodes: LayoutNode[] = []
-  const place = (list: RedirectGraph["nodes"], column: "source" | "target") => {
-    const col = COLUMNS.find((c) => c.key === column)!
+  for (const [d, list] of [...byDepth.entries()].sort((a, b) => a[0] - b[0])) {
+    list.sort((a, b) => a.label.localeCompare(b.label))
+    const x = START_X + d * (COLUMN_WIDTH + COLUMN_GAP)
     list.forEach((n, i) => {
       nodes.push({
-        id: `${column}:${n.id}`,
-        column,
+        id: n.id,
+        depth: d,
         url: n.id,
         status: n.status,
         history_count: n.history_count,
-        x: col.x,
+        x,
         y: TOP_PAD + i * slot + (slot - NODE_HEIGHT) / 2,
-        width: col.width,
+        width: COLUMN_WIDTH,
         height: NODE_HEIGHT,
       })
     })
   }
-  place(left, "source")
-  place(right, "target")
 
-  return { nodes, width: 448 + 380 + 40, height }
+  const columns = Array.from({ length: maxDepth + 1 }, (_, d) => ({
+    depth: d,
+    x: START_X + d * (COLUMN_WIDTH + COLUMN_GAP),
+    label: d === 0 ? "Sources" : `Hop ${d}`,
+  }))
+
+  return {
+    nodes,
+    columns,
+    width: START_X + maxDepth * (COLUMN_WIDTH + COLUMN_GAP) + COLUMN_WIDTH + 16,
+    height,
+  }
 }
 
 function truncate(s: string, max: number) {
@@ -432,7 +490,8 @@ export function RedirectsPage() {
   }
 
   const tableEmpty = !loading && total === 0
-  const graphEmpty = !graphLoading && (!graph || graph.nodes.length === 0)
+  const graphEmpty =
+    !graphLoading && (!graph || graph.nodes.length === 0 || (layout?.nodes.length ?? 0) === 0)
 
   return (
     <div className="space-y-6">
@@ -536,10 +595,10 @@ export function RedirectsPage() {
                 </marker>
               </defs>
 
-              {COLUMNS.map((c) => (
+              {layout.columns.map((c) => (
                 <text
-                  key={c.key}
-                  x={c.x + c.width / 2}
+                  key={c.depth}
+                  x={c.x + COLUMN_WIDTH / 2}
                   y={TOP_PAD - 30}
                   textAnchor="middle"
                   fontSize={10}
@@ -551,8 +610,8 @@ export function RedirectsPage() {
               ))}
 
               {visibleLinks.map((l, i) => {
-                const src = layoutById.get(`source:${l.source}`)
-                const dst = layoutById.get(`target:${l.target}`)
+                const src = layoutById.get(l.source)
+                const dst = layoutById.get(l.target)
                 if (!src || !dst) return null
                 const active = isLinkActive(l)
                 return (
