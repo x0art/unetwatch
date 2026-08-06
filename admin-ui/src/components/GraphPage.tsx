@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpRight,
+  Ban,
+  Link2,
   Maximize,
   MousePointerClick,
   Network,
   RefreshCcw,
   Search,
   SearchX,
+  Server,
+  Users,
   X,
   ZoomIn,
   ZoomOut,
@@ -14,9 +21,20 @@ import {
   type FindingsGraph,
   type GraphLink,
   type GraphNode,
+  addBaseUrlToBlacklist,
   getFindingsGraph,
 } from "../api"
-import { Button, EmptyState, Input, Select, Skeleton, useToast } from "./ui"
+import {
+  Badge,
+  Button,
+  EmptyState,
+  Input,
+  Pagination,
+  Select,
+  Skeleton,
+  StatCard,
+  useToast,
+} from "./ui"
 import { type View } from "./Sidebar"
 import { cn, useDebounce } from "../lib/utils"
 
@@ -55,6 +73,12 @@ const KIND_PLURAL: Record<Kind, string> = {
   url: "URLs",
 }
 
+const KIND_BADGE: Record<Kind, "secondary" | "warning" | "destructive"> = {
+  ip: "secondary",
+  server: "warning",
+  url: "destructive",
+}
+
 const NODE_HEIGHT = 40
 const TOP_PAD = 84
 const BOTTOM_PAD = 32
@@ -82,6 +106,7 @@ const EDGE_STYLES: Record<Kind, string> = {
 
 const MIN_SCALE = 0.2
 const MAX_SCALE = 3
+const PAGE_SIZE = 25
 
 function clampScale(s: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
@@ -141,6 +166,50 @@ function edgePath(a: LayoutNode, b: LayoutNode) {
   return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`
 }
 
+/* ── Table sorting helpers ─────────────────────────────────────────── */
+
+type SortKey = "endpoint" | "kind" | "accesses"
+type SortDir = "asc" | "desc"
+
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0
+  if (a === undefined || a === null || a === "") return 1
+  if (b === undefined || b === null || b === "") return -1
+  if (typeof a === "number" && typeof b === "number") return a - b
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sortBy,
+  sortDir,
+  onSort,
+}: {
+  label: string
+  sortKey: SortKey
+  sortBy: SortKey | null
+  sortDir: SortDir
+  onSort: (key: SortKey) => void
+}) {
+  const active = sortBy === sortKey
+  const Icon = active && sortDir === "asc" ? ArrowUp : ArrowDown
+  return (
+    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        {label}
+        <Icon className={active ? "h-3 w-3 opacity-100" : "h-3 w-3 opacity-30"} aria-hidden="true" />
+      </button>
+    </th>
+  )
+}
+
 export function GraphPage({
   onNavigate,
 }: {
@@ -162,6 +231,13 @@ export function GraphPage({
   const [dragging, setDragging] = useState(false)
   // Rich tooltip: content + cursor position (fixed coords, clamped to graph).
   const [tip, setTip] = useState<{ node: LayoutNode; x: number; y: number } | null>(null)
+
+  // Table state (endpoints derived from the graph nodes).
+  const [tablePage, setTablePage] = useState(0)
+  const [sortBy, setSortBy] = useState<SortKey | null>("accesses")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const viewportRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
@@ -188,6 +264,12 @@ export function GraphPage({
   useEffect(() => {
     fetchGraph()
   }, [fetchGraph])
+
+  // Reset client-side table state whenever the underlying graph changes.
+  useEffect(() => {
+    setTablePage(0)
+    setSelectedIds(new Set())
+  }, [graph])
 
   const layout = useMemo(() => (graph ? buildLayout(graph) : null), [graph])
   const layoutById = useMemo(
@@ -360,10 +442,104 @@ export function GraphPage({
     setDragging(false)
   }
 
-  const empty = !loading && !error && (!graph || graph.nodes.length === 0)
+  /* ── Endpoint table (client-side over graph nodes) ───────────────── */
+
+  const allNodes = useMemo(() => graph?.nodes ?? [], [graph])
+
+  const filteredNodes = useMemo(() => {
+    if (!q) return allNodes
+    return allNodes.filter((n) => n.label.toLowerCase().includes(q))
+  }, [q, allNodes])
+
+  const sortedNodes = useMemo(() => {
+    const sorted = [...filteredNodes]
+    if (!sortBy) return sorted
+    const dir = sortDir === "asc" ? 1 : -1
+    sorted.sort((a, b) => {
+      const av = sortBy === "endpoint" ? a.label : sortBy === "kind" ? a.kind : a.count
+      const bv = sortBy === "endpoint" ? b.label : sortBy === "kind" ? b.kind : b.count
+      return compareValues(av, bv) * dir
+    })
+    return sorted
+  }, [filteredNodes, sortBy, sortDir])
+
+  const pageItems = useMemo(
+    () => sortedNodes.slice(tablePage * PAGE_SIZE, (tablePage + 1) * PAGE_SIZE),
+    [sortedNodes, tablePage],
+  )
+
+  // Drop selections for nodes no longer present after a refetch/search change.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(allNodes.map((n) => n.id))
+      const next = new Set([...prev].filter((id) => visible.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [allNodes])
+
+  useEffect(() => {
+    setTablePage(0)
+  }, [q, sortBy, sortDir])
+
+  const allSelected = pageItems.length > 0 && pageItems.every((n) => selectedIds.has(n.id))
+  const someSelected = selectedIds.size > 0 && !allSelected
+
+  const toggleSelectAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(pageItems.map((n) => n.id)))
+  }
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkBlacklist = async () => {
+    // Use allNodes (not the search-filtered set) so every selected endpoint is
+    // blacklisted, matching the "N selected" count shown in the bulk bar.
+    const nodes = allNodes.filter((n) => selectedIds.has(n.id) && n.label.trim())
+    if (!nodes.length) return
+    setBulkBusy(true)
+    try {
+      const results = await Promise.all(nodes.map((n) => addBaseUrlToBlacklist(n.label)))
+      const added = results.reduce((sum, r) => sum + r.added.length, 0)
+      toast({
+        title: added
+          ? `${added} entr${added === 1 ? "y" : "ies"} added to blacklist`
+          : "Already in blacklist",
+        variant: added ? "success" : "info",
+      })
+      setSelectedIds(new Set())
+    } catch (e) {
+      toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  const handleSort = (key: SortKey) => {
+    if (sortBy === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortBy(key)
+      setSortDir(key === "accesses" ? "desc" : "asc")
+    }
+    setTablePage(0)
+  }
+
+  const shareOf = (n: GraphNode) =>
+    layerTotals[n.kind] > 0 ? Math.round((n.count / layerTotals[n.kind]) * 100) : 0
+
+  const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
+  const tableEmpty = !loading && (!!error || filteredNodes.length === 0)
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Traffic Graph</h2>
@@ -372,26 +548,6 @@ export function GraphPage({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Highlight IP or URL..."
-              className="w-56 pl-8 pr-8"
-              aria-label="Highlight nodes matching text"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
           <Select
             value={limit}
             onChange={setLimit}
@@ -406,255 +562,449 @@ export function GraphPage({
         </div>
       </div>
 
-      {/* Legend + summary + zoom controls */}
-      {graph && !empty && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-info" aria-hidden="true" />
-            {nodeKindCounts.ip.toLocaleString()} client IP{nodeKindCounts.ip === 1 ? "" : "s"}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
-            {nodeKindCounts.server.toLocaleString()} server IP{nodeKindCounts.server === 1 ? "" : "s"}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-danger" aria-hidden="true" />
-            {nodeKindCounts.url.toLocaleString()} URL{nodeKindCounts.url === 1 ? "" : "s"}
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <Network className="h-3.5 w-3.5" aria-hidden="true" />
-            {graph.links.length.toLocaleString()} access flow{graph.links.length === 1 ? "" : "s"}
-          </span>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {q.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
-                {matchCount} match{matchCount === 1 ? "" : "es"}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 text-muted-foreground/70">
-              <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
-              Hover to highlight · Click a node to view findings · Ctrl+scroll zooms · drag pans
-            </span>
-            <div className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => zoomBy(1.2)}
-                aria-label="Zoom in"
-              >
-                <ZoomIn className="h-3.5 w-3.5" />
-              </Button>
-              <span className="w-10 text-center text-[11px] tabular-nums text-muted-foreground">
-                {Math.round(transform.scale * 100)}%
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={() => zoomBy(0.8)}
-                aria-label="Zoom out"
-              >
-                <ZoomOut className="h-3.5 w-3.5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                onClick={fitView}
-                aria-label="Fit graph to view"
-              >
-                <Maximize className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="space-y-3" aria-busy="true">
-          <Skeleton className="h-64 w-full rounded-lg" />
-          <div className="flex gap-3">
-            <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-8 w-32" />
-            <Skeleton className="h-8 w-32" />
-          </div>
-        </div>
-      ) : error ? (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
-          <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
-          <p className="text-sm font-medium text-destructive">{error}</p>
-          <Button variant="outline" size="sm" onClick={fetchGraph}>
-            Try again
-          </Button>
-        </div>
-      ) : empty ? (
-        <EmptyState
+      {/* Summary chips */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard
           icon={Network}
-          title="No traffic to graph"
-          description="Findings appear here once the ES poll detects matching log entries. The graph maps which client IPs are hitting which flagged URLs."
-          action={
-            <Button variant="outline" onClick={fetchGraph}>
-              Refresh
-            </Button>
-          }
+          label="Access flows"
+          value={(graph?.links.length ?? 0).toLocaleString()}
+          tone="info"
+          hint="Client → server → URL edges"
         />
-      ) : layout && graph ? (
-        <div
-          ref={viewportRef}
-          className={cn(
-            "overflow-auto rounded-lg border border-border bg-card shadow-sm",
-            dragging ? "cursor-grabbing" : "cursor-grab",
-          )}
-          onMouseMove={moveTooltip}
-          onMouseLeave={() => setTip(null)}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        >
-          <div className="min-w-fit p-2">
-            <svg
-              width={layout.width}
-              height={layout.height}
-              viewBox={`0 0 ${layout.width} ${layout.height}`}
-              role="img"
-              aria-label="IP to URL access flow graph"
-              className="block overflow-visible"
-            >
-              <defs>
-                <marker
-                  id="flow-arrow"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
+        <StatCard
+          icon={Users}
+          label="Client IPs"
+          value={nodeKindCounts.ip.toLocaleString()}
+          tone="default"
+          hint="Unique clients in window"
+        />
+        <StatCard
+          icon={Server}
+          label="Server IPs"
+          value={nodeKindCounts.server.toLocaleString()}
+          tone="warning"
+          hint="Unique servers in window"
+        />
+        <StatCard
+          icon={Link2}
+          label="Flagged URLs"
+          value={nodeKindCounts.url.toLocaleString()}
+          tone="danger"
+          hint="URLs matching blocked patterns"
+        />
+      </div>
+
+      {/* Visualization: traffic relations */}
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight">Traffic relations</h3>
+            <p className="text-xs text-muted-foreground">
+              Client IPs reaching flagged URLs through server IPs. Hover to highlight · click a
+              node to open its findings.
+            </p>
+          </div>
+          {graph && !graphEmpty && (
+            <div className="flex flex-wrap items-center gap-2">
+              {q.length > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
+                  {matchCount} match{matchCount === 1 ? "" : "es"}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 text-muted-foreground/70">
+                <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
+                Ctrl+scroll zooms · drag pans
+              </span>
+              <div className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => zoomBy(1.2)}
+                  aria-label="Zoom in"
                 >
-                  <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
-                </marker>
-              </defs>
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </Button>
+                <span className="w-10 text-center text-[11px] tabular-nums text-muted-foreground">
+                  {Math.round(transform.scale * 100)}%
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => zoomBy(0.8)}
+                  aria-label="Zoom out"
+                >
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={fitView}
+                  aria-label="Fit graph to view"
+                >
+                  <Maximize className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
 
-              <g
-                transform={`translate(${transform.tx} ${transform.ty}) scale(${transform.scale})`}
+        {/* Legend strip */}
+        {graph && !graphEmpty && (
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-info" aria-hidden="true" />
+              {nodeKindCounts.ip.toLocaleString()} client IP{nodeKindCounts.ip === 1 ? "" : "s"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
+              {nodeKindCounts.server.toLocaleString()} server IP
+              {nodeKindCounts.server === 1 ? "" : "s"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-danger" aria-hidden="true" />
+              {nodeKindCounts.url.toLocaleString()} URL{nodeKindCounts.url === 1 ? "" : "s"}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Network className="h-3.5 w-3.5" aria-hidden="true" />
+              {graph.links.length.toLocaleString()} access flow
+              {graph.links.length === 1 ? "" : "s"}
+            </span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="space-y-3 p-4" aria-busy="true">
+            <Skeleton className="h-64 w-full rounded-lg" />
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+            <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
+            <p className="text-sm font-medium text-destructive">{error}</p>
+            <Button variant="outline" size="sm" onClick={fetchGraph}>
+              Try again
+            </Button>
+          </div>
+        ) : graphEmpty ? (
+          <EmptyState
+            icon={Network}
+            title="No traffic to graph"
+            description="Findings appear here once the ES poll detects matching log entries. The graph maps which client IPs are hitting which flagged URLs."
+            action={
+              <Button variant="outline" onClick={fetchGraph}>
+                Refresh
+              </Button>
+            }
+            className="border-0"
+          />
+        ) : layout && graph ? (
+          <div
+            ref={viewportRef}
+            className={cn(
+              "overflow-auto",
+              dragging ? "cursor-grabbing" : "cursor-grab",
+            )}
+            onMouseMove={moveTooltip}
+            onMouseLeave={() => setTip(null)}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+          >
+            <div className="min-w-fit p-2">
+              <svg
+                width={layout.width}
+                height={layout.height}
+                viewBox={`0 0 ${layout.width} ${layout.height}`}
+                role="img"
+                aria-label="IP to URL access flow graph"
+                className="block overflow-visible"
               >
-                {/* Column headers */}
-                {(Object.keys(KIND_COLUMN) as Kind[]).map((k) => (
-                  <text
-                    key={k}
-                    x={KIND_COLUMN[k].x + KIND_COLUMN[k].width / 2}
-                    y={TOP_PAD - 30}
-                    textAnchor="middle"
-                    fontSize={10}
-                    letterSpacing="0.14em"
-                    className="fill-muted-foreground font-medium uppercase"
+                <defs>
+                  <marker
+                    id="flow-arrow"
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
                   >
-                    {KIND_COLUMN[k].label}
-                  </text>
-                ))}
+                    <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
+                  </marker>
+                </defs>
 
-                {/* Edges */}
-                {graph.links.map((l, i) => {
-                  const src = layoutById.get(l.source)
-                  const dst = layoutById.get(l.target)
-                  if (!src || !dst) return null
-                  const active = isLinkActive(l)
-                  const dimmed = isEdgeDimmed(l)
-                  const strokeWidth = 1 + (l.count / layout.maxLinkCount) * 6
-                  return (
-                    <g key={i}>
-                      {!dimmed && !(activeId !== null && active) && (
+                <g
+                  transform={`translate(${transform.tx} ${transform.ty}) scale(${transform.scale})`}
+                >
+                  {/* Column headers */}
+                  {(Object.keys(KIND_COLUMN) as Kind[]).map((k) => (
+                    <text
+                      key={k}
+                      x={KIND_COLUMN[k].x + KIND_COLUMN[k].width / 2}
+                      y={TOP_PAD - 30}
+                      textAnchor="middle"
+                      fontSize={10}
+                      letterSpacing="0.14em"
+                      className="fill-muted-foreground font-medium uppercase"
+                    >
+                      {KIND_COLUMN[k].label}
+                    </text>
+                  ))}
+
+                  {/* Edges */}
+                  {graph.links.map((l, i) => {
+                    const src = layoutById.get(l.source)
+                    const dst = layoutById.get(l.target)
+                    if (!src || !dst) return null
+                    const active = isLinkActive(l)
+                    const dimmed = isEdgeDimmed(l)
+                    const strokeWidth = 1 + (l.count / layout.maxLinkCount) * 6
+                    return (
+                      <g key={i}>
+                        {!dimmed && !(activeId !== null && active) && (
+                          <path
+                            d={edgePath(src, dst)}
+                            fill="none"
+                            className={cn("edge-flow", EDGE_STYLES[kindOf(l.target)])}
+                            style={{ strokeWidth }}
+                            opacity={0.4}
+                          />
+                        )}
                         <path
                           d={edgePath(src, dst)}
                           fill="none"
-                          className={cn("edge-flow", EDGE_STYLES[kindOf(l.target)])}
-                          style={{ strokeWidth }}
-                          opacity={0.4}
-                        />
-                      )}
-                      <path
-                        d={edgePath(src, dst)}
-                        fill="none"
-                        className={cn(
-                          "transition-opacity duration-150",
-                          active && activeId ? EDGE_STYLES[kindOf(l.target)] : "stroke-muted",
-                        )}
-                        style={{
-                          strokeWidth,
-                          opacity: dimmed ? 0.12 : active && activeId !== null ? 1 : 0.55,
-                        }}
-                        markerEnd="url(#flow-arrow)"
-                      >
-                        <title>{`${src.label} → ${dst.label} · ${l.count} access${l.count === 1 ? "" : "es"}`}</title>
-                      </path>
-                    </g>
-                  )
-                })}
+                          className={cn(
+                            "transition-opacity duration-150",
+                            active && activeId ? EDGE_STYLES[kindOf(l.target)] : "stroke-muted",
+                          )}
+                          style={{
+                            strokeWidth,
+                            opacity: dimmed ? 0.12 : active && activeId !== null ? 1 : 0.55,
+                          }}
+                          markerEnd="url(#flow-arrow)"
+                        >
+                          <title>{`${src.label} → ${dst.label} · ${l.count} access${l.count === 1 ? "" : "es"}`}</title>
+                        </path>
+                      </g>
+                    )
+                  })}
 
-                {/* Nodes */}
-                {layout.nodes.map((n) => (
-                  <g
-                    key={n.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${n.label} — ${n.count} accesses. Open findings.`}
-                    aria-describedby="traffic-graph-tooltip"
-                    onClick={() => openFindings(n)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        openFindings(n)
-                      }
-                    }}
-                    onMouseEnter={(e) => {
-                      if (dragRef.current) return // ignore nodes under the cursor while panning
-                      setHovered(n.id)
-                      showTooltip(n, e.clientX, e.clientY)
-                    }}
-                    onMouseLeave={() => {
-                      setHovered(null)
-                      setTip(null)
-                    }}
-                    onFocus={() => setFocused(n.id)}
-                    onBlur={() => setFocused(null)}
-                    className="cursor-pointer transition-opacity duration-150"
-                    style={{ opacity: isNodeDimmed(n.id) ? 0.15 : 1 }}
-                  >
-                    <rect
-                      x={n.x}
-                      y={n.y}
-                      width={n.width}
-                      height={n.height}
-                      rx={9}
-                      strokeWidth={activeId === n.id ? 2 : 1.2}
-                      className={cn(KIND_STYLES[n.kind].rect, "transition-all duration-150")}
-                    />
-                    <text
-                      x={n.x + n.width / 2}
-                      y={n.y + n.height / 2 - 5}
-                      textAnchor="middle"
-                      fontSize={11}
-                      className={cn(KIND_STYLES[n.kind].label, "font-mono")}
+                  {/* Nodes */}
+                  {layout.nodes.map((n) => (
+                    <g
+                      key={n.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${n.label} — ${n.count} accesses. Open findings.`}
+                      aria-describedby="traffic-graph-tooltip"
+                      onClick={() => openFindings(n)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          openFindings(n)
+                        }
+                      }}
+                      onMouseEnter={(e) => {
+                        if (dragRef.current) return // ignore nodes under the cursor while panning
+                        setHovered(n.id)
+                        showTooltip(n, e.clientX, e.clientY)
+                      }}
+                      onMouseLeave={() => {
+                        setHovered(null)
+                        setTip(null)
+                      }}
+                      onFocus={() => setFocused(n.id)}
+                      onBlur={() => setFocused(null)}
+                      className="cursor-pointer transition-opacity duration-150"
+                      style={{ opacity: isNodeDimmed(n.id) ? 0.15 : 1 }}
                     >
-                      {truncate(n.label, n.kind === "url" ? 44 : 21)}
-                    </text>
-                    <text
-                      x={n.x + n.width / 2}
-                      y={n.y + n.height / 2 + 10}
-                      textAnchor="middle"
-                      fontSize={9.5}
-                      className="fill-muted-foreground"
-                    >
-                      {n.count.toLocaleString()} access{n.count === 1 ? "" : "es"}
-                    </text>
-                  </g>
-                ))}
-              </g>
-            </svg>
+                      <rect
+                        x={n.x}
+                        y={n.y}
+                        width={n.width}
+                        height={n.height}
+                        rx={9}
+                        strokeWidth={activeId === n.id ? 2 : 1.2}
+                        className={cn(KIND_STYLES[n.kind].rect, "transition-all duration-150")}
+                      />
+                      <text
+                        x={n.x + n.width / 2}
+                        y={n.y + n.height / 2 - 5}
+                        textAnchor="middle"
+                        fontSize={11}
+                        className={cn(KIND_STYLES[n.kind].label, "font-mono")}
+                      >
+                        {truncate(n.label, n.kind === "url" ? 44 : 21)}
+                      </text>
+                      <text
+                        x={n.x + n.width / 2}
+                        y={n.y + n.height / 2 + 10}
+                        textAnchor="middle"
+                        fontSize={9.5}
+                        className="fill-muted-foreground"
+                      >
+                        {n.count.toLocaleString()} access{n.count === 1 ? "" : "es"}
+                      </text>
+                    </g>
+                  ))}
+                </g>
+              </svg>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Endpoints table */}
+      <div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            {filteredNodes.length.toLocaleString()} endpoint
+            {filteredNodes.length !== 1 ? "s" : ""}
+            {q.length > 0 && ` matching "${debouncedSearch.trim()}"`}
+          </p>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search endpoints..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-64 pl-8 pr-8"
+              aria-label="Search endpoints"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
-      ) : null}
+
+        {selectedIds.size > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+            <span className="font-medium">{selectedIds.size} selected</span>
+            <Button size="sm" variant="outline" onClick={handleBulkBlacklist} disabled={bulkBusy}>
+              <Ban className="h-3.5 w-3.5" />
+              Add to blacklist
+            </Button>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="space-y-3" aria-busy="true">
+            <Skeleton className="h-48 w-full rounded-lg" />
+          </div>
+        ) : tableEmpty ? (
+          <EmptyState
+            icon={SearchX}
+            title={error ? "Unable to load endpoints" : q ? "No matching endpoints" : "No endpoints"}
+            description={
+              error
+                ? error
+                : q
+                  ? "Try adjusting your search."
+                  : "Endpoints appear here once the graph has traffic data."
+            }
+          />
+        ) : (
+          <>
+            <div className="overflow-x-auto rounded-lg border border-border bg-card">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50">
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      <label className="inline-flex items-center gap-2 uppercase tracking-wide">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected
+                          }}
+                          onChange={toggleSelectAll}
+                          disabled={bulkBusy || pageItems.length === 0}
+                          aria-label="Select all endpoints"
+                          className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        />
+                        <span className="sr-only">Select</span>
+                      </label>
+                    </th>
+                    <SortableTh label="Kind" sortKey="kind" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                    <SortableTh label="Endpoint" sortKey="endpoint" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                    <SortableTh label="Accesses" sortKey="accesses" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      <span className="uppercase tracking-wide">Share</span>
+                    </th>
+                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageItems.map((n) => (
+                    <tr
+                      key={n.id}
+                      className={cn(
+                        "border-b border-border transition-colors hover:bg-muted/30",
+                        selectedIds.has(n.id) && "bg-muted/40",
+                      )}
+                    >
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(n.id)}
+                          onChange={() => toggleSelectOne(n.id)}
+                          disabled={bulkBusy}
+                          aria-label={`Select ${n.label}`}
+                          className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={KIND_BADGE[n.kind]}>{KIND_LABEL[n.kind]}</Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs" title={n.label}>
+                          {truncate(n.label, 56)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">{n.count.toLocaleString()}</td>
+                      <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                        {shareOf(n)}%
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => openFindings(n)}
+                          aria-label={`View findings for ${n.label}`}
+                        >
+                          <ArrowUpRight className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {sortedNodes.length > PAGE_SIZE && (
+              <Pagination
+                page={tablePage}
+                pageSize={PAGE_SIZE}
+                total={sortedNodes.length}
+                onPageChange={setTablePage}
+              />
+            )}
+          </>
+        )}
+      </div>
 
       {/* Rich tooltip (fixed-positioned outside the scroll container) */}
       {tip && (
