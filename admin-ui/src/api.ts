@@ -317,6 +317,10 @@ export async function addBaseUrlToBlacklist(value: string): Promise<{ added: str
   return res.json()
 }
 
+export async function deleteBlacklistEntry(kind: "url" | "ip", value: string): Promise<void> {
+  return request(`/blacklist/${kind}/${encodeURIComponent(value)}`, { method: "DELETE" })
+}
+
 export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[] }> {
   const headers: Record<string, string> = {}
   const tok = getToken()

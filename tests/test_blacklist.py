@@ -175,6 +175,34 @@ async def test_blacklist_migration_normalizes_legacy_entries(db_path):
     assert not any(k == "url" and v.startswith("http") for k, v in entries)
 
 
+def test_blacklist_delete_entry(client):
+    client.post("/api/blacklist/", json={"value": "http://del.example/x"})
+    assert "del.example" in client.get("/api/blacklist/urls").text
+
+    resp = client.delete("/api/blacklist/url/del.example")
+    assert resp.status_code == 204
+    assert "del.example" not in client.get("/api/blacklist/urls").text
+
+
+def test_blacklist_delete_ip_entry(client):
+    client.post("/api/blacklist/", json={"value": "5.6.7.8"})
+    assert "5.6.7.8" in client.get("/api/blacklist/ips").text
+
+    resp = client.delete("/api/blacklist/ip/5.6.7.8")
+    assert resp.status_code == 204
+    assert "5.6.7.8" not in client.get("/api/blacklist/ips").text
+
+
+def test_blacklist_delete_missing_returns_404(client):
+    resp = client.delete("/api/blacklist/url/nope.example")
+    assert resp.status_code == 404
+
+
+def test_blacklist_delete_invalid_kind(client):
+    resp = client.delete("/api/blacklist/domain/example.com")
+    assert resp.status_code == 422
+
+
 def test_blacklist_requires_auth(db_path):
     """Endpoints are mounted with verify_admin; requests without auth -> 401."""
     asyncio.run(init_db())
