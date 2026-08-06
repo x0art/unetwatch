@@ -1,4 +1,5 @@
 import math
+import re
 from datetime import UTC, datetime
 from numbers import Integral, Real
 
@@ -54,9 +55,54 @@ async def get_whitelist_patterns(db) -> list[str]:
     return [r[0] for r in rows]
 
 
+# Lucene query_string characters that must be backslash-escaped when a pattern
+# is inlined as a term. `*` and `?` are intentionally left untouched so
+# patterns keep acting as wildcards; `&` and `|` are escaped too so a pattern
+# can never smuggle in a Lucene `&&`/`||` operator.
+_QUERY_STRING_SPECIAL = re.compile(r"([+\-!(){}[\]^\"~:\\/&| ])")
+
+
+def _glob_to_regex(pattern: str) -> str:
+    """Convert a wildcard pattern (``*``/``?``) into a safe literal-match regex.
+
+    Patterns are globs, not regexes: ``*`` matches any run of characters,
+    ``?`` matches any single character, and everything else is matched
+    literally. This mirrors the substring semantics the Findings graph uses
+    for whitelist patterns, and guarantees a user-supplied pattern can never
+    produce an invalid regex (``re.error``) that would crash a poll or a
+    metrics run.
+    """
+    pattern = pattern.strip()
+    if not pattern:
+        return ""
+    return re.escape(pattern).replace(r"\*", ".*").replace(r"\?", ".")
+
+
+def _build_pattern_regex(patterns: list[str]) -> str:
+    """Join wildcard patterns into a single alternation regex.
+
+    Case-insensitivity is applied by the caller (``case=False`` on
+    ``str.contains`` / ``re.IGNORECASE``), not baked into the regex.
+    """
+    return "|".join(p for p in map(_glob_to_regex, patterns) if p)
+
+
+def _escape_query_string(term: str) -> str:
+    """Escape Lucene query_string special chars in a pattern term.
+
+    ``*`` and ``?`` are preserved so patterns keep acting as wildcards; all
+    other Lucene operators and delimiters (``:``, ``/``, ``+``, ``-``, quotes,
+    brackets, whitespace...) are escaped so an arbitrary pattern cannot break
+    the query or silently change its meaning.
+    """
+    return _QUERY_STRING_SPECIAL.sub(r"\\\1", term) if term else term
+
+
 def build_logs_query(block_patterns: list[str], minutes: int, size: int) -> dict:
     """ES query that flags URLs matching any block pattern within the window."""
-    query_string = " OR ".join([f"url : {p}" for p in block_patterns])
+    query_string = " OR ".join(
+        f"url : {_escape_query_string(p)}" for p in block_patterns
+    )
     return {
         "size": size,
         "query": {
@@ -178,7 +224,7 @@ async def fetch_logs(minutes: int = 10):
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No block patterns configured.")
             return
 
-        whitelist_regex = "|".join(whitelist_patterns)
+        whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(block_patterns, minutes, settings.es_query_size)
 
         try:
@@ -278,7 +324,7 @@ async def fetch_metrics(minutes: int = 60) -> dict:
         return result
 
     es = build_es_client(settings, timeout=15)
-    whitelist_regex = "|".join(whitelist_patterns)
+    whitelist_regex = _build_pattern_regex(whitelist_patterns)
     query = build_logs_query(block_patterns, minutes, settings.es_query_size)
 
     try:

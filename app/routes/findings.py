@@ -1,6 +1,9 @@
+import re
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.database import get_db_conn
+from app.services.monitor import _build_pattern_regex
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
@@ -33,14 +36,16 @@ async def findings_graph(
         "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
     )
     wl_rows = await wl_cursor.fetchall()
-    whitelist_patterns = [r[0] for r in wl_rows]
-    if whitelist_patterns:
+    # Same glob semantics as the monitor: `*`/`?` act as wildcards, everything
+    # else is matched literally (case-insensitive).
+    whitelist_regex = _build_pattern_regex([r[0] for r in wl_rows])
+    if whitelist_regex:
         rows = [
             r
             for r in await cursor.fetchall()
-            if not any(
-                pat and (pat in str(r["url"]) or pat in str(r["base_url"]))
-                for pat in whitelist_patterns
+            if not (
+                re.search(whitelist_regex, str(r["url"]), re.IGNORECASE)
+                or re.search(whitelist_regex, str(r["base_url"]), re.IGNORECASE)
             )
         ]
     else:

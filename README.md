@@ -109,6 +109,11 @@ The API is documented interactively at `http://localhost:8000/docs` (Swagger UI)
 Pattern types: `block` (URLs to flag) and `whitelist` (URLs to allow). Query params
 for list: `?pattern_type=block&search=porn&limit=50&offset=0`.
 
+Patterns are **substring globs**, not regexes: `*` matches any run of characters,
+`?` matches a single character, and everything else is matched literally (so
+`*porn*`, `googleapis` and `film?` are all valid, and special regex characters like
+`+`, `(`, `:` never break polling or the ES query).
+
 ### Monitor
 
 | Method | Path               | Description                      |

@@ -565,6 +565,47 @@ async def test_findings_graph_excludes_whitelisted_urls(client):
     assert "http://safe.example/x" not in url_labels
 
 
+async def test_findings_graph_whitelist_supports_globs(client):
+    """Wildcard whitelist patterns (`*safe*`) filter the graph like the monitor."""
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        await _insert_findings(
+            db,
+            [
+                {
+                    "client_ip": "1.2.3.4",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://keep.example/a",
+                    "base_url": "keep.example",
+                    "ts": "2026-08-05T04:00:00Z",
+                },
+                {
+                    "client_ip": "1.2.3.4",
+                    "server_ip": "10.0.0.1",
+                    "url": "http://notsafe-cdn.example/x",
+                    "base_url": "notsafe-cdn.example",
+                    "ts": "2026-08-05T04:01:00Z",
+                },
+            ],
+        )
+        resp = client.post(
+            "/api/patterns/",
+            json={"pattern": "*safe*", "pattern_type": "whitelist"},
+        )
+        assert resp.status_code == 201
+    finally:
+        await db.close()
+
+    data = client.get("/api/findings/graph").json()
+    url_labels = [n["label"] for n in data["nodes"] if n["kind"] == "url"]
+    assert "http://keep.example/a" in url_labels
+    # Glob *safe* matches the literal substring pattern anywhere in the URL.
+    assert "http://notsafe-cdn.example/x" not in url_labels
+
+
 async def test_store_findings_uses_es_timestamp(client):
     """ES @timestamp is authoritative; blank/NaT/epoch values are normalized."""
     from datetime import UTC, datetime
