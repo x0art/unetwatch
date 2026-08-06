@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import {
   type RedirectGraph,
+  type RedirectLink,
   type TrackedUrl,
   type UrlRedirectHistory,
   addBaseUrlToBlacklist,
@@ -27,9 +28,6 @@ import {
 import {
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
   ConfirmDialog,
   Dialog,
   EmptyState,
@@ -64,7 +62,135 @@ const SOURCE_META: Record<
 
 type SortKey = "id" | "url" | "source" | "status" | "last_checked_at"
 type SortDir = "asc" | "desc"
-type GroupNode = RedirectGraph["nodes"][number]
+
+/* ── Flow layout: depth-layered columns (Sources → Hop 1 → Hop 2 …) ── */
+
+type FlowNode = RedirectGraph["nodes"][number] & {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const FLOW_NODE_W = 224
+const FLOW_NODE_H = 44
+const FLOW_COL_GAP = 110
+const FLOW_ROW_GAP = 16
+const FLOW_TOP_PAD = 58
+const FLOW_SIDE_PAD = 28
+
+const STATUS_NODE_STYLE: Record<
+  TrackedUrl["status"],
+  { rect: string; text: string }
+> = {
+  ok: { rect: "fill-success/15 stroke-success", text: "fill-success" },
+  redirect: { rect: "fill-warning/15 stroke-warning", text: "fill-warning" },
+  error: { rect: "fill-danger/15 stroke-danger", text: "fill-danger" },
+  unknown: {
+    rect: "fill-muted-foreground/10 stroke-muted-foreground/70",
+    text: "fill-muted-foreground",
+  },
+}
+
+// Longest-path layering: nodes with no incoming edge sit at depth 0; every
+// other node lands one column past its deepest source. DAG edges therefore
+// always flow strictly left → right. Unresolvable cycles are parked in a
+// single fallback column instead of looping forever.
+function computeDepths(nodeIds: Set<string>, links: RedirectLink[]): Map<string, number> {
+  const preds = new Map<string, string[]>()
+  for (const id of nodeIds) preds.set(id, [])
+  for (const l of links) {
+    if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) continue
+    preds.get(l.target)!.push(l.source)
+  }
+
+  const depth = new Map<string, number>()
+  const remaining = new Set(nodeIds)
+  let fallback = 0
+  while (remaining.size > 0) {
+    const frontier = [...remaining].filter((n) =>
+      preds.get(n)!.every((p) => depth.has(p)),
+    )
+    if (frontier.length === 0) {
+      // Cycle: park the rest in one fallback column.
+      for (const n of remaining) depth.set(n, fallback)
+      break
+    }
+    for (const n of frontier) {
+      const predDepths = preds.get(n)!.map((p) => depth.get(p)!)
+      depth.set(n, predDepths.length === 0 ? 0 : 1 + Math.max(...predDepths))
+      remaining.delete(n)
+    }
+    fallback += 1
+  }
+  return depth
+}
+
+function buildFlowLayout(
+  graph: RedirectGraph,
+  showHistorical: boolean,
+): {
+  nodes: FlowNode[]
+  links: RedirectLink[]
+  width: number
+  height: number
+  columns: string[]
+} | null {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+  const links = showHistorical ? graph.links : graph.links.filter((l) => l.active)
+
+  const linkedIds = new Set<string>()
+  for (const l of links) {
+    linkedIds.add(l.source)
+    linkedIds.add(l.target)
+  }
+  const nodeIds = new Set<string>([...linkedIds].filter((id) => byId.has(id)))
+  if (nodeIds.size === 0) return null
+
+  const depth = computeDepths(nodeIds, links)
+  const byDepth = new Map<number, string[]>()
+  for (const id of nodeIds) {
+    const d = depth.get(id) ?? 0
+    const list = byDepth.get(d) ?? []
+    list.push(id)
+    byDepth.set(d, list)
+  }
+  const cols = [...byDepth.keys()].sort((a, b) => a - b)
+  const maxRows = Math.max(...[...byDepth.values()].map((l) => l.length))
+  const width =
+    FLOW_SIDE_PAD +
+    cols.length * FLOW_NODE_W +
+    (cols.length - 1) * FLOW_COL_GAP +
+    FLOW_SIDE_PAD
+  const height =
+    FLOW_TOP_PAD + maxRows * FLOW_NODE_H + (maxRows - 1) * FLOW_ROW_GAP + FLOW_SIDE_PAD
+
+  const nodes: FlowNode[] = []
+  cols.forEach((d, ci) => {
+    const ids = byDepth.get(d)!.sort((a, b) => a.localeCompare(b))
+    ids.forEach((id, ri) => {
+      nodes.push({
+        ...byId.get(id)!,
+        x: FLOW_SIDE_PAD + ci * (FLOW_NODE_W + FLOW_COL_GAP),
+        y: FLOW_TOP_PAD + ri * (FLOW_NODE_H + FLOW_ROW_GAP),
+        width: FLOW_NODE_W,
+        height: FLOW_NODE_H,
+      })
+    })
+  })
+
+  const columns = cols.map((_, i) => (i === 0 ? "Sources" : `Hop ${i}`))
+  return { nodes, links, width, height, columns }
+}
+
+function flowEdgePath(a: FlowNode, b: FlowNode) {
+  const sx = a.x + a.width
+  const sy = a.y + a.height / 2
+  const tx = b.x
+  const ty = b.y + b.height / 2
+  const dx = Math.max(48, (tx - sx) / 2)
+  return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`
+}
 
 function formatWhen(ts: string | null) {
   if (!ts) return "—"
@@ -127,6 +253,8 @@ export function RedirectsPage() {
   const [deleteTarget, setDeleteTarget] = useState<TrackedUrl | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [showHistorical, setShowHistorical] = useState(false)
+  const [hovered, setHovered] = useState<string | null>(null)
   const [historyTarget, setHistoryTarget] = useState<TrackedUrl | null>(null)
   const [history, setHistory] = useState<UrlRedirectHistory | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
@@ -165,6 +293,7 @@ export function RedirectsPage() {
   const loadGraph = useCallback(() => {
     let cancelled = false
     setGraphLoading(true)
+    setHovered(null) // a stale highlight must not survive a refetch
     getRedirectGraph()
       .then((data) => {
         if (!cancelled) setGraph(data)
@@ -398,45 +527,46 @@ export function RedirectsPage() {
     }
   }
 
-  /* ── Grouped-by-current-target visualization ──────────────────────── */
+  /* ── Flow visualization (depth-layered columns) ───────────────────── */
 
-  const groups = useMemo(() => {
-    const links = (graph?.links ?? []).filter((l) => l.active)
-    const byId = new Map((graph?.nodes ?? []).map((n) => [n.id, n]))
-    const members = new Map<string, GroupNode[]>()
-    const edgeStatus = new Map<string, number>()
-    for (const l of links) {
-      const source = byId.get(l.source)
-      const target = byId.get(l.target)
-      if (!source || !target) continue
-      const list = members.get(l.target) ?? []
-      list.push(source)
-      members.set(l.target, list)
-      edgeStatus.set(l.source, l.http_status)
-    }
-    const ordered = [...members.entries()]
-      .map(([targetId, sources]) => ({
-        target: byId.get(targetId)!,
-        sources: [...sources].sort((a, b) => a.label.localeCompare(b.label)),
-      }))
-      .sort(
-        (a, b) =>
-          b.sources.length - a.sources.length ||
-          a.target.label.localeCompare(b.target.label),
-      )
-    return { groups: ordered, edgeStatus }
-  }, [graph])
+  const flow = useMemo(
+    () => (graph ? buildFlowLayout(graph, showHistorical) : null),
+    [graph, showHistorical],
+  )
+  const flowById = useMemo(
+    () => new Map((flow?.nodes ?? []).map((n) => [n.id, n])),
+    [flow],
+  )
 
-  // Tracked URLs that neither point anywhere nor are pointed at.
-  const isolated = useMemo(() => {
+  // Tracked URLs with no edges at all (never redirected, never a target).
+  const isolatedNodes = useMemo(() => {
     if (!graph) return []
-    const links = graph.links.filter((l) => l.active)
-    const sources = new Set(links.map((l) => l.source))
-    const targets = new Set(links.map((l) => l.target))
+    const linked = new Set<string>()
+    for (const l of graph.links) {
+      linked.add(l.source)
+      linked.add(l.target)
+    }
     return graph.nodes
-      .filter((n) => !sources.has(n.id) && !targets.has(n.id))
+      .filter((n) => !linked.has(n.id))
       .sort((a, b) => a.label.localeCompare(b.label))
   }, [graph])
+
+  const flowNeighbours = useCallback(
+    (id: string) => {
+      const set = new Set<string>([id])
+      for (const l of flow?.links ?? []) {
+        if (l.source === id) set.add(l.target)
+        if (l.target === id) set.add(l.source)
+      }
+      return set
+    },
+    [flow],
+  )
+
+  const flowNodeDimmed = (id: string) =>
+    hovered !== null && !flowNeighbours(hovered).has(id)
+  const flowEdgeDimmed = (l: RedirectLink) =>
+    hovered !== null && l.source !== hovered && l.target !== hovered
 
   const focusTable = (url: string) => {
     setSearch(url)
@@ -506,97 +636,228 @@ export function RedirectsPage() {
         <StatCard icon={SearchX} label="Errors" value={stats.error.toLocaleString()} tone="danger" hint="Unreachable or failed check" />
       </div>
 
-      {/* Visualization: grouped by current target */}
+      {/* Visualization: redirect flow */}
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="border-b border-border px-4 py-3">
-          <h3 className="text-sm font-semibold tracking-tight">Grouped by current target</h3>
-          <p className="text-xs text-muted-foreground">
-            One card per destination URL, listing every tracked URL currently redirecting into
-            it. Click a source to filter the table.
-          </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight">Redirect flow</h3>
+            <p className="text-xs text-muted-foreground">
+              Chains flow left to right — sources on the left, each hop in its own column. Hover
+              to highlight · click a URL to filter the table.
+            </p>
+          </div>
+          {graph && !graphEmpty && (
+            <button
+              type="button"
+              onClick={() => setShowHistorical((v) => !v)}
+              aria-pressed={showHistorical}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:border-info/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <History className="h-3.5 w-3.5" aria-hidden="true" />
+              Show historical edges
+            </button>
+          )}
         </div>
+
         {graphLoading ? (
           <div className="space-y-3 p-4" aria-busy="true">
-            <Skeleton className="h-40 w-full rounded-lg" />
+            <Skeleton className="h-64 w-full rounded-lg" />
           </div>
         ) : graphEmpty ? (
           <EmptyState
             icon={GitBranch}
             title="No relations yet"
-            description="Track a URL and run “Check now” — redirect targets will appear here as groups."
+            description="Track a URL and run “Check now” — redirect chains will flow here, hop by hop."
             className="border-0"
           />
-        ) : (
-          <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">
-            {groups.groups.map(({ target, sources }) => (
-              <Card key={target.id} className="overflow-hidden">
-                <CardHeader className="gap-1 border-b border-border bg-muted/30 p-3.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 font-mono text-xs font-semibold" title={target.label}>
-                      {truncate(target.label, 44)}
-                    </p>
-                    <Badge variant={STATUS_META[target.status].variant} className="shrink-0">
-                      {STATUS_META[target.status].label}
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    {sources.length} source{sources.length === 1 ? "" : "s"} redirect here
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-2 p-3">
-                  {sources.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => focusTable(s.label)}
-                      className="group flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2 text-left transition-colors hover:border-info/40 hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={`${s.label} → ${target.label}`}
-                      aria-label={`Filter table by ${s.label}`}
+        ) : flow ? (
+          <>
+            <div className="overflow-x-auto">
+              <div className="min-w-fit p-2">
+                <svg
+                  width={flow.width}
+                  height={flow.height}
+                  viewBox={`0 0 ${flow.width} ${flow.height}`}
+                  role="img"
+                  aria-label="Redirect chain flow graph"
+                  className="block"
+                >
+                  <defs>
+                    <marker
+                      id="redirect-arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="6"
+                      markerHeight="6"
+                      orient="auto-start-reverse"
                     >
-                      <CornerUpRight
-                        className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-info"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{s.label}</span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                        HTTP {groups.edgeStatus.get(s.id) ?? "?"}
-                      </span>
-                      <Badge variant={STATUS_META[s.status].variant} className="shrink-0">
-                        {STATUS_META[s.status].label}
-                      </Badge>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
-            ))}
+                      <path d="M 0 0 L 10 5 L 0 10 z" className="fill-muted-foreground/60" />
+                    </marker>
+                  </defs>
 
-            {isolated.length > 0 && (
-              <Card className="border-dashed">
-                <CardHeader className="gap-1 border-b border-border bg-muted/30 p-3.5">
-                  <p className="font-mono text-xs font-semibold">Not redirecting</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {isolated.length} tracked URL{isolated.length === 1 ? "" : "s"} with no
-                    current redirect
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-2 p-3">
-                  {isolated.map((n) => (
-                    <div
-                      key={n.id}
-                      className="flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2"
+                  {/* Column headers */}
+                  {flow.columns.map((label, i) => (
+                    <text
+                      key={label}
+                      x={FLOW_SIDE_PAD + i * (FLOW_NODE_W + FLOW_COL_GAP) + FLOW_NODE_W / 2}
+                      y={FLOW_TOP_PAD - 26}
+                      textAnchor="middle"
+                      fontSize={10}
+                      letterSpacing="0.14em"
+                      className="fill-muted-foreground font-medium uppercase"
                     >
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={n.label}>
-                        {n.label}
-                      </span>
+                      {label}
+                    </text>
+                  ))}
+
+                  {/* Edges */}
+                  {flow.links.map((l, i) => {
+                    const src = flowById.get(l.source)
+                    const dst = flowById.get(l.target)
+                    if (!src || !dst) return null
+                    const dimmed = flowEdgeDimmed(l)
+                    return (
+                      <path
+                        key={i}
+                        d={flowEdgePath(src, dst)}
+                        fill="none"
+                        className={cn(
+                          "stroke-muted-foreground transition-opacity duration-150",
+                          hovered !== null && !dimmed && "stroke-foreground/80",
+                        )}
+                        style={{
+                          strokeDasharray: l.active ? undefined : "4 5",
+                          opacity: dimmed ? 0.12 : l.active ? 0.7 : 0.45,
+                          strokeWidth: l.active ? 1.6 : 1.3,
+                        }}
+                        markerEnd="url(#redirect-arrow)"
+                      >
+                        <title>{`${src.label} → ${dst.label} · HTTP ${l.http_status}${l.active ? "" : " (historical)"}`}</title>
+                      </path>
+                    )
+                  })}
+
+                  {/* Nodes */}
+                  {flow.nodes.map((n) => (
+                    <g
+                      key={n.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${n.label} — ${STATUS_META[n.status].label}${
+                        n.final_url && n.final_url !== n.label
+                          ? `, redirects to ${n.final_url}`
+                          : ""
+                      }. Click to filter the table.`}
+                      onClick={() => focusTable(n.label)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault()
+                          focusTable(n.label)
+                        }
+                      }}
+                      onMouseEnter={() => setHovered(n.id)}
+                      onMouseLeave={() => setHovered(null)}
+                      onFocus={() => setHovered(n.id)}
+                      onBlur={() => setHovered(null)}
+                      className="cursor-pointer transition-opacity duration-150"
+                      style={{ opacity: flowNodeDimmed(n.id) ? 0.15 : 1 }}
+                    >
+                      <rect
+                        x={n.x}
+                        y={n.y}
+                        width={n.width}
+                        height={n.height}
+                        rx={9}
+                        strokeWidth={hovered === n.id ? 2 : 1.2}
+                        className={cn(
+                          STATUS_NODE_STYLE[n.status].rect,
+                          "transition-all duration-150",
+                        )}
+                      />
+                      <text
+                        x={n.x + n.width / 2}
+                        y={n.y + n.height / 2 - 5}
+                        textAnchor="middle"
+                        fontSize={11}
+                        className={cn(STATUS_NODE_STYLE[n.status].text, "font-mono")}
+                      >
+                        {truncate(n.label, 30)}
+                      </text>
+                      <text
+                        x={n.x + n.width / 2}
+                        y={n.y + n.height / 2 + 11}
+                        textAnchor="middle"
+                        fontSize={9.5}
+                        className="fill-muted-foreground"
+                      >
+                        {STATUS_META[n.status].label}
+                        {n.final_url && n.final_url !== n.label
+                          ? ` → ${truncate(n.final_url, 18)}`
+                          : ""}
+                      </text>
+                    </g>
+                  ))}
+                </svg>
+              </div>
+            </div>
+
+            {/* Tracked URLs with no relations at all */}
+            {isolatedNodes.length > 0 && (
+              <div className="border-t border-border px-4 py-3">
+                <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Not redirecting · {isolatedNodes.length}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {isolatedNodes.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => focusTable(n.label)}
+                      title={n.label}
+                      aria-label={`Filter table by ${n.label}`}
+                      className="inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1 font-mono text-xs transition-colors hover:border-info/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="truncate">{truncate(n.label, 42)}</span>
                       <Badge variant={STATUS_META[n.status].variant} className="shrink-0">
                         {STATUS_META[n.status].label}
                       </Badge>
-                    </div>
+                    </button>
                   ))}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
+          </>
+        ) : isolatedNodes.length > 0 ? (
+          <div className="border-t border-border px-4 py-3">
+            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Not redirecting · {isolatedNodes.length}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {isolatedNodes.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => focusTable(n.label)}
+                  title={n.label}
+                  aria-label={`Filter table by ${n.label}`}
+                  className="inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1 font-mono text-xs transition-colors hover:border-info/40 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="truncate">{truncate(n.label, 42)}</span>
+                  <Badge variant={STATUS_META[n.status].variant} className="shrink-0">
+                    {STATUS_META[n.status].label}
+                  </Badge>
+                </button>
+              ))}
+            </div>
           </div>
+        ) : (
+          <EmptyState
+            icon={GitBranch}
+            title="No relations yet"
+            description="Tracked URLs aren’t redirecting anywhere yet. Run “Check now” to follow their chains."
+            className="border-0"
+          />
         )}
       </div>
 

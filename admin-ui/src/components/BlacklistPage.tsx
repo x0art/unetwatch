@@ -112,7 +112,7 @@ export function BlacklistPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Blacklist</h1>
           <p className="text-sm text-muted-foreground">
-            Concrete URLs and IPs blacklisted from findings. Plain text endpoints for external integrations.
+            Concrete URLs and IPs blacklisted from findings. Entries are stored as bare hosts (no protocol or path).
           </p>
         </div>
       </div>
@@ -124,7 +124,7 @@ export function BlacklistPage() {
           onKeyDown={(e) => {
             if (e.key === "Enter") add()
           }}
-          placeholder="Add base URL"
+          placeholder="Add URL or IP — saved as bare host"
         />
         <Button onClick={add} disabled={adding || !addValue.trim()}>
           Add

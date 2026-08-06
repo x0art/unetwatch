@@ -1,3 +1,5 @@
+import sqlite3
+
 import aiosqlite
 
 from app.config import get_settings
@@ -97,6 +99,34 @@ async def init_db():
             UNIQUE (source_url, target_url)
         )
     """)
+
+    # Migration: normalize blacklist entries to bare FQDN / IPv4 (protocol,
+    # port, path and query stripped) so the plain-text feeds stay clean.
+    # Idempotent — safe to run on every startup. Rows that cannot be parsed
+    # are dropped rather than shipped in a broken feed.
+    from app.services.blacklist import normalize_blacklist_value
+
+    cursor = await db.execute("SELECT id, kind, value FROM blacklist_entries")
+    for row in await cursor.fetchall():
+        try:
+            kind, value = normalize_blacklist_value(row["value"])
+        except ValueError:
+            await db.execute(
+                "DELETE FROM blacklist_entries WHERE id = ?", (row["id"],)
+            )
+            continue
+        if kind == row["kind"] and value == row["value"]:
+            continue
+        try:
+            await db.execute(
+                "UPDATE blacklist_entries SET kind = ?, value = ? WHERE id = ?",
+                (kind, value, row["id"]),
+            )
+        except sqlite3.IntegrityError:
+            # Duplicate of an already-normalized entry — keep the canonical row.
+            await db.execute(
+                "DELETE FROM blacklist_entries WHERE id = ?", (row["id"],)
+            )
 
     # One-time purge of any demo seed rows left over from a prior version.
     # These are the documentation-only IPs used by the old sample seed

@@ -1,10 +1,9 @@
-import ipaddress
-
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from fastapi.responses import PlainTextResponse
 
 from app.database import get_db_conn
 from app.models import BlacklistEntryCreate
+from app.services.blacklist import normalize_blacklist_value
 
 router = APIRouter(prefix="/api/blacklist", tags=["blacklist"])
 
@@ -40,74 +39,18 @@ async def list_blacklist_entries(db=Depends(get_db_conn)):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def add_blacklist_entry(payload: BlacklistEntryCreate, db=Depends(get_db_conn)):
-    value = payload.value.strip()
-    kind = "url"
-    host = ""
+    try:
+        kind, value = normalize_blacklist_value(payload.value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    if value.startswith(("http://", "https://")):
-        host = value.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
-    else:
-        try:
-            ipaddress.IPv4Address(value)
-        except ValueError:
-            if " " in value or "." not in value:
-                raise HTTPException(
-                    status_code=400,
-                    detail="value must be a URL (http://...) or IPv4 address",
-                )
-            host = value
-        else:
-            kind = "ip"
-            host = value
-
-    if not value:
-        raise HTTPException(status_code=400, detail="value must not be empty")
-
-    if " " in value:
-        raise HTTPException(
-            status_code=400,
-            detail="value must be a URL (http://...) or IPv4 address",
-        )
-
-    if kind == "url" and host == "":
-        raise HTTPException(
-            status_code=400,
-            detail="value must be a URL (http://...) or IPv4 address",
-        )
-
-    if kind == "url" and "." not in host:
-        raise HTTPException(
-            status_code=400,
-            detail="value must be a URL (http://...) or IPv4 address",
-        )
-
-
-
-    added: list[str] = []
     cursor = await db.execute(
         "INSERT OR IGNORE INTO blacklist_entries (kind, value, source, finding_id)"
         " VALUES (?, ?, ?, ?)",
         (kind, value, payload.source, payload.finding_id),
     )
-    if cursor.rowcount:
-        added.append(value)
-
-    if kind == "url" and host:
-        try:
-            ipaddress.IPv4Address(host)
-        except ValueError:
-            pass
-        else:
-            cursor = await db.execute(
-                "INSERT OR IGNORE INTO blacklist_entries (kind, value, source, finding_id)"
-                " VALUES (?, ?, ?, ?)",
-                ("ip", host, payload.source, payload.finding_id),
-            )
-            if cursor.rowcount:
-                added.append(host)
-
     await db.commit()
-    return {"added": added}
+    return {"added": [value] if cursor.rowcount else []}
 
 
 @router.delete("/{kind}/{value}", status_code=status.HTTP_204_NO_CONTENT)
