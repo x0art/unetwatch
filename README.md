@@ -16,6 +16,9 @@ patterns through a full REST API.
 - **Authentication** — dashboard login with session tokens, API key or Basic Auth for
   programmatic access. Credentials stored in `.env`.
 - **Poll countdown** — real-time countdown widget showing time until next ES query.
+- **Redirect tracker** — monitor URLs for redirects: an HTTP checker follows redirect
+  chains hop-by-hop, auto-adds every destination to the watch list, records when a URL's
+  target changes over time, and visualizes the relations as a layered graph.
 - **Serve API + UI from one process** — the built frontend is served at `/`.
 
 ## Tech Stack
@@ -84,6 +87,9 @@ optional and have sensible defaults.
 | `ADMIN_USER`            | `admin`                 | Dashboard login username             |
 | `ADMIN_PASS`            | `changeme`              | Dashboard login password             |
 | `API_KEY`               | _(empty)_               | Static API key for programmatic use  |
+| `REDIRECT_CHECK_INTERVAL_MINUTES` | `60`          | How often to re-check tracked URLs   |
+| `REDIRECT_TIMEOUT_SECONDS` | `10`               | HTTP timeout per redirect hop        |
+| `REDIRECT_MAX_HOPS`     | `10`                    | Max hops followed per URL            |
 
 ## API
 
@@ -111,6 +117,27 @@ for list: `?pattern_type=block&search=porn&limit=50&offset=0`.
 | GET    | `/api/monitor/status` | Service & pattern counts      |
 | POST   | `/api/monitor/run` | Trigger a manual ES poll          |
 
+### Redirects
+
+| Method | Path                    | Description                                    |
+|--------|-------------------------|------------------------------------------------|
+| GET    | `/api/redirects/`       | List tracked URLs (search/sort/paginate)       |
+| POST   | `/api/redirects/`       | Add a URL to track                             |
+| DELETE | `/api/redirects/{id}`   | Stop tracking a URL (history is kept)          |
+| POST   | `/api/redirects/check`  | Re-check all tracked URLs — or one, via `{"url": "..."}` |
+| GET    | `/api/redirects/graph`  | Nodes + edges for the relations graph          |
+| GET    | `/api/redirects/{id}/history` | Full redirect history for one URL         |
+
+Field reference:
+
+- `source` — how the URL entered the list: `manual` (typed in the UI/API),
+  `finding` (added from the Findings page), or `auto` (discovered while following a chain).
+- `status` — last check outcome: `unknown`, `ok`, `redirect`, or `error`.
+- Graph edges carry an `active` flag: `true` = the current live redirect,
+  `false` = a historical relation (URL's target changed).
+
+All redirect endpoints require authentication (`X-API-Key`, session token, or Basic Auth).
+
 ### Example
 
 ```bash
@@ -133,13 +160,31 @@ curl -X POST http://localhost:8000/api/patterns/ \
 4. Results are filtered against the **whitelist** and for `action == "ALLOW"`.
 5. Aggregated results (grouped by client IP) are POSTed to the configured webhook.
 
+## How redirect tracking works
+
+1. URLs are added to the watch list manually, from a **Finding**, or are auto-discovered
+   as redirect destinations.
+2. APScheduler runs `check_all()` every `REDIRECT_CHECK_INTERVAL_MINUTES` — the same
+   job is triggered on demand by the "Check now" button.
+3. Each URL is requested with `HEAD` (falling back to `GET` when the server rejects it)
+   and redirects are followed hop-by-hop (bounded by `REDIRECT_MAX_HOPS`, with loop
+   protection).
+4. Every observed hop is stored as a `redirect_edges` row. When a URL's target changes
+   (e.g. url1 used to point at url2, now points at url3), the old edge is marked
+   inactive and kept for history; the new edge becomes active.
+5. Every destination is added to `tracked_urls` (source `auto`) so the whole chain is
+   monitored transitively.
+6. The **Redirects** page lists all tracked URLs (status, current target, history count)
+   and visualizes the relations as a depth-layered graph — sources on the left, each hop
+   in its own column — with a toggle to show historical (dashed) edges.
+
 ## Developing
 
 ### Backend tests
 
 ```bash
 source .venv/bin/activate
-pytest            # 20 tests covering the full CRUD + validation surface
+pytest            # full test suite (CRUD, validation, redirects)
 ```
 
 ### Lint
@@ -169,10 +214,14 @@ elk-monitoring/
 │   ├── main.py            # FastAPI app, lifespan, static serving
 │   ├── routes/
 │   │   ├── patterns.py    # CRUD + bulk endpoints
-│   │   └── monitor.py     # status + manual run
+│   │   ├── monitor.py     # status + manual run
+│   │   ├── findings.py    # findings list + traffic graph
+│   │   ├── blacklist.py   # URL/IP blacklist feeds
+│   │   └── redirects.py   # redirect tracker endpoints
 │   └── services/
 │       ├── seed.py        # Default pattern seeding
-│       └── monitor.py     # Elasticsearch polling logic
+│       ├── monitor.py     # Elasticsearch polling logic
+│       └── redirects.py   # Hop-by-hop redirect checking
 ├── admin-ui/              # React admin console
 ├── tests/                 # pytest suite
 ├── .env.example           # Config template (commit this)
