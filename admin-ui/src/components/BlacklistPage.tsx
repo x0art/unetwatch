@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
-import { Ban, Copy, Link2, RefreshCcw, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Ban, Copy, Link2, RefreshCcw, Search, Trash2, X } from "lucide-react"
 import {
   addBaseUrlToBlacklist,
   deleteBlacklistEntry,
@@ -24,6 +24,9 @@ interface FeedCardProps {
   path: string
   kind: "url" | "ip"
   entries: string[]
+  /** Total entries before filtering (shown when a search is active). */
+  totalEntries?: number
+  searchActive?: boolean
   loading: boolean
   onRefresh: () => void
   onCopy: () => void
@@ -36,6 +39,8 @@ function FeedCard({
   path,
   kind,
   entries,
+  totalEntries,
+  searchActive,
   loading,
   onRefresh,
   onCopy,
@@ -46,7 +51,14 @@ function FeedCard({
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
         <div className="min-w-0">
-          <CardTitle>{title}</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>{title}</CardTitle>
+            {searchActive && typeof totalEntries === "number" && (
+              <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+                {entries.length}/{totalEntries}
+              </span>
+            )}
+          </div>
           <code className="mt-1.5 inline-block rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground">
             {path}
           </code>
@@ -87,6 +99,12 @@ function FeedCard({
               </li>
             ))}
           </ul>
+        ) : searchActive ? (
+          <EmptyState
+            icon={Search}
+            title="No matches"
+            description="Nothing in this feed matches your search."
+          />
         ) : (
           <EmptyState icon={Link2} title="Empty feed" description="No entries yet." />
         )}
@@ -103,6 +121,7 @@ export function BlacklistPage() {
   const [addValue, setAddValue] = useState("")
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [search, setSearch] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<{
     kind: "url" | "ip"
     value: string
@@ -112,6 +131,16 @@ export function BlacklistPage() {
   const splitLines = useCallback((text: string) => {
     return text.split("\n").filter((l) => l.trim().length > 0)
   }, [])
+
+  const q = search.trim().toLowerCase()
+  const filteredUrls = useMemo(
+    () => (q ? urls.filter((u) => u.toLowerCase().includes(q)) : urls),
+    [urls, q],
+  )
+  const filteredIps = useMemo(
+    () => (q ? ips.filter((i) => i.toLowerCase().includes(q)) : ips),
+    [ips, q],
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -209,12 +238,44 @@ export function BlacklistPage() {
         </Button>
       </div>
 
+      {/* Search */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search URLs or IPs..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-72 pl-8 pr-8"
+            aria-label="Search blacklist entries"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        {q && (
+          <span className="text-xs text-muted-foreground">
+            {filteredUrls.length + filteredIps.length} match
+            {filteredUrls.length + filteredIps.length === 1 ? "" : "es"} across both feeds
+          </span>
+        )}
+      </div>
+
       <div className="space-y-4">
         <FeedCard
           title="URL blacklist"
           path="/api/blacklist/urls"
           kind="url"
-          entries={urls}
+          entries={filteredUrls}
+          totalEntries={urls.length}
+          searchActive={!!q}
           loading={loading}
           onRefresh={load}
           onCopy={() => copy(urls.join("\n"), "URLs")}
@@ -225,7 +286,9 @@ export function BlacklistPage() {
           title="IP blacklist"
           path="/api/blacklist/ips"
           kind="ip"
-          entries={ips}
+          entries={filteredIps}
+          totalEntries={ips.length}
+          searchActive={!!q}
           loading={loading}
           onRefresh={load}
           onCopy={() => copy(ips.join("\n"), "IPs")}
