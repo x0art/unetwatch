@@ -116,6 +116,11 @@ def build_logs_query(
         {"query_string": {"query": query_string, "analyze_wildcard": True}}
     ]
     terms = [t for t in re.split(r"\s+", search.strip()) if t] if search else []
+    # Cap the number of ANDed wildcard clauses: each token becomes three
+    # leading-wildcard subqueries (url/client_ip/server_ip), which are
+    # scan-heavy on large indexes. 20 tokens = 60 wildcard clauses, far
+    # below ES's default max_clause_count (1024).
+    terms = terms[:20]
     if terms:
         clauses = [
             "("

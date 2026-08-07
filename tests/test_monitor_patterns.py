@@ -101,6 +101,18 @@ def test_build_logs_query_narrows_matches_when_search_given():
     assert len(plain["query"]["bool"]["must"]) == 1
 
 
+def test_build_logs_query_caps_search_tokens():
+    # 20 tokens max — 60 wildcard clauses stay far below ES's max_clause_count.
+    long_search = " ".join(f"tok{i}" for i in range(40))
+    q = build_logs_query(["*porn*"], 10, 50, search=long_search)
+    must = q["query"]["bool"]["must"]
+    assert len(must) == 2
+    search_qs = must[1]["query_string"]["query"]
+    # Exactly 20 ANDed clauses; token 20+ dropped.
+    assert search_qs.count("(url:*tok") == 20
+    assert "(url:*tok39*" not in search_qs
+
+
 # ── apply_filters resilience ───────────────────────────────────────────────
 
 
