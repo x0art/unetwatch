@@ -8,11 +8,14 @@ import {
   Network,
   Play,
   RefreshCcw,
+  Search,
   SearchX,
   Server,
   Users,
+  X,
   Zap,
 } from "lucide-react"
+import { useDebounce } from "../lib/utils"
 import {
   type QueryDoc,
   type QueryFlow,
@@ -24,6 +27,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  Input,
   Select,
   Skeleton,
   StatCard,
@@ -361,14 +365,68 @@ export function QueryPage() {
       ),
       width: "w-24",
     },
+    {
+      id: "coverage",
+      header: "Lists",
+      enableSorting: false,
+      cell: (d) => (
+        <div className="flex flex-wrap items-center gap-1">
+          {d.blocked_by.length > 0 && (
+            <span
+              title={`Matched block pattern${d.blocked_by.length > 1 ? "s" : ""}: ${d.blocked_by.join(", ")}`}
+            >
+              <Badge variant="warning">
+                block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
+              </Badge>
+            </span>
+          )}
+          {d.whitelisted && (
+            <span title="URL matches a whitelist pattern — excluded from findings">
+              <Badge variant="success">whitelist</Badge>
+            </span>
+          )}
+          {d.blacklisted && (
+            <span
+              title={
+                d.blacklist_source === "ip"
+                  ? "Client IP is on the blacklist"
+                  : "Host is on the blacklist"
+              }
+            >
+              <Badge variant="destructive">
+                blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
+              </Badge>
+            </span>
+          )}
+          {d.blocked_by.length === 0 && !d.whitelisted && !d.blacklisted && (
+            <span className="text-xs text-muted-foreground/50">—</span>
+          )}
+        </div>
+      ),
+      width: "w-44",
+    },
   ]
 
   const [page, setPage] = useState(0)
+  const [docSearch, setDocSearch] = useState("")
+  const debouncedDocSearch = useDebounce(docSearch, 200)
+  const q = debouncedDocSearch.trim().toLowerCase()
 
-  // Reset to the first page whenever a new query result arrives.
+  // Reset to the first page whenever a new query result or search arrives.
   useEffect(() => {
     setPage(0)
-  }, [result])
+  }, [result, debouncedDocSearch])
+
+  // Client-side substring filter across IPs and URLs.
+  const visibleItems = useMemo(() => {
+    const items = result?.items ?? []
+    if (!q) return items
+    return items.filter((d) =>
+      [d.client_ip, d.server_ip, d.url, d.base_url].some((field) =>
+        field.toLowerCase().includes(q),
+      ),
+    )
+  }, [result, q])
 
   const esOffline = result !== null && !result.es_online
 
@@ -379,8 +437,8 @@ export function QueryPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Query</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Live Elasticsearch queries against the block patterns — run, chart and inspect
-            flagged traffic.
+            Live Elasticsearch queries against the block patterns — inspect raw matches,
+            whitelisted and blacklisted coverage.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -519,17 +577,68 @@ export function QueryPage() {
               <div>
                 <h3 className="text-sm font-semibold tracking-tight">Matching documents</h3>
                 <p className="text-xs text-muted-foreground">
-                  {result.items.length.toLocaleString()} of {result.total_requests.toLocaleString()} matching docs shown
+                  {visibleItems.length.toLocaleString()}
+                  {q ? ` of ${result.items.length.toLocaleString()}` : ""} matching doc
+                  {visibleItems.length === 1 ? "" : "s"} ·{" "}
+                  <span className="text-warning">
+                    {visibleItems.filter((d) => d.blocked_by.length > 0).length} blocked
+                  </span>{" "}
+                  ·{" "}
+                  <span className="text-success">
+                    {visibleItems.filter((d) => d.whitelisted).length} whitelisted
+                  </span>{" "}
+                  ·{" "}
+                  <span className="text-destructive">
+                    {visibleItems.filter((d) => d.blacklisted).length} blacklisted
+                  </span>
                 </p>
               </div>
-              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Server className="h-3.5 w-3.5" aria-hidden="true" />
-                {result.es_online ? "Elasticsearch online" : "Elasticsearch unreachable"}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Filter by IP or URL..."
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                    className="w-64 pl-8 pr-8"
+                    aria-label="Filter documents by IP or URL"
+                  />
+                  {docSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setDocSearch("")}
+                      aria-label="Clear document filter"
+                      className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Server className="h-3.5 w-3.5" aria-hidden="true" />
+                  {result.es_online ? "Elasticsearch online" : "Elasticsearch unreachable"}
+                </span>
+              </div>
+            </div>
+
+            {/* Badge legend */}
+            <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Badge variant="warning">block</Badge>
+                matched a block pattern (why it is flagged)
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Badge variant="success">whitelist</Badge>
+                matches a whitelist pattern — excluded from findings
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Badge variant="destructive">blacklist</Badge>
+                host or client IP already blacklisted
               </span>
             </div>
             <DataTable
               columns={columns}
-              data={result.items}
+              data={visibleItems}
               rowId={rowId}
               selectable
               busy={loading}
@@ -547,7 +656,9 @@ export function QueryPage() {
               empty={{
                 icon: SearchX,
                 title: "No matching documents",
-                description: "Try a longer window or trigger a manual run.",
+                description: q
+                  ? "Nothing matches your filter — try a different IP or URL substring."
+                  : "Try a longer window or trigger a manual run.",
               }}
               defaultSortBy="timestamp"
               defaultSortDir="desc"

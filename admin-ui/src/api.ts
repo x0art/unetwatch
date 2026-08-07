@@ -133,6 +133,13 @@ export interface QueryDoc {
   base_url: string
   duration_seconds: number | null
   action: string
+  /** Block patterns this URL matched (the reason it was flagged). */
+  blocked_by: string[]
+  /** URL matches a whitelist pattern (excluded from findings, shown here for triage). */
+  whitelisted: boolean
+  /** Host or client IP is already on the blacklist. */
+  blacklisted: boolean
+  blacklist_source: "url" | "ip" | null
 }
 
 export interface QueryTopUrl {

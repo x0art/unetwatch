@@ -177,18 +177,22 @@ def _safe_number(value) -> float | None:
         return None
 
 
-def apply_filters(df: pd.DataFrame, whitelist_regex: str) -> pd.DataFrame:
+def apply_filters(
+    df: pd.DataFrame, whitelist_regex: str, *, exclude_whitelist: bool = True
+) -> pd.DataFrame:
     """Apply whitelist + ALLOW filters and derive base_url.
 
     Missing columns are tolerated (filled with empty strings) so a single odd
-    document can never crash a whole poll.
+    document can never crash a whole poll. The Query page runs with
+    ``exclude_whitelist=False`` so whitelisted matches are still surfaced
+    (badged in the UI) instead of silently dropped.
     """
     df = df.copy()
     for col in ("url", "client_ip", "action", "@timestamp"):
         if col not in df.columns:
             df[col] = ""
     df["base_url"] = df["url"].astype(str).apply(_extract_base_url)
-    if whitelist_regex:
+    if whitelist_regex and exclude_whitelist:
         df = df[~df["url"].astype(str).str.contains(whitelist_regex, case=False)]
     return df[df["action"] == "ALLOW"]
 
@@ -378,20 +382,60 @@ def _build_flow(df: pd.DataFrame) -> dict:
     return {"nodes": nodes, "links": links}
 
 
-def _build_items(df: pd.DataFrame, limit: int) -> list[dict]:
-    """Rows for the Query page table (capped to ``limit``)."""
+def _build_items(
+    df: pd.DataFrame,
+    limit: int,
+    *,
+    block_patterns: list[str],
+    whitelist_regex: str,
+    blacklist_urls: set[str],
+    blacklist_ips: set[str],
+) -> list[dict]:
+    """Rows for the Query page table (capped to ``limit``).
+
+    Each row is annotated for the UI badges: which block pattern(s) matched
+    (``blocked_by``), whether the URL matches a whitelist pattern
+    (``whitelisted``), and whether its host or client IP is already on the
+    blacklist (``blacklisted`` / ``blacklist_source``).
+    """
     now = datetime.now(UTC).isoformat()
+    block_matchers = [
+        (pattern, re.compile(_glob_to_regex(pattern), re.IGNORECASE))
+        for pattern in block_patterns
+        if pattern.strip()
+    ]
+    whitelist_matcher = (
+        re.compile(whitelist_regex, re.IGNORECASE) if whitelist_regex else None
+    )
+
     items: list[dict] = []
     for _, row in df.head(limit).iterrows():
+        url = str(row.get("url") or "")
+        base_url = str(row.get("base_url") or "")
+        client_ip = str(row.get("client_ip") or "")
+
+        blocked_by = [pattern for pattern, rx in block_matchers if rx.search(url)]
+        whitelisted = bool(whitelist_matcher and whitelist_matcher.search(url))
+
+        blacklisted = base_url in blacklist_urls
+        blacklist_source = "url" if blacklisted else None
+        if not blacklisted and client_ip in blacklist_ips:
+            blacklisted = True
+            blacklist_source = "ip"
+
         items.append(
             {
                 "timestamp": _normalize_timestamp(row.get("@timestamp"), now),
-                "client_ip": str(row.get("client_ip") or ""),
+                "client_ip": client_ip,
                 "server_ip": str(row.get("server_ip") or ""),
-                "url": str(row.get("url") or ""),
-                "base_url": str(row.get("base_url") or ""),
+                "url": url,
+                "base_url": base_url,
                 "duration_seconds": _safe_number(row.get("duration_seconds")),
                 "action": str(row.get("action") or ""),
+                "blocked_by": blocked_by,
+                "whitelisted": whitelisted,
+                "blacklisted": blacklisted,
+                "blacklist_source": blacklist_source,
             }
         )
     return items
@@ -413,8 +457,12 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
     try:
         block_patterns = await get_block_patterns(db)
         whitelist_patterns = await get_whitelist_patterns(db)
+        bl_cursor = await db.execute("SELECT kind, value FROM blacklist_entries")
+        bl_rows = await bl_cursor.fetchall()
     finally:
         await db.close()
+    blacklist_urls = {r["value"] for r in bl_rows if r["kind"] == "url"}
+    blacklist_ips = {r["value"] for r in bl_rows if r["kind"] == "ip"}
 
     result = {
         "window_minutes": minutes,
@@ -456,7 +504,13 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
         if not hits:
             return result
 
-        df = apply_filters(pd.DataFrame([h["_source"] for h in hits]), whitelist_regex)
+        # Raw matches (whitelisted docs included, badged in the UI) so the
+        # table shows everything the query actually returned.
+        df = apply_filters(
+            pd.DataFrame([h["_source"] for h in hits]),
+            whitelist_regex,
+            exclude_whitelist=False,
+        )
         if df.empty:
             return result
         log["filtered"] = len(df)
@@ -474,7 +528,14 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
         ]
         result["timeline"] = _build_timeline(df, minutes)
         result["flow"] = _build_flow(df)
-        result["items"] = _build_items(df, limit)
+        result["items"] = _build_items(
+            df,
+            limit,
+            block_patterns=block_patterns,
+            whitelist_regex=whitelist_regex,
+            blacklist_urls=blacklist_urls,
+            blacklist_ips=blacklist_ips,
+        )
     except Exception as e:
         log["error"] = str(e)
         result["error"] = str(e)

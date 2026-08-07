@@ -192,6 +192,96 @@ async def test_query_run_records_log_and_degrades_gracefully(client, monkeypatch
     assert logs["items"][0]["es_online"] == 0
 
 
+async def test_query_run_annotates_lists(client, monkeypatch):
+    """Query items carry blocked_by / whitelisted / blacklisted badges."""
+    from app.services import monitor as svc
+
+    assert (
+        client.post(
+            "/api/patterns/",
+            json={"pattern": "*flagged.example*", "pattern_type": "block"},
+        ).status_code
+        in (200, 201)
+    )
+    assert (
+        client.post(
+            "/api/patterns/",
+            json={"pattern": "*allowed.example*", "pattern_type": "whitelist"},
+        ).status_code
+        in (200, 201)
+    )
+    resp = client.post("/api/blacklist/", json={"value": "blocked.example"})
+    assert resp.status_code in (200, 201)
+    resp = client.post("/api/blacklist/", json={"value": "9.9.9.9"})
+    assert resp.status_code in (200, 201)
+
+    docs = [
+        {
+            "@timestamp": "2026-08-07T10:00:00Z",
+            "client_ip": "10.0.0.1",
+            "server_ip": "10.9.9.9",
+            "url": "http://flagged.example/a",
+            "action": "ALLOW",
+        },
+        {
+            "@timestamp": "2026-08-07T10:00:01Z",
+            "client_ip": "10.0.0.2",
+            "server_ip": "10.9.9.9",
+            "url": "http://allowed.example/b",
+            "action": "ALLOW",
+        },
+        {
+            "@timestamp": "2026-08-07T10:00:02Z",
+            "client_ip": "10.0.0.3",
+            "server_ip": "10.9.9.9",
+            "url": "http://blocked.example/c",
+            "action": "ALLOW",
+        },
+        {
+            "@timestamp": "2026-08-07T10:00:03Z",
+            "client_ip": "9.9.9.9",
+            "server_ip": "10.9.9.9",
+            "url": "http://flagged.example/d",
+            "action": "ALLOW",
+        },
+    ]
+
+    class FakeES:
+        async def search(self, **kwargs):
+            return {"hits": {"hits": [{"_source": d} for d in docs]}}
+
+        async def close(self):
+            pass
+
+    def fake_build(*args, **kwargs):
+        return FakeES()
+
+    monkeypatch.setattr(svc, "build_es_client", fake_build)
+
+    resp = client.get("/api/query/run?minutes=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_requests"] == 4  # raw matches, whitelisted docs included
+
+    by_url = {i["url"]: i for i in body["items"]}
+
+    # Blocked by a block pattern.
+    assert by_url["http://flagged.example/a"]["blocked_by"] == ["*flagged.example*"]
+    assert by_url["http://flagged.example/a"]["whitelisted"] is False
+    assert by_url["http://flagged.example/a"]["blacklisted"] is False
+
+    # Whitelist pattern match is surfaced (not filtered out) and badged.
+    assert by_url["http://allowed.example/b"]["whitelisted"] is True
+
+    # Host on the URL blacklist.
+    assert by_url["http://blocked.example/c"]["blacklisted"] is True
+    assert by_url["http://blocked.example/c"]["blacklist_source"] == "url"
+
+    # Client IP on the IP blacklist.
+    assert by_url["http://flagged.example/d"]["blacklisted"] is True
+    assert by_url["http://flagged.example/d"]["blacklist_source"] == "ip"
+
+
 async def test_fetch_logs_records_query_and_webhook(client, monkeypatch):
     """A poll run records the ES query DSL, matches and webhook status."""
     from app.database import get_db
