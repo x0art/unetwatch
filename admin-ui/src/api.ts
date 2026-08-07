@@ -442,7 +442,7 @@ export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
 /* ── Blacklist plain-text feeds (for external integrations) ──────── */
 
 export async function getBlacklistUrls(): Promise<string> {
-  const res = await fetch(`${API}/blacklist/urls`, {
+  const res = await fetch(`${API}/blacklist/urls.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
   })
   if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
@@ -451,7 +451,7 @@ export async function getBlacklistUrls(): Promise<string> {
 }
 
 export async function getBlacklistIps(): Promise<string> {
-  const res = await fetch(`${API}/blacklist/ips`, {
+  const res = await fetch(`${API}/blacklist/ips.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
   })
   if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }

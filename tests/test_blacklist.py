@@ -78,7 +78,7 @@ async def test_blacklist_urls_endpoint_returns_urls_only(client):
     finally:
         await db.close()
 
-    resp = client.get("/api/blacklist/urls")
+    resp = client.get("/api/blacklist/urls.txt")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     lines = resp.text.split("\n")
@@ -102,7 +102,7 @@ async def test_blacklist_ips_endpoint_returns_ips_only(client):
     finally:
         await db.close()
 
-    resp = client.get("/api/blacklist/ips")
+    resp = client.get("/api/blacklist/ips.txt")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     lines = resp.text.split("\n")
@@ -177,20 +177,20 @@ async def test_blacklist_migration_normalizes_legacy_entries(db_path):
 
 def test_blacklist_delete_entry(client):
     client.post("/api/blacklist/", json={"value": "http://del.example/x"})
-    assert "del.example" in client.get("/api/blacklist/urls").text
+    assert "del.example" in client.get("/api/blacklist/urls.txt").text
 
     resp = client.delete("/api/blacklist/url/del.example")
     assert resp.status_code == 204
-    assert "del.example" not in client.get("/api/blacklist/urls").text
+    assert "del.example" not in client.get("/api/blacklist/urls.txt").text
 
 
 def test_blacklist_delete_ip_entry(client):
     client.post("/api/blacklist/", json={"value": "5.6.7.8"})
-    assert "5.6.7.8" in client.get("/api/blacklist/ips").text
+    assert "5.6.7.8" in client.get("/api/blacklist/ips.txt").text
 
     resp = client.delete("/api/blacklist/ip/5.6.7.8")
     assert resp.status_code == 204
-    assert "5.6.7.8" not in client.get("/api/blacklist/ips").text
+    assert "5.6.7.8" not in client.get("/api/blacklist/ips.txt").text
 
 
 def test_blacklist_delete_missing_returns_404(client):
@@ -209,7 +209,7 @@ def test_blacklist_requires_auth(db_path):
 
     with TestClient(app, raise_server_exceptions=False) as c:
         c.headers.clear()
-        r = c.get("/api/blacklist/urls")
+        r = c.get("/api/blacklist/urls.txt")
         assert r.status_code == 401
-        r2 = c.get("/api/blacklist/ips")
+        r2 = c.get("/api/blacklist/ips.txt")
         assert r2.status_code == 401

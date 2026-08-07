@@ -271,7 +271,7 @@ export function BlacklistPage() {
       <div className="space-y-4">
         <FeedCard
           title="URL blacklist"
-          path="/api/blacklist/urls"
+          path="/api/blacklist/urls.txt"
           kind="url"
           entries={filteredUrls}
           totalEntries={urls.length}
@@ -284,7 +284,7 @@ export function BlacklistPage() {
         />
         <FeedCard
           title="IP blacklist"
-          path="/api/blacklist/ips"
+          path="/api/blacklist/ips.txt"
           kind="ip"
           entries={filteredIps}
           totalEntries={ips.length}

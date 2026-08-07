@@ -16,13 +16,13 @@ async def _list_values(db, kind: str) -> list[str]:
     return [row[0] for row in await cursor.fetchall()]
 
 
-@router.get("/urls", response_class=PlainTextResponse)
+@router.get("/urls.txt", response_class=PlainTextResponse)
 async def list_blacklist_urls(db=Depends(get_db_conn)):
     body = "\n".join(await _list_values(db, "url"))
     return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
 
 
-@router.get("/ips", response_class=PlainTextResponse)
+@router.get("/ips.txt", response_class=PlainTextResponse)
 async def list_blacklist_ips(db=Depends(get_db_conn)):
     body = "\n".join(await _list_values(db, "ip"))
     return PlainTextResponse(body, media_type="text/plain; charset=utf-8")
