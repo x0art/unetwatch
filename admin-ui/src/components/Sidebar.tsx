@@ -84,15 +84,35 @@ export interface NavItem {
   icon: LucideIcon
 }
 
-export const DEFAULT_NAV: NavItem[] = [
-  { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { view: "query", label: "Query", icon: FileSearch },
-  { view: "patterns", label: "Patterns", icon: ListFilter },
-  { view: "findings", label: "Findings", icon: Radar },
-  { view: "graph", label: "Traffic", icon: Network },
-  { view: "blacklist", label: "Blacklist", icon: Ban },
-  { view: "redirects", label: "Redirects", icon: GitBranch },
-  { view: "logs", label: "Logs", icon: ScrollText },
+export interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+/* Sidebar groups: Monitor (live views), Management (config + data), and
+ * System (audit). Ordering here is the display order. */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "Monitor",
+    items: [
+      { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { view: "graph", label: "Traffic", icon: Network },
+      { view: "query", label: "Query", icon: FileSearch },
+    ],
+  },
+  {
+    label: "Management",
+    items: [
+      { view: "patterns", label: "Patterns", icon: ListFilter },
+      { view: "findings", label: "Findings", icon: Radar },
+      { view: "redirects", label: "Redirects", icon: GitBranch },
+      { view: "blacklist", label: "Blacklist", icon: Ban },
+    ],
+  },
+  {
+    label: "System",
+    items: [{ view: "logs", label: "Logs", icon: ScrollText }],
+  },
 ]
 
 /* ════════════════════════════════════════════════════════════════
@@ -129,30 +149,37 @@ function SidebarContent({
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label="Primary">
-        {DEFAULT_NAV.map((item) => {
-          const Icon = item.icon
-          const active = current === item.view
-          return (
-            <button
-              key={item.view}
-              type="button"
-              onClick={() => onNavigate(item.view)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active
-                  ? "bg-sidebar-active/15 text-sidebar-active"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-hover hover:text-sidebar-foreground",
-              )}
-            >
-              <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-              <span className="truncate">{item.label}</span>
-            </button>
-          )
-        })}
+      {/* Nav (grouped) */}
+      <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4" aria-label="Primary">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="space-y-1">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-sidebar-muted">
+              {group.label}
+            </p>
+            {group.items.map((item) => {
+              const Icon = item.icon
+              const active = current === item.view
+              return (
+                <button
+                  key={item.view}
+                  type="button"
+                  onClick={() => onNavigate(item.view)}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    active
+                      ? "bg-sidebar-active/15 text-sidebar-active"
+                      : "text-sidebar-foreground/80 hover:bg-sidebar-hover hover:text-sidebar-foreground",
+                  )}
+                >
+                  <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                  <span className="truncate">{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* Footer: theme + user */}

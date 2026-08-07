@@ -34,7 +34,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { ClusterFlow, type ClusterFlowGroup, type ClusterFlowSource } from "./ClusterFlow"
+import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
@@ -58,13 +58,6 @@ const SOURCE_META: Record<
   auto: { label: "Auto", variant: "default" },
 }
 
-const SOURCE_TONE: Record<TrackedUrl["status"], ClusterFlowSource["tone"]> = {
-  unknown: "muted",
-  ok: "success",
-  redirect: "warning",
-  error: "danger",
-}
-
 function formatWhen(ts: string | null) {
   if (!ts) return "—"
   const date = new Date(ts)
@@ -72,65 +65,34 @@ function formatWhen(ts: string | null) {
   return date.toLocaleString()
 }
 
-/* ── Flow: cluster sources by their final URL ─────────────────────────
- *
- *   url1 ->|
- *   url2 ->|  final_url1
- *   url3 ->|
- *
- * Every tracked URL that redirects is grouped under the destination it
- * currently lands on. URLs that don't redirect (direct hits, errors) are
- * shown separately as chips below the flow.
- */
+/* URLs that don't redirect (direct hits, errors) — shown as chips below
+ * the flow. */
+function directNodes(graph: RedirectGraph | null): RedirectGraph["nodes"] {
+  if (!graph) return []
+  return graph.nodes
+    .filter((n) => !(n.final_url && n.final_url !== n.id))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
 
-type GraphNode = RedirectGraph["nodes"][number]
+/* Sankey input: every tracked URL that currently lands elsewhere links to
+ * its final destination; the destination nodes carry the flow totals. */
+function toSankey(graph: RedirectGraph | null): {
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+} {
+  if (!graph) return { nodes: [], links: [] }
 
-function buildClusters(graph: RedirectGraph | null) {
-  if (!graph) {
-    return { clusters: [] as ClusterFlowGroup[], direct: [] as GraphNode[] }
-  }
-
-  const groups = new Map<string, ClusterFlowGroup>()
-  const byFinal = new Map<string, GraphNode[]>()
-  const direct: GraphNode[] = []
-
-  for (const node of graph.nodes) {
-    if (node.final_url && node.final_url !== node.id) {
-      const list = byFinal.get(node.final_url) ?? []
-      list.push(node)
-      byFinal.set(node.final_url, list)
-    } else {
-      direct.push(node)
+  const nodes: SankeyNode[] = graph.nodes.map((n) => ({ id: n.id, name: n.label }))
+  const links: SankeyLink[] = []
+  for (const n of graph.nodes) {
+    if (n.final_url && n.final_url !== n.id) {
+      if (!nodes.some((x) => x.id === n.final_url)) {
+        nodes.push({ id: n.final_url, name: n.final_url })
+      }
+      links.push({ source: n.id, target: n.final_url, value: 1 })
     }
   }
-
-  for (const [finalUrl, nodes] of byFinal) {
-    const sorted = [...nodes].sort((a, b) => a.label.localeCompare(b.label))
-    const hasError = sorted.some((n) => n.status === "error")
-    const tone = hasError ? "danger" : "warning"
-    groups.set(finalUrl, {
-      id: finalUrl,
-      title: finalUrl,
-      tone,
-      badge: (
-        <Badge variant={hasError ? "destructive" : "warning"}>
-          {sorted.length} URL{sorted.length === 1 ? "" : "s"}
-        </Badge>
-      ),
-      subtitle: hasError ? "Some sources are failing to resolve" : "All sources land here",
-      sources: sorted.map((n) => ({
-        id: n.id,
-        label: n.label,
-        title: `${n.label} — ${STATUS_META[n.status].label}`,
-        tone: SOURCE_TONE[n.status],
-      })),
-    })
-  }
-
-  return {
-    clusters: [...groups.values()].sort((a, b) => a.title.localeCompare(b.title)),
-    direct: direct.sort((a, b) => a.label.localeCompare(b.label)),
-  }
+  return { nodes, links }
 }
 
 /* ── Page ───────────────────────────────────────────────────────────── */
@@ -397,7 +359,8 @@ export function RedirectsPage() {
 
   /* ── Derived data ────────────────────────────────────────────────── */
 
-  const { clusters, direct } = useMemo(() => buildClusters(graph), [graph])
+  const direct = useMemo(() => directNodes(graph), [graph])
+  const redirectSankey = useMemo(() => toSankey(graph), [graph])
 
   const stats = useMemo(() => {
     const nodes = graph?.nodes ?? []
@@ -599,7 +562,7 @@ export function RedirectsPage() {
           </div>
           {graph && !graphEmpty && (
             <span className="text-xs text-muted-foreground">
-              {clusters.length} destination{clusters.length === 1 ? "" : "s"}
+              {redirectSankey.links.length} flow{redirectSankey.links.length === 1 ? "" : "s"}
             </span>
           )}
         </div>
@@ -617,10 +580,15 @@ export function RedirectsPage() {
           />
         ) : (
           <div className="p-4 sm:p-6">
-            {clusters.length > 0 ? (
-              <ClusterFlow
-                groups={clusters}
-                onSourceClick={(_, source) => focusTable(source.label)}
+            {redirectSankey && redirectSankey.links.length > 0 ? (
+              <SankeyDiagram
+                nodes={redirectSankey.nodes}
+                links={redirectSankey.links}
+                layerColors={{
+                  0: "var(--color-warning)",
+                  1: "var(--color-success)",
+                }}
+                ariaLabel="Redirect source to final URL flow"
               />
             ) : (
               <p className="py-8 text-center text-sm text-muted-foreground">

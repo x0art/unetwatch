@@ -310,6 +310,12 @@ async def fetch_logs(minutes: int = 10):
         df = apply_filters(pd.DataFrame([h["_source"] for h in hits]), whitelist_regex)
         log["filtered"] = len(df)
 
+        # Surface what this run actually flagged — top matched URLs and the
+        # block patterns they hit (stored so the Logs page can show them).
+        if not df.empty:
+            log["top_urls"] = df["url"].astype(str).value_counts().head(10).index.tolist()
+            log["matched_patterns"] = list(block_patterns)
+
         if df.empty:
             log["webhook_reason"] = (
                 f"{len(hits)} matches, all excluded by whitelist/ALLOW filter — "
@@ -568,6 +574,9 @@ async def run_query(
         log["filtered"] = len(df)
         if df.empty:
             return result
+
+        log["top_urls"] = df["url"].astype(str).value_counts().head(10).index.tolist()
+        log["matched_patterns"] = list(block_patterns)
 
         result["total_requests"] = int(len(df))
         result["unique_ips"] = int(df["client_ip"].nunique())

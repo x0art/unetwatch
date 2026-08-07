@@ -138,7 +138,7 @@ function AppRoutes() {
       {view === "query" && <QueryPage />}
       {view === "patterns" && <PatternTable />}
       {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
-      {view === "graph" && <GraphPage onNavigate={handleNavigate} />}
+      {view === "graph" && <GraphPage />}
       {view === "blacklist" && <BlacklistPage />}
       {view === "redirects" && <RedirectsPage />}
       {view === "logs" && <LogsPage />}

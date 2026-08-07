@@ -285,6 +285,13 @@ async def test_query_run_annotates_lists(client, monkeypatch):
     assert by_url["http://flagged.example/d"]["blacklisted"] is True
     assert by_url["http://flagged.example/d"]["blacklist_source"] == "ip"
 
+    # The run log records what it flagged: top URLs + matched patterns.
+    logs = client.get("/api/logs/?kind=query").json()
+    assert logs["total"] == 1
+    row = logs["items"][0]
+    assert "http://flagged.example/a" in row["top_urls"]
+    assert "*flagged.example*" in row["matched_patterns"]
+
 
 async def test_fetch_logs_records_query_and_webhook(client, monkeypatch):
     """A poll run records the ES query DSL, matches and webhook status."""

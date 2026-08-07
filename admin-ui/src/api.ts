@@ -226,12 +226,29 @@ export interface MonitorLog {
   webhook_status: number | null
   webhook_error: string | null
   webhook_reason: string | null
+  /** Top flagged URLs (JSON string from the backend; parsed by listLogs). */
+  top_urls: string | null
+  /** Block patterns that matched (JSON string; parsed by listLogs). */
+  matched_patterns: string | null
   error: string | null
+  /** Parsed convenience views — present after listLogs. */
+  topUrls?: string[]
+  matchedPatterns?: string[]
 }
 
 export interface LogsResponse {
   items: MonitorLog[]
   total: number
+}
+
+function parseJsonList(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const v = JSON.parse(raw)
+    return Array.isArray(v) ? v.map(String) : []
+  } catch {
+    return []
+  }
 }
 
 export async function listLogs(params?: {
@@ -249,7 +266,15 @@ export async function listLogs(params?: {
   if (params?.offset) qs.set("offset", String(params.offset))
   if (params?.sort_by) qs.set("sort_by", params.sort_by)
   if (params?.sort_order) qs.set("sort_order", params.sort_order)
-  return request(`/logs/?${qs}`)
+  const data = await request<LogsResponse>(`/logs/?${qs}`)
+  return {
+    ...data,
+    items: data.items.map((l) => ({
+      ...l,
+      topUrls: parseJsonList(l.top_urls),
+      matchedPatterns: parseJsonList(l.matched_patterns),
+    })),
+  }
 }
 
 export async function deleteLog(id: number): Promise<void> {

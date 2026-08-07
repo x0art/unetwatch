@@ -5,6 +5,7 @@ import {
   Eraser,
   Eye,
   FileJson,
+  Link2,
   RefreshCcw,
   ScrollText,
   Send,
@@ -195,7 +196,7 @@ export function LogsPage() {
     },
     {
       id: "kind",
-      header: "Kind",
+      header: "Type",
       accessor: (l) => l.kind,
       defaultSortDir: "asc",
       cell: (l) => (
@@ -219,11 +220,11 @@ export function LogsPage() {
     },
     {
       id: "matches",
-      header: "Matches",
+      header: "Hits",
       accessor: (l) => l.matches,
       cell: (l) => <span className="tabular-nums">{l.matches.toLocaleString()}</span>,
       align: "right",
-      width: "w-24",
+      width: "w-20",
     },
     {
       id: "stored",
@@ -236,6 +237,30 @@ export function LogsPage() {
       ),
       align: "right",
       width: "w-20",
+    },
+    {
+      id: "flagged",
+      header: "Flagged URLs",
+      accessor: (l) => (l.topUrls?.length ?? 0),
+      cell: (l) => {
+        const urls = l.topUrls ?? []
+        if (urls.length === 0) {
+          return <span className="text-xs text-muted-foreground/50">—</span>
+        }
+        return (
+          <span className="flex max-w-[280px] items-center gap-1.5">
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={urls.join("\n")}>
+              {urls[0]}
+            </span>
+            {urls.length > 1 && (
+              <Badge variant="secondary" className="shrink-0">
+                +{urls.length - 1}
+              </Badge>
+            )}
+          </span>
+        )
+      },
+      width: "w-64",
     },
     {
       id: "webhook_status",
@@ -442,6 +467,31 @@ export function LogsPage() {
                 <p className="mt-0.5 font-semibold tabular-nums">{detail.stored.toLocaleString()}</p>
               </div>
             </div>
+
+            {/* URL matches */}
+            {(detail.topUrls?.length ?? 0) > 0 && (
+              <div>
+                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  URL matches
+                </div>
+                <div className="space-y-1 rounded-md border border-border bg-muted/30 p-3">
+                  {detail.topUrls?.map((url) => (
+                    <p key={url} className="truncate font-mono text-[11px] leading-relaxed text-foreground/90" title={url}>
+                      {url}
+                    </p>
+                  ))}
+                </div>
+                {detail.matchedPatterns && detail.matchedPatterns.length > 0 && (
+                  <p className="mt-1.5 text-[11px] text-muted-foreground">
+                    Matched pattern{detail.matchedPatterns.length === 1 ? "" : "s"}:{" "}
+                    <span className="font-mono text-[10px]">
+                      {detail.matchedPatterns.join(", ")}
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* ES query */}
             <div>

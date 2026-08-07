@@ -24,12 +24,20 @@ async def write_log(entry: dict) -> None:
             except (TypeError, ValueError):
                 query_json = str(entry["es_query"])
 
+        def _json_list(value) -> str | None:
+            if value is None:
+                return None
+            try:
+                return json.dumps(list(value))
+            except (TypeError, ValueError):
+                return None
+
         await db.execute(
             "INSERT INTO monitor_logs"
             " (kind, started_at, duration_ms, minutes, es_online, matches, filtered,"
             "  stored, es_query, webhook_url, webhook_status, webhook_error,"
-            "  webhook_reason, error)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  webhook_reason, top_urls, matched_patterns, error)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.get("kind", "poll"),
                 entry.get("started_at") or datetime.now(UTC).isoformat(),
@@ -44,6 +52,8 @@ async def write_log(entry: dict) -> None:
                 entry.get("webhook_status"),
                 entry.get("webhook_error"),
                 entry.get("webhook_reason"),
+                _json_list(entry.get("top_urls")),
+                _json_list(entry.get("matched_patterns")),
                 entry.get("error"),
             ),
         )
@@ -122,5 +132,7 @@ def default_log(kind: str, minutes: int | None) -> dict:
         "webhook_status": None,
         "webhook_error": None,
         "webhook_reason": None,
+        "top_urls": [],
+        "matched_patterns": [],
         "error": None,
     }

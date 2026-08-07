@@ -34,7 +34,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
-import { ClusterFlow } from "./ClusterFlow"
+import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 
 const PAGE_SIZE = 25
 
@@ -204,40 +204,20 @@ function RankBars({ rows }: { rows: { label: string; count: number }[] }) {
   )
 }
 
-/* ── Flow: cluster client IPs by base_url ───────────────────────────── */
+/* ── Flow: client IPs → destination host sankey ──────────────────────── */
 
-function buildFlowGroups(flow: QueryFlow) {
-  const ipById = new Map(flow.nodes.filter((n) => n.kind === "ip").map((n) => [n.id, n]))
-  const baseNodes = flow.nodes.filter((n) => n.kind === "base")
-  const totals = new Map<string, number>()
-  for (const l of flow.links) totals.set(l.target, (totals.get(l.target) ?? 0) + l.count)
-
-  return [...baseNodes]
-    .sort((a, b) => (totals.get(b.id) ?? 0) - (totals.get(a.id) ?? 0))
-    .slice(0, 12)
-    .map((base) => {
-      const links = flow.links
-        .filter((l) => l.target === base.id)
-        .sort((a, b) => b.count - a.count)
-      const total = links.reduce((n, l) => n + l.count, 0)
-      return {
-        id: base.id,
-        title: base.label,
-        tone: "info" as const,
-        badge: (
-          <Badge variant="secondary">
-            {links.length} IP{links.length === 1 ? "" : "s"}
-          </Badge>
-        ),
-        subtitle: `${total.toLocaleString()} request${total === 1 ? "" : "s"} · ${new Set(links.map((l) => l.source)).size} source${links.length === 1 ? "" : "s"}`,
-        sources: links.map((l) => ({
-          id: l.source,
-          label: ipById.get(l.source)?.label ?? l.source,
-          meta: l.count.toLocaleString(),
-          title: `${ipById.get(l.source)?.label ?? l.source} — ${l.count.toLocaleString()} requests`,
-        })),
-      }
-    })
+function toSankey(flow: QueryFlow): { nodes: SankeyNode[]; links: SankeyLink[] } {
+  const nodes: SankeyNode[] = flow.nodes.map((n) => ({
+    id: n.id,
+    name: n.label,
+    layer: n.kind === "ip" ? 0 : 1,
+  }))
+  const links: SankeyLink[] = flow.links.map((l) => ({
+    source: l.source,
+    target: l.target,
+    value: Math.max(1, l.count),
+  }))
+  return { nodes, links }
 }
 
 /* ── Page ───────────────────────────────────────────────────────────── */
@@ -283,10 +263,7 @@ export function QueryPage() {
 
   const handleRun = () => fetchQuery()
 
-  const flowGroups = useMemo(
-    () => (result?.flow ? buildFlowGroups(result.flow) : []),
-    [result],
-  )
+  const flowSankey = useMemo(() => (result?.flow ? toSankey(result.flow) : null), [result])
 
   const rowId = useCallback((d: QueryDoc) => `${d.timestamp}|${d.client_ip}|${d.url}`, [])
 
@@ -608,8 +585,16 @@ export function QueryPage() {
               <p className="py-10 text-center text-sm text-muted-foreground">
                 Flow unavailable — Elasticsearch unreachable.
               </p>
-            ) : flowGroups.length > 0 ? (
-              <ClusterFlow groups={flowGroups} />
+            ) : flowSankey && flowSankey.links.length > 0 ? (
+              <SankeyDiagram
+                nodes={flowSankey.nodes}
+                links={flowSankey.links}
+                layerColors={{
+                  0: "var(--color-info)",
+                  1: "var(--color-danger)",
+                }}
+                ariaLabel="Client IP to destination host flow"
+              />
             ) : (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 No traffic in this window to visualize
