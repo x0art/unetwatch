@@ -16,8 +16,10 @@ import { useTheme } from "./Sidebar"
  * a small flow never renders a huge empty box, and the node layers are
  * spread across the available width (no overlap).
  *
- * App colors are oklch() CSS vars, which ECharts can't consume, so the
- * resolved palette is computed at render time from the live CSS values.
+ * App colors are oklch() CSS vars, which ECharts' canvas renderer can't
+ * parse. They are converted to sRGB here with the standard OKLab → sRGB
+ * math (Björn Ottosson, as used by CSS Color 4) — pure functions, no DOM
+ * access, so it's safe to call from render.
  *
  * Chart lifecycle — the two-effect split matters:
  *   • A mount effect creates the ECharts instance ONCE and wires resize
@@ -44,10 +46,8 @@ export interface SankeyLink {
   value: number
 }
 
-/* Resolve a `var(--token)` to the live computed color. oklch() values
- * aren't parseable by ECharts, so map the app's semantic tokens to fixed
- * hex equivalents (dark-theme values; the diagram re-renders on theme
- * flip and the fallback keeps it legible in both modes). */
+/* Static fallback palette (dark theme). Used when the live CSS token is
+ * not a parseable oklch()/color(). Kept legible on dark surfaces. */
 const FALLBACK: Record<string, string> = {
   "--color-info": "#5b8def",
   "--color-warning": "#e8a33d",
@@ -60,12 +60,68 @@ const FALLBACK: Record<string, string> = {
   "--color-border": "#3f3f4d",
 }
 
+/* ── oklch() → sRGB ─────────────────────────────────────────────
+ * ECharts' canvas renderer (zrender) cannot parse oklch()/color()
+ * strings, and browsers serialize computed colors as oklch() in modern
+ * engines — so a getComputedStyle-based "probe" returns oklch back and
+ * the chart fails to render. Convert numerically instead.
+ *
+ * The math is the standard OKLab → sRGB (Björn Ottosson, CSS Color 4):
+ *   OKLab → LMS (cube-root encoded) → cube → linear LMS → linear sRGB
+ *   → gamma-encoded sRGB. The cube step is critical: without it the
+ *   values stay in the compressed cube-root space and dark colors come
+ *   out far too light.
+ * ────────────────────────────────────────────────────────────────── */
+
+function parseOklch(input: string): [number, number, number] | null {
+  const m = input.match(/^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
+  if (!m) return null
+  return [Number(m[1]), Number(m[2]), Number(m[3])]
+}
+
+function oklchToSrgb(L: number, C: number, Hdeg: number): string {
+  const H = (Hdeg * Math.PI) / 180
+  const a = C * Math.cos(H)
+  const b = C * Math.sin(H)
+
+  // OKLab → LMS (cube-root encoded)
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b
+
+  // Cube → linear LMS
+  const l = l_ ** 3
+  const m = m_ ** 3
+  const s = s_ ** 3
+
+  // linear LMS → linear sRGB
+  const r_lin = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+  const g_lin = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+  const b_lin = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s
+
+  // linear → gamma sRGB
+  const lin = (c: number) => (c > 0.0031308 ? 1.055 * c ** (1 / 2.4) - 0.055 : 12.92 * c)
+  const clamp = (v: number) => Math.max(0, Math.min(255, Math.round(lin(v) * 255)))
+  return `rgb(${clamp(r_lin)}, ${clamp(g_lin)}, ${clamp(b_lin)})`
+}
+
+/* Resolve a `var(--token)` to a color ECharts can consume. Reads the
+ * live CSS custom property (theme-aware) and converts oklch → sRGB.
+ * Pure function — safe to call during render. */
 function resolveColor(raw: string): string {
   const m = raw.match(/var\((--[\w-]+)\)/)
   if (!m) return raw
-  const live = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim()
-  if (live && !live.startsWith("oklch")) return live
-  return FALLBACK[m[1]] ?? "#888"
+  const token = m[1]
+  const live = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
+  if (!live) return FALLBACK[token] ?? "#888"
+
+  if (live.startsWith("oklch")) {
+    const parsed = parseOklch(live)
+    if (parsed) return oklchToSrgb(parsed[0], parsed[1], parsed[2])
+    return FALLBACK[token] ?? "#888"
+  }
+  // Not oklch — a plain hex/rgb/named color passes straight through.
+  return live
 }
 
 /* Content equality for the props that matter. The parent re-renders
@@ -104,17 +160,45 @@ function sameLayerColors(a?: Record<string, string>, b?: Record<string, string>)
   return true
 }
 
-/* Derive a diagram height from the largest layer so small graphs stay
- * compact and dense ones grow without clipping. */
-function contentHeight(nodes: SankeyNode[], nodeHeight = 18, nodeGap = 12, pad = 40) {
+/* Derive a diagram height from the largest layer. The height is the
+ * main lever for readable nodes: ECharts sizes sankey node heights
+ * proportional to their value share of the chart, so when a layer has
+ * few nodes a short container shrinks each node until the 11px label
+ * text no longer fits. Keep a generous minimum and a roomy per-node
+ * budget so even a handful of connections renders labels at full size. */
+function contentHeight(nodes: SankeyNode[], nodeHeight = 30, nodeGap = 16, pad = 44) {
   const byLayer: Record<number, number> = {}
   for (const n of nodes) {
     const layer = n.layer ?? 0
     byLayer[layer] = (byLayer[layer] ?? 0) + 1
   }
   const max = Math.max(1, ...Object.values(byLayer))
-  return Math.max(180, Math.min(640, pad + max * nodeHeight + (max - 1) * nodeGap))
+  return Math.max(240, Math.min(700, pad + max * nodeHeight + (max - 1) * nodeGap))
 }
+
+/* Label formatting + measurement. The rightmost layer's labels are
+ * rendered to the right of their nodes, outside the series area — the
+ * callers' overflow-hidden cards clip anything past the right edge. We
+ * measure those labels with the same mono font and reserve the width as
+ * the series `right` margin so the text always shows. This is pure
+ * measurement (no layout side effects), so it's safe during render. */
+const MAX_LABEL = 42
+const LABEL_FONT = "11px ui-monospace, SFMono-Regular, monospace"
+
+function formatLabel(name: string): string {
+  return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
+}
+
+function measureLabelWidth(text: string): number {
+  if (typeof document === "undefined") return text.length * 6.6
+  // Lazy, cached measurement canvas — created once, reused. It is NOT
+  // attached to the DOM, so this has no render-phase side effects.
+  const ctx = measureLabelWidth.ctx ?? (measureLabelWidth.ctx = document.createElement("canvas").getContext("2d"))
+  if (!ctx) return text.length * 6.6
+  ctx.font = LABEL_FONT
+  return ctx.measureText(text).width
+}
+measureLabelWidth.ctx = undefined as CanvasRenderingContext2D | null | undefined
 
 function buildOption(
   nodes: SankeyNode[],
@@ -140,6 +224,14 @@ function buildOption(
       : undefined
   const data = nodes.map((n) => (nodeItemStyle ? { ...n, itemStyle: nodeItemStyle(n) } : n))
 
+  /* Rightmost layer: labels hang off the right edge of their nodes, so
+   * reserve enough `right` margin for the widest one — otherwise the
+   * caller's overflow-hidden card clips the text. */
+  const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
+  const lastLayerLabels = nodes.filter((n) => (n.layer ?? 0) === maxLayer).map((n) => formatLabel(n.name))
+  const rightLabelWidth = lastLayerLabels.reduce((m, t) => Math.max(m, measureLabelWidth(t)), 0)
+  const rightMargin = 12 + rightLabelWidth + 8
+
   return {
     animationDuration: 500,
     animationEasing: "cubicOut",
@@ -162,11 +254,11 @@ function buildOption(
         data,
         links,
         left: 8,
-        right: 8,
+        right: rightMargin,
         top: 12,
         bottom: 12,
-        nodeWidth: 14,
-        nodeGap: 10,
+        nodeWidth: 16,
+        nodeGap: 16,
         layoutIterations: 32,
         emphasis: { focus: "adjacency" },
         lineStyle: {
@@ -179,7 +271,7 @@ function buildOption(
           fontFamily: "ui-monospace, SFMono-Regular, monospace",
           fontSize: 11,
           position: "right",
-          formatter: (p: { name: string }) => (p.name.length > 42 ? `${p.name.slice(0, 41)}…` : p.name),
+          formatter: (p: { name: string }) => formatLabel(p.name),
         },
         itemStyle: {
           borderColor: palette.border,
