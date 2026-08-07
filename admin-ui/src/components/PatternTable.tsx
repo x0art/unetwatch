@@ -14,11 +14,10 @@ import {
   Dialog,
   Select,
   Label,
-  Skeleton,
   ConfirmDialog,
-  Pagination,
   useToast,
 } from "./ui"
+import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 import {
   Search,
@@ -27,52 +26,10 @@ import {
   Pencil,
   Trash2,
   Loader2,
-  ArrowUpDown,
-  ChevronUp,
-  ChevronDown,
+  ListFilter,
 } from "lucide-react"
 
 const PAGE_SIZE = 50
-
-type SortKey = "id" | "pattern" | "pattern_type" | "created_at"
-type SortOrder = "asc" | "desc"
-
-function SortableHeader({
-  label,
-  sortKey,
-  sortBy,
-  sortOrder,
-  onSort,
-}: {
-  label: string
-  sortKey: SortKey
-  sortBy: SortKey
-  sortOrder: SortOrder
-  onSort: (key: SortKey) => void
-}) {
-  const active = sortBy === sortKey
-  return (
-    <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-        aria-label={`Sort by ${label}${active && sortOrder === "asc" ? " (descending)" : " (ascending)"}`}
-      >
-        {label}
-        {active ? (
-          sortOrder === "desc" ? (
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
-          ) : (
-            <ChevronUp className="h-3.5 w-3.5" aria-hidden="true" />
-          )
-        ) : (
-          <ArrowUpDown className="h-3.5 w-3.5 opacity-50" aria-hidden="true" />
-        )}
-      </button>
-    </th>
-  )
-}
 
 export function PatternTable() {
   const [patterns, setPatterns] = useState<Pattern[]>([])
@@ -82,8 +39,9 @@ export function PatternTable() {
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
   const [page, setPage] = useState(0)
-  const [sortBy, setSortBy] = useState<SortKey>("id")
-  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+  const [sortBy, setSortBy] = useState<SortKey | null>("id")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [busy, setBusy] = useState(false)
 
   // ── Edit dialog ──
   const [editOpen, setEditOpen] = useState(false)
@@ -106,6 +64,8 @@ export function PatternTable() {
 
   // ── Confirm delete ──
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
 
   const { toast } = useToast()
 
@@ -125,8 +85,8 @@ export function PatternTable() {
         search: debouncedSearch || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
-        sort_by: sortBy,
-        sort_order: sortOrder,
+        sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
+        sort_order: sortDir,
       })
       setPatterns(data)
     } catch (e) {
@@ -134,7 +94,7 @@ export function PatternTable() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, filterType, page, sortBy, sortOrder])
+  }, [debouncedSearch, filterType, page, sortBy, sortDir])
 
   useEffect(() => {
     fetchPatterns()
@@ -152,15 +112,15 @@ export function PatternTable() {
     setPage(0)
   }
 
-  const handleSort = (key: SortKey) => {
+  const handleSortChange = (key: SortKey, dir: SortDir) => {
     setSortBy(key)
-    setSortOrder((prev) => (sortBy === key && prev === "asc" ? "desc" : "asc"))
+    setSortDir(dir)
     setPage(0)
   }
 
-  // Delete
   const handleDeleteConfirm = async () => {
     if (deleteTarget === null) return
+    setBusy(true)
     try {
       await deletePattern(deleteTarget)
       toast({ title: "Pattern deleted", variant: "success" })
@@ -168,6 +128,26 @@ export function PatternTable() {
       fetchPatterns()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleBulkDelete = async (ids: Set<string | number>) => {
+    const idList = [...ids] as number[]
+    setPendingBulk(null)
+    setConfirmBulkDelete(false)
+    if (!idList.length) return
+    setBusy(true)
+    try {
+      await Promise.all(idList.map((id) => deletePattern(id)))
+      toast({ title: `Deleted ${idList.length} pattern${idList.length === 1 ? "" : "s"}`, variant: "success" })
+      if (idList.length >= patterns.length && page > 0) setPage(page - 1)
+      else fetchPatterns()
+    } catch (e) {
+      toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -247,6 +227,79 @@ export function PatternTable() {
     { value: "whitelist", label: "Whitelist" },
   ]
 
+  const columns: DataTableColumn<Pattern>[] = [
+    {
+      id: "id",
+      header: "ID",
+      accessor: (p) => p.id,
+      cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
+      width: "w-14",
+    },
+    {
+      id: "pattern",
+      header: "Pattern",
+      accessor: (p) => p.pattern,
+      defaultSortDir: "asc",
+      cell: (p) => (
+        <span className="block max-w-[260px] truncate font-mono text-sm" title={p.pattern}>
+          {p.pattern}
+        </span>
+      ),
+    },
+    {
+      id: "pattern_type",
+      header: "Type",
+      accessor: (p) => p.pattern_type,
+      defaultSortDir: "asc",
+      cell: (p) => (
+        <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
+          {p.pattern_type}
+        </Badge>
+      ),
+      width: "w-24",
+    },
+    {
+      id: "created_at",
+      header: "Created",
+      accessor: (p) => p.created_at,
+      cell: (p) => (
+        <span className="whitespace-nowrap text-xs text-muted-foreground">
+          {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
+        </span>
+      ),
+      width: "w-28",
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      enableSorting: false,
+      align: "right",
+      width: "w-20",
+      cell: (p) => (
+        <div className="flex justify-end gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => openEdit(p)}
+            aria-label="Edit pattern"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
+            onClick={() => setDeleteTarget(p.id)}
+            disabled={busy}
+            aria-label="Delete pattern"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ),
+    },
+  ]
+
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
@@ -259,6 +312,7 @@ export function PatternTable() {
             value={search}
             onChange={handleSearchChange}
             className="pl-8 max-w-xs"
+            aria-label="Search patterns"
           />
         </div>
         <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
@@ -283,105 +337,40 @@ export function PatternTable() {
       )}
 
       {/* ── Table ── */}
-      <div className="rounded-lg border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                <SortableHeader label="ID" sortKey="id" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
-                <SortableHeader label="Pattern" sortKey="pattern" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
-                <SortableHeader label="Type" sortKey="pattern_type" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
-                <SortableHeader label="Created" sortKey="created_at" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border">
-                    <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
-                    <td className="px-4 py-3"><Skeleton className="h-4 w-40" /></td>
-                    <td className="px-4 py-3"><Skeleton className="h-5 w-16 rounded-full" /></td>
-                    <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <Skeleton className="h-8 w-8 rounded-md" />
-                        <Skeleton className="h-8 w-8 rounded-md" />
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : patterns.length === 0 ? (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <Search className="h-8 w-8 text-muted-foreground/40 mb-3" />
-                      <p className="text-sm font-medium text-muted-foreground">
-                        {debouncedSearch || filterType
-                          ? "No patterns match your search"
-                          : "No patterns yet"}
-                      </p>
-                      <p className="text-xs text-muted-foreground/60 mt-1">
-                        {debouncedSearch || filterType
-                          ? "Try adjusting your search or filter"
-                          : "Add your first pattern to get started"}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                patterns.map((p) => (
-                  <tr
-                    key={p.id}
-                    className="border-b border-border hover:bg-muted/50 transition-colors"
-                  >
-                    <td className="px-4 py-3 text-muted-foreground text-xs font-mono">{p.id}</td>
-                    <td className="px-4 py-3 font-mono text-sm max-w-[260px] truncate" title={p.pattern}>
-                      {p.pattern}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
-                        {p.pattern_type}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
-                      {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEdit(p)}
-                          aria-label="Edit pattern"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
-                          onClick={() => setDeleteTarget(p.id)}
-                          aria-label="Delete pattern"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ── Pagination (unknown total — prev/next only) ── */}
-      <Pagination
+      <DataTable
+        columns={columns}
+        data={patterns}
+        rowId={(p) => p.id}
+        loading={loading}
+        selectable
+        busy={busy}
+        bulkActions={[
+          {
+            label: "Delete",
+            icon: Trash2,
+            variant: "destructive",
+            onClick: (ids) => {
+              setPendingBulk(ids)
+              setConfirmBulkDelete(true)
+            },
+          },
+        ]}
+        empty={{
+          icon: ListFilter,
+          title: debouncedSearch || filterType !== "all" ? "No patterns match your search" : "No patterns yet",
+          description:
+            debouncedSearch || filterType !== "all"
+              ? "Try adjusting your search or filter"
+              : "Add your first pattern to get started",
+        }}
+        sortBy={sortBy}
+        sortDir={sortDir}
+        onSortChange={handleSortChange}
         page={page}
         pageSize={PAGE_SIZE}
         hasNext={patterns.length === PAGE_SIZE}
         onPageChange={setPage}
+        ariaLabel="Patterns"
       />
 
       {/* ── Confirm Delete Dialog ── */}
@@ -393,6 +382,20 @@ export function PatternTable() {
         variant="destructive"
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Delete selected patterns?"
+        description={`${pendingBulk?.size ?? 0} selected pattern${
+          (pendingBulk?.size ?? 0) !== 1 ? "s" : ""
+        } will be permanently removed. This cannot be undone.`}
+        confirmLabel="Delete selected"
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingBulk) handleBulkDelete(pendingBulk)
+        }}
+        onCancel={() => setConfirmBulkDelete(false)}
       />
 
       {/* ── Edit Dialog ── */}

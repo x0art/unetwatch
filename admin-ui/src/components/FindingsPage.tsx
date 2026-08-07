@@ -1,5 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, CheckCircle2, Copy, CornerUpRight, Eraser, History, SearchX, Search, RefreshCcw, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import {
+  CheckCircle2,
+  Copy,
+  CornerUpRight,
+  Eraser,
+  History,
+  SearchX,
+  Search,
+  RefreshCcw,
+  Trash2,
+} from "lucide-react"
 import {
   type Finding,
   addBaseUrlToBlacklist,
@@ -14,60 +24,16 @@ import {
   listTrackedUrls,
   type Pattern,
 } from "../api"
-import { Button, ConfirmDialog, EmptyState, Input, Pagination, Skeleton, useToast } from "./ui"
+import { Button, ConfirmDialog, Input, useToast } from "./ui"
+import { DataTable, type DataTableColumn } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
-
-type SortKey = "id" | "client_ip" | "server_ip" | "url" | "base_url" | "log_timestamp"
-type SortDir = "asc" | "desc"
 
 function formatDetected(ts: string) {
   const date = new Date(ts)
   if (Number.isNaN(date.getTime())) return ts
   return date.toLocaleString()
-}
-
-function compareValues(a: unknown, b: unknown): number {
-  if (a === b) return 0
-  if (a === undefined || a === null || a === "") return 1
-  if (b === undefined || b === null || b === "") return -1
-  if (typeof a === "number" && typeof b === "number") return a - b
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
-}
-
-function SortableTh({
-  label,
-  sortKey,
-  sortBy,
-  sortDir,
-  onSort,
-}: {
-  label: string
-  sortKey: SortKey
-  sortBy: SortKey | null
-  sortDir: SortDir
-  onSort: (key: SortKey) => void
-}) {
-  const active = sortBy === sortKey
-  const Icon = active && sortDir === "asc" ? ArrowUp : ArrowDown
-  return (
-    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
-        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-      >
-        {label}
-        <Icon
-          className={active ? "h-3 w-3 opacity-100" : "h-3 w-3 opacity-30"}
-          aria-hidden="true"
-        />
-      </button>
-    </th>
-  )
 }
 
 export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
@@ -80,13 +46,11 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
   const [busy, setBusy] = useState(false)
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
   const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
-  const [sortBy, setSortBy] = useState<SortKey | null>("id")
-  const [sortDir, setSortDir] = useState<SortDir>("desc")
   const debouncedSearch = useDebounce(search, 300)
 
   // Allow the Graph view to deep-link into findings filtered by an IP/URL.
@@ -195,65 +159,20 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     setPage(0)
   }
 
-  const handleSort = (key: SortKey) => {
-    if (sortBy === key) {
-      // Toggle direction on repeat click.
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    } else {
-      setSortBy(key)
-      setSortDir(key === "id" ? "desc" : "asc")
-    }
-    setPage(0)
-  }
-
-  const sortedFindings = useMemo(() => {
-    if (!sortBy) return findings
-    const dir = sortDir === "asc" ? 1 : -1
-    return [...findings].sort((a, b) => dir * compareValues(a[sortBy], b[sortBy]))
-  }, [findings, sortBy, sortDir])
-
-  // Drop selections for rows no longer present after a refetch/page change so
-  // the bulk bar count never references stale ids.
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev
-      const visible = new Set(findings.map((f) => f.id))
-      const next = new Set([...prev].filter((id) => visible.has(id)))
-      return next.size === prev.size ? prev : next
-    })
-  }, [findings])
-
-  const allSelected = findings.length > 0 && selectedIds.size === findings.length
-  const someSelected = selectedIds.size > 0 && !allSelected
-
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(findings.map((f) => f.id)))
-  }
-
-  const toggleSelectOne = (id: number) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const handleBulkDelete = async () => {
-    const ids = [...selectedIds]
-    // Close the dialog immediately so a double-click can't fire twice.
+  const handleBulkDelete = async (ids: Set<string | number>) => {
+    const idList = [...ids] as number[]
+    setPendingBulk(null)
     setConfirmBulkDelete(false)
-    if (ids.length === 0) return
+    if (idList.length === 0) return
     setBusy(true)
     try {
-      const res = await bulkDeleteFindings(ids)
+      const res = await bulkDeleteFindings(idList)
       toast({
         title: `${res.deleted} finding${res.deleted !== 1 ? "s" : ""} deleted`,
         variant: "success",
       })
-      setSelectedIds(new Set())
       // If we just emptied the current page, step back a page.
-      if (ids.length >= findings.length && page > 0) setPage(page - 1)
+      if (idList.length >= findings.length && page > 0) setPage(page - 1)
       else refetch()
     } catch (e) {
       toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
@@ -265,7 +184,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const handleDelete = async () => {
     if (!deleteTarget) return
     const target = deleteTarget
-    // Close the dialog immediately so a double-click can't fire twice.
     setDeleteTarget(null)
     setBusy(true)
     try {
@@ -275,7 +193,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         description: `${target.client_ip} → ${target.url}`,
         variant: "success",
       })
-      // If we just removed the last row on this page, step back a page.
       if (findings.length === 1 && page > 0) setPage(page - 1)
       else refetch()
     } catch (e) {
@@ -286,7 +203,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   }
 
   const handleClearAll = async () => {
-    // Close the dialog immediately so a double-click can't fire twice.
     setConfirmClear(false)
     setBusy(true)
     try {
@@ -310,8 +226,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         description: baseUrl,
         variant: "success",
       })
-      // Refresh findings so the row disappears once the new whitelist filter
-      // hides it from the graph, and so the W/B button reflects updated state.
       refetch()
       const next: Record<string, true> = { ...whitelistIndex, [baseUrl]: true }
       setWhitelistIndex(next)
@@ -376,7 +290,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url)
       } else {
-        // Fallback for older browsers / non-secure contexts.
         const ta = document.createElement("textarea")
         ta.value = url
         ta.setAttribute("readonly", "")
@@ -392,6 +305,147 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       toast({ title: "Copy failed", description: (e as Error).message, variant: "error" })
     }
   }
+
+  const columns: DataTableColumn<Finding>[] = [
+    {
+      id: "id",
+      header: "ID",
+      accessor: (f) => f.id,
+      cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
+      width: "w-14",
+    },
+    {
+      id: "client_ip",
+      header: "Client IP",
+      accessor: (f) => f.client_ip,
+      defaultSortDir: "asc",
+      cell: (f) => <span className="font-mono text-sm">{f.client_ip}</span>,
+    },
+    {
+      id: "server_ip",
+      header: "Server IP",
+      accessor: (f) => f.server_ip,
+      defaultSortDir: "asc",
+      cell: (f) => <span className="font-mono text-sm">{f.server_ip}</span>,
+    },
+    {
+      id: "url",
+      header: "URL",
+      accessor: (f) => f.url,
+      defaultSortDir: "asc",
+      cell: (f) => (
+        <div className="flex items-center gap-2 max-w-[320px]">
+          <span className="truncate font-mono text-xs" title={f.url}>
+            {f.url}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={() => handleCopyUrl(f.url)}
+            disabled={busy}
+            aria-label={`Copy URL ${f.url}`}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      ),
+    },
+    {
+      id: "base_url",
+      header: "Base URL",
+      accessor: (f) => f.base_url,
+      defaultSortDir: "asc",
+      cell: (f) => (
+        <div className="flex items-center gap-2">
+          <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
+          {whitelistIndex[f.base_url] ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+              title="Already in whitelist"
+              aria-label="Already in whitelist"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              whitelist
+            </span>
+          ) : blacklistIndex[f.base_url] ? (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+              title="In blacklist"
+              aria-label="In blacklist"
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              In blacklist
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "log_timestamp",
+      header: "Detected",
+      accessor: (f) => f.log_timestamp,
+      cell: (f) => (
+        <span className="whitespace-nowrap text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
+      ),
+      defaultSortDir: "desc",
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      enableSorting: false,
+      align: "right",
+      width: "w-40",
+      cell: (f) => (
+        <div className="flex justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            onClick={() => handleAddBaseUrl(f.base_url)}
+            disabled={busy || whitelistIndex[f.base_url]}
+            aria-label={`Add base URL ${f.base_url} to whitelist`}
+          >
+            <span className="text-[10px] font-semibold">W</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-muted-foreground hover:text-destructive"
+            onClick={() => handleAddToBlacklist(f.base_url)}
+            disabled={busy || blacklistIndex[f.base_url]}
+            aria-label={`Add base URL ${f.base_url} to blacklist`}
+          >
+            <span className="text-[10px] font-semibold">Blacklist</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
+            onClick={() => handleTrackRedirect(f.url)}
+            disabled={busy || trackedIndex[f.url]}
+            aria-label={`Track redirects for ${f.url}`}
+          >
+            {trackedIndex[f.url] ? (
+              <History className="h-4 w-4" />
+            ) : (
+              <CornerUpRight className="h-4 w-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive"
+            onClick={() => setDeleteTarget(f)}
+            disabled={busy}
+            aria-label={`Delete finding ${f.id}`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ),
+    },
+  ]
 
   return (
     <div className="space-y-4">
@@ -413,18 +467,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
               aria-label="Search findings"
             />
           </div>
-          {selectedIds.size > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => setConfirmBulkDelete(true)}
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-              Delete selected ({selectedIds.size})
-            </Button>
-          )}
           <Button
             variant="outline"
             size="sm"
@@ -442,233 +484,44 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         </div>
       </div>
 
-      {!loading && total === 0 ? (
-        <EmptyState
-          icon={SearchX}
-          title={debouncedSearch ? "No matching findings" : "No findings yet"}
-          description={
-            debouncedSearch
-              ? "Try adjusting your search."
-              : "Findings appear here when the ES poll detects matching log entries."
-          }
-          action={
+      <DataTable
+        columns={columns}
+        data={findings}
+        rowId={(f) => f.id}
+        loading={loading}
+        selectable
+        busy={busy}
+        bulkActions={[
+          {
+            label: "Delete",
+            icon: Trash2,
+            variant: "destructive",
+            onClick: (ids) => {
+              setPendingBulk(ids)
+              setConfirmBulkDelete(true)
+            },
+          },
+        ]}
+        empty={{
+          icon: SearchX,
+          title: debouncedSearch ? "No matching findings" : "No findings yet",
+          description: debouncedSearch
+            ? "Try adjusting your search."
+            : "Findings appear here when the ES poll detects matching log entries.",
+          action: (
             <Button variant="outline" onClick={refetch}>
               Refresh
             </Button>
-          }
-        />
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-lg border border-border bg-card">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                    <label className="inline-flex items-center gap-2 uppercase tracking-wide">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = someSelected
-                        }}
-                        onChange={toggleSelectAll}
-                        disabled={busy || findings.length === 0}
-                        aria-label="Select all findings"
-                        className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                      />
-                      <span className="sr-only">Select</span>
-                    </label>
-                  </th>
-                  <SortableTh
-                    label="ID"
-                    sortKey="id"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <SortableTh
-                    label="Client IP"
-                    sortKey="client_ip"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <SortableTh
-                    label="Server IP"
-                    sortKey="server_ip"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <SortableTh
-                    label="URL"
-                    sortKey="url"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <SortableTh
-                    label="Base URL"
-                    sortKey="base_url"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <SortableTh
-                    label="Detected"
-                    sortKey="log_timestamp"
-                    sortBy={sortBy}
-                    sortDir={sortDir}
-                    onSort={handleSort}
-                  />
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading
-                  ? Array.from({ length: 8 }).map((_, i) => (
-                      <tr key={i} className="border-b border-border">
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-4" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-8" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-28" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-56" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-24" /></td>
-                        <td className="px-4 py-3"><Skeleton className="h-4 w-32" /></td>
-                        <td className="px-4 py-3" />
-                      </tr>
-                    ))
-                  : sortedFindings.map((f) => (
-                      <tr
-                        key={f.id}
-                        className={`border-b border-border transition-colors hover:bg-muted/30 ${
-                          selectedIds.has(f.id) ? "bg-muted/40" : ""
-                        }`}
-                      >
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(f.id)}
-                            onChange={() => toggleSelectOne(f.id)}
-                            disabled={busy}
-                            aria-label={`Select finding ${f.id}`}
-                            className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                          />
-                        </td>
-                        <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{f.id}</td>
-                        <td className="px-4 py-3 font-mono text-sm">{f.client_ip}</td>
-                        <td className="px-4 py-3 font-mono text-sm">{f.server_ip}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2 max-w-[320px]">
-                            <span
-                              className="font-mono text-xs truncate"
-                              title={f.url}
-                            >
-                              {f.url}
-                            </span>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-                              onClick={() => handleCopyUrl(f.url)}
-                              disabled={busy}
-                              aria-label={`Copy URL ${f.url}`}
-                            >
-                              <Copy className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 font-mono text-sm text-muted-foreground">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate">{f.base_url}</span>
-                            {whitelistIndex[f.base_url] ? (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
-                                title="Already in whitelist"
-                                aria-label="Already in whitelist"
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                                whitelist
-                              </span>
-                            ) : blacklistIndex[f.base_url] ? (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
-                                title="In blacklist"
-                                aria-label="In blacklist"
-                              >
-                                <CheckCircle2 className="h-3 w-3" />
-                                In blacklist
-                              </span>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                          {formatDetected(f.log_timestamp)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => handleAddBaseUrl(f.base_url)}
-                              disabled={busy || whitelistIndex[f.base_url]}
-                              aria-label={`Add base URL ${f.base_url} to whitelist`}
-                            >
-                              <span className="text-[10px] font-semibold">W</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 px-2 text-muted-foreground hover:text-destructive"
-                              onClick={() => handleAddToBlacklist(f.base_url)}
-                              disabled={busy || blacklistIndex[f.base_url]}
-                              aria-label={`Add base URL ${f.base_url} to blacklist`}
-                            >
-                              <span className="text-[10px] font-semibold">Blacklist</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                              onClick={() => handleTrackRedirect(f.url)}
-                              disabled={busy || trackedIndex[f.url]}
-                              aria-label={`Track redirects for ${f.url}`}
-                            >
-                              {trackedIndex[f.url] ? (
-                                <History className="h-4 w-4" />
-                              ) : (
-                                <CornerUpRight className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                              onClick={() => setDeleteTarget(f)}
-                              disabled={busy}
-                              aria-label={`Delete finding ${f.id}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-              </tbody>
-            </table>
-          </div>
-
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onPageChange={setPage}
-          />
-        </>
-      )}
+          ),
+        }}
+        defaultSortBy="id"
+        defaultSortDir="desc"
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        onPageChange={setPage}
+        ariaLabel="Findings"
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}
@@ -697,12 +550,14 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       <ConfirmDialog
         open={confirmBulkDelete}
         title="Delete selected findings?"
-        description={`${selectedIds.size} selected finding${
-          selectedIds.size !== 1 ? "s" : ""
+        description={`${pendingBulk?.size ?? 0} selected finding${
+          (pendingBulk?.size ?? 0) !== 1 ? "s" : ""
         } will be permanently removed. This cannot be undone.`}
         confirmLabel="Delete selected"
         variant="destructive"
-        onConfirm={handleBulkDelete}
+        onConfirm={() => {
+          if (pendingBulk) handleBulkDelete(pendingBulk)
+        }}
         onCancel={() => setConfirmBulkDelete(false)}
       />
     </div>

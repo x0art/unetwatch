@@ -1,0 +1,166 @@
+"""Tests for the monitor audit trail: /api/logs + /api/query/run."""
+
+import asyncio
+
+from fastapi.testclient import TestClient
+
+from app.database import init_db
+from app.main import app
+
+
+def test_logs_requires_auth(db_path):
+    asyncio.run(init_db())
+    with TestClient(app, raise_server_exceptions=False) as c:
+        c.headers.clear()
+        assert c.get("/api/logs/").status_code == 401
+        assert c.get("/api/query/run").status_code == 401
+
+
+def test_logs_list_empty(client):
+    resp = client.get("/api/logs/")
+    assert resp.status_code == 200
+    assert resp.json() == {"items": [], "total": 0}
+
+
+async def test_write_log_and_list(client):
+    from app.services.logs import write_log
+
+    await write_log(
+        {
+            "kind": "poll",
+            "minutes": 10,
+            "matches": 7,
+            "filtered": 5,
+            "stored": 3,
+            "es_query": {"size": 10, "query": {"match_all": {}}},
+            "webhook_url": "https://hooks.example/x",
+            "webhook_status": 200,
+            "duration_ms": 1234,
+        }
+    )
+    data = client.get("/api/logs/").json()
+    assert data["total"] == 1
+    row = data["items"][0]
+    assert row["kind"] == "poll"
+    assert row["matches"] == 7
+    assert row["filtered"] == 5
+    assert row["stored"] == 3
+    assert row["webhook_status"] == 200
+    assert "match_all" in row["es_query"]
+
+    # Kind filter
+    assert client.get("/api/logs/?kind=poll").json()["total"] == 1
+    assert client.get("/api/logs/?kind=query").json()["total"] == 0
+
+    # Sorting + pagination
+    listed = client.get("/api/logs/?sort_by=matches&sort_order=asc").json()
+    assert listed["total"] == 1
+
+
+async def test_logs_bulk_delete_and_clear(client):
+    from app.services.logs import write_log
+
+    for i in range(3):
+        await write_log({"kind": "query", "minutes": 60, "matches": i})
+
+    assert client.get("/api/logs/").json()["total"] == 3
+    ids = [row["id"] for row in client.get("/api/logs/").json()["items"]]
+
+    res = client.post("/api/logs/bulk-delete", json={"ids": ids[:2]})
+    assert res.status_code == 200
+    assert res.json()["deleted"] == 2
+    assert client.get("/api/logs/").json()["total"] == 1
+
+    res = client.delete("/api/logs")
+    assert res.status_code == 200
+    assert res.json()["deleted"] == 1
+    assert client.get("/api/logs/").json()["total"] == 0
+
+
+def test_logs_delete_one_404(client):
+    assert client.delete("/api/logs/9999").status_code == 404
+
+
+async def test_query_run_records_log_and_degrades_gracefully(client, monkeypatch):
+    """ES unreachable → 200 with es_online=False, and a query log is written."""
+    from app.services import monitor as svc
+
+    class FakeES:
+        async def search(self, **kwargs):
+            raise ConnectionError("boom")
+
+        async def close(self):
+            pass
+
+    def fake_build(*args, **kwargs):
+        return FakeES()
+
+    monkeypatch.setattr(svc, "build_es_client", fake_build)
+
+    resp = client.get("/api/query/run?minutes=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["es_online"] is False
+    assert body["items"] == []
+    assert body["flow"] == {"nodes": [], "links": []}
+
+    logs = client.get("/api/logs/?kind=query").json()
+    assert logs["total"] == 1
+    assert logs["items"][0]["es_online"] == 0
+
+
+async def test_fetch_logs_records_query_and_webhook(client, monkeypatch):
+    """A poll run records the ES query DSL, matches and webhook status."""
+    from app.database import get_db
+    from app.services import monitor as svc
+
+    await get_db()  # ensure tables exist via init_db (already done by fixture)
+
+    class FakeES:
+        async def search(self, **kwargs):
+            return {
+                "hits": {
+                    "hits": [
+                        {
+                            "_source": {
+                                "@timestamp": "2026-08-07T10:00:00Z",
+                                "client_ip": "10.1.2.3",
+                                "server_ip": "10.9.9.9",
+                                "url": "http://bad.example/x",
+                                "base_url": "bad.example",
+                                "duration_seconds": 1.5,
+                                "action": "ALLOW",
+                            }
+                        }
+                    ]
+                }
+            }
+
+        async def close(self):
+            pass
+
+    def fake_build(*args, **kwargs):
+        return FakeES()
+
+    async def fake_send(webhook_url, n_item, payload):
+        return 200
+
+    monkeypatch.setattr(svc, "build_es_client", fake_build)
+    monkeypatch.setattr(svc, "send_logs", fake_send)
+
+    await svc.fetch_logs(minutes=5)
+
+    logs = client.get("/api/logs/?kind=poll").json()
+    assert logs["total"] == 1
+    row = logs["items"][0]
+    assert row["matches"] == 1
+    assert row["filtered"] == 1
+    assert row["stored"] == 1
+    assert row["webhook_status"] == 200
+    assert row["es_query"] is not None
+    assert "now-5m" in row["es_query"]
+
+    # The finding was persisted as well.
+    findings = client.get("/api/findings/?limit=50").json()
+    assert findings["total"] == 1
+    assert findings["items"][0]["url"] == "http://bad.example/x"

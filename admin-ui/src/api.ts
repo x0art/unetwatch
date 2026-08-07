@@ -55,19 +55,6 @@ export interface FindingsGraph {
   links: GraphLink[]
 }
 
-export interface MetricsPoint {
-  count: number
-}
-
-export interface MonitorMetrics {
-  window_minutes: number
-  es_online: boolean
-  total_requests: number
-  unique_ips: number
-  top_urls: (MetricsPoint & { url: string })[]
-  top_ips: (MetricsPoint & { client_ip: string })[]
-}
-
 export interface BlacklistSet {
   urls: string[]
   ips: string[]
@@ -134,6 +121,126 @@ export interface UrlRedirectHistory {
     last_seen_at: string
     active: boolean
   }[]
+}
+
+/* ── Query console (live ES queries) ─────────────────────────────── */
+
+export interface QueryDoc {
+  timestamp: string
+  client_ip: string
+  server_ip: string
+  url: string
+  base_url: string
+  duration_seconds: number | null
+  action: string
+}
+
+export interface QueryTopUrl {
+  url: string
+  count: number
+}
+
+export interface QueryTopIp {
+  client_ip: string
+  count: number
+}
+
+export interface QueryTimelinePoint {
+  bucket: string
+  count: number
+}
+
+export interface QueryFlowNode {
+  id: string
+  label: string
+  kind: "ip" | "base"
+}
+
+export interface QueryFlowLink {
+  source: string
+  target: string
+  count: number
+}
+
+export interface QueryFlow {
+  nodes: QueryFlowNode[]
+  links: QueryFlowLink[]
+}
+
+export interface QueryResult {
+  window_minutes: number
+  es_online: boolean
+  query: Record<string, unknown> | null
+  total_requests: number
+  unique_ips: number
+  distinct_urls: number
+  items: QueryDoc[]
+  top_urls: QueryTopUrl[]
+  top_ips: QueryTopIp[]
+  timeline: QueryTimelinePoint[]
+  flow: QueryFlow
+  error?: string
+}
+
+export async function runQuery(minutes: number): Promise<QueryResult> {
+  return request(`/query/run?minutes=${minutes}`)
+}
+
+/* ── Monitor logs (ES query + webhook audit trail) ───────────────── */
+
+export interface MonitorLog {
+  id: number
+  kind: "poll" | "query"
+  started_at: string
+  duration_ms: number
+  minutes: number | null
+  es_online: boolean
+  matches: number
+  filtered: number
+  stored: number
+  es_query: string | null
+  webhook_url: string | null
+  webhook_status: number | null
+  webhook_error: string | null
+  error: string | null
+}
+
+export interface LogsResponse {
+  items: MonitorLog[]
+  total: number
+}
+
+export async function listLogs(params?: {
+  kind?: "poll" | "query"
+  search?: string
+  limit?: number
+  offset?: number
+  sort_by?: string
+  sort_order?: "asc" | "desc"
+}): Promise<LogsResponse> {
+  const qs = new URLSearchParams()
+  if (params?.kind) qs.set("kind", params.kind)
+  if (params?.search) qs.set("search", params.search)
+  if (params?.limit) qs.set("limit", String(params.limit))
+  if (params?.offset) qs.set("offset", String(params.offset))
+  if (params?.sort_by) qs.set("sort_by", params.sort_by)
+  if (params?.sort_order) qs.set("sort_order", params.sort_order)
+  return request(`/logs/?${qs}`)
+}
+
+export async function deleteLog(id: number): Promise<void> {
+  return request(`/logs/${id}`, { method: "DELETE" })
+}
+
+export async function clearLogs(): Promise<{ deleted: number }> {
+  return request("/logs", { method: "DELETE" })
+}
+
+export async function bulkDeleteLogs(ids: number[]): Promise<{ deleted: number }> {
+  return request("/logs/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  })
 }
 
 const API = "/api"
@@ -250,10 +357,6 @@ export async function triggerManualRun(
 ): Promise<{ status: string; minutes: number }> {
   const qs = minutes !== undefined ? `?minutes=${minutes}` : ""
   return request(`/monitor/run${qs}`, { method: "POST" })
-}
-
-export async function getMonitorMetrics(minutes: number): Promise<MonitorMetrics> {
-  return request(`/monitor/metrics?minutes=${minutes}`)
 }
 
 export async function getFindings(params?: {

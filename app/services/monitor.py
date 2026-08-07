@@ -7,6 +7,7 @@ import pandas as pd
 from elasticsearch import AsyncElasticsearch
 
 from app.config import get_settings
+from app.services.logs import default_log, write_log
 
 
 def build_es_client(
@@ -161,6 +162,21 @@ def _normalize_timestamp(ts, fallback: str) -> str:
     return rendered or fallback
 
 
+def _safe_number(value) -> float | None:
+    """Coerce a pandas/ES value to a float, or None when it is missing/NaN."""
+    if value is None:
+        return None
+    try:
+        if bool(pd.isna(value)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def apply_filters(df: pd.DataFrame, whitelist_regex: str) -> pd.DataFrame:
     """Apply whitelist + ALLOW filters and derive base_url.
 
@@ -177,11 +193,12 @@ def apply_filters(df: pd.DataFrame, whitelist_regex: str) -> pd.DataFrame:
     return df[df["action"] == "ALLOW"]
 
 
-async def store_findings(db, df: pd.DataFrame):
+async def store_findings(db, df: pd.DataFrame) -> int:
     """Persist filtered matches so they surface in the Findings page.
 
     Uses INSERT OR IGNORE + a UNIQUE(client_ip, url, log_timestamp) constraint so
-    overlapping poll windows never create duplicate rows.
+    overlapping poll windows never create duplicate rows. Returns the number of
+    rows actually inserted.
     """
     rows = []
     now = datetime.now(UTC).isoformat()
@@ -197,18 +214,26 @@ async def store_findings(db, df: pd.DataFrame):
             )
         )
     if not rows:
-        return
-    await db.executemany(
+        return 0
+    cursor = await db.executemany(
         "INSERT OR IGNORE INTO findings"
         " (client_ip, server_ip, url, base_url, log_timestamp)"
         " VALUES (?, ?, ?, ?, ?)",
         rows,
     )
     await db.commit()
+    return int(cursor.rowcount or 0)
 
 
 async def fetch_logs(minutes: int = 10):
+    """Poll Elasticsearch for block-pattern matches and alert via webhook.
+
+    Every run is recorded in ``monitor_logs`` — the exact ES query DSL,
+    match counts, storage result and webhook delivery outcome — so the Logs
+    page can audit what happened.
+    """
     settings = get_settings()
+    started = datetime.now(UTC)
     es = build_es_client(
         settings, timeout=180, retry_on_timeout=True, max_retries=3
     )
@@ -216,24 +241,32 @@ async def fetch_logs(minutes: int = 10):
     from app.database import get_db
 
     db = await get_db()
+    log = default_log("poll", minutes)
     try:
         block_patterns = await get_block_patterns(db)
         whitelist_patterns = await get_whitelist_patterns(db)
 
         if not block_patterns:
-            print(f"[{datetime.now(UTC).isoformat()}][INFO] No block patterns configured.")
+            log["error"] = "No block patterns configured."
+            print(
+                f"[{datetime.now(UTC).isoformat()}][INFO] No block patterns configured."
+            )
             return
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        log["es_query"] = query
 
         try:
             res = await es.search(index=settings.elastic_index, body=query)
         except Exception as e:
+            log["es_online"] = False
+            log["error"] = str(e)
             print(f"Error: {e}")
             return
 
         hits = res["hits"]["hits"]
+        log["matches"] = len(hits)
 
         if not hits:
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No matches found.")
@@ -244,6 +277,8 @@ async def fetch_logs(minutes: int = 10):
         if df.empty:
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No filtered matches.")
             return
+
+        log["filtered"] = len(df)
 
         required_columns = [
             "@timestamp", "client_ip", "server_ip", "url",
@@ -280,17 +315,174 @@ async def fetch_logs(minutes: int = 10):
         # Persist locally before webhook delivery; storage failures must never
         # break alert delivery, so this is best-effort.
         try:
-            await store_findings(db, df)
+            log["stored"] = await store_findings(db, df)
         except Exception as e:
+            log["error"] = f"Failed to store findings: {e}"
             print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")
 
-        await send_logs(settings.webhook_url, total_sum, payload)
+        try:
+            log["webhook_status"] = await send_logs(settings.webhook_url, total_sum, payload)
+        except Exception as e:
+            log["webhook_error"] = str(e)
+            print(f"[{datetime.now(UTC).isoformat()}][WARN] Webhook failed: {e}")
 
     except Exception as e:
+        log["error"] = str(e)
         print(f"Error: {e}")
     finally:
+        log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        await write_log(log)
         await es.close()
         await db.close()
+
+
+def _build_timeline(df: pd.DataFrame, minutes: int) -> list[dict]:
+    """Bucket matching docs into a continuous minute-granularity timeline.
+
+    Bucket width is scaled to the window so long windows (e.g. 24h) still
+    render a reasonable number of points (~48 max).
+    """
+    ts = pd.to_datetime(df["@timestamp"], errors="coerce", utc=True).dropna()
+    if ts.empty:
+        return []
+    span = max(1, minutes // 48)
+    binned = ts.dt.floor(f"{span}min")
+    counts = binned.value_counts().sort_index()
+    if counts.empty:
+        return []
+    full = pd.date_range(counts.index.min(), counts.index.max(), freq=f"{span}min")
+    counts = counts.reindex(full, fill_value=0)
+    return [
+        {"bucket": idx.isoformat(), "count": int(c)} for idx, c in counts.items()
+    ]
+
+
+def _build_flow(df: pd.DataFrame) -> dict:
+    """Collapse docs into a client_ip → base_url flow for visualization."""
+    grouped = (
+        df.groupby(["client_ip", "base_url"]).size().reset_index(name="count")
+    )
+    nodes: list[dict] = []
+    for ip in grouped["client_ip"].unique():
+        nodes.append({"id": f"ip:{ip}", "label": str(ip), "kind": "ip"})
+    for base in grouped["base_url"].unique():
+        nodes.append({"id": f"base:{base}", "label": str(base), "kind": "base"})
+    links = [
+        {
+            "source": f"ip:{row.client_ip}",
+            "target": f"base:{row.base_url}",
+            "count": int(row.count),
+        }
+        for row in grouped.itertuples()
+    ]
+    return {"nodes": nodes, "links": links}
+
+
+def _build_items(df: pd.DataFrame, limit: int) -> list[dict]:
+    """Rows for the Query page table (capped to ``limit``)."""
+    now = datetime.now(UTC).isoformat()
+    items: list[dict] = []
+    for _, row in df.head(limit).iterrows():
+        items.append(
+            {
+                "timestamp": _normalize_timestamp(row.get("@timestamp"), now),
+                "client_ip": str(row.get("client_ip") or ""),
+                "server_ip": str(row.get("server_ip") or ""),
+                "url": str(row.get("url") or ""),
+                "base_url": str(row.get("base_url") or ""),
+                "duration_seconds": _safe_number(row.get("duration_seconds")),
+                "action": str(row.get("action") or ""),
+            }
+        )
+    return items
+
+
+async def run_query(minutes: int = 60, limit: int = 500) -> dict:
+    """Run the block-pattern ES query and return a rich payload for the Query page.
+
+    Returns the matching documents (table), aggregates (stat cards + charts)
+    and a client_ip → base_url flow. Elasticsearch failures degrade gracefully
+    (``es_online: False``) and are recorded in ``monitor_logs``.
+    """
+    started = datetime.now(UTC)
+    settings = get_settings()
+
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        block_patterns = await get_block_patterns(db)
+        whitelist_patterns = await get_whitelist_patterns(db)
+    finally:
+        await db.close()
+
+    result = {
+        "window_minutes": minutes,
+        "es_online": True,
+        "query": None,
+        "total_requests": 0,
+        "unique_ips": 0,
+        "distinct_urls": 0,
+        "items": [],
+        "top_urls": [],
+        "top_ips": [],
+        "timeline": [],
+        "flow": {"nodes": [], "links": []},
+    }
+    log = default_log("query", minutes)
+    try:
+        if not block_patterns:
+            log["error"] = "No block patterns configured."
+            return result
+
+        whitelist_regex = _build_pattern_regex(whitelist_patterns)
+        query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        result["query"] = query
+        log["es_query"] = query
+
+        es = build_es_client(settings, timeout=30)
+        try:
+            res = await es.search(index=settings.elastic_index, body=query)
+        except Exception as e:
+            result["es_online"] = False
+            log["es_online"] = False
+            log["error"] = str(e)
+            return result
+        finally:
+            await es.close()
+
+        hits = res["hits"]["hits"]
+        log["matches"] = len(hits)
+        if not hits:
+            return result
+
+        df = apply_filters(pd.DataFrame([h["_source"] for h in hits]), whitelist_regex)
+        if df.empty:
+            return result
+        log["filtered"] = len(df)
+
+        result["total_requests"] = int(len(df))
+        result["unique_ips"] = int(df["client_ip"].nunique())
+        result["distinct_urls"] = int(df["url"].nunique())
+        result["top_urls"] = [
+            {"url": url, "count": int(count)}
+            for url, count in df["url"].astype(str).value_counts().head(10).items()
+        ]
+        result["top_ips"] = [
+            {"client_ip": ip, "count": int(count)}
+            for ip, count in df["client_ip"].astype(str).value_counts().head(10).items()
+        ]
+        result["timeline"] = _build_timeline(df, minutes)
+        result["flow"] = _build_flow(df)
+        result["items"] = _build_items(df, limit)
+    except Exception as e:
+        log["error"] = str(e)
+        result["error"] = str(e)
+        print(f"[{datetime.now(UTC).isoformat()}][WARN] Query run failed: {e}")
+    finally:
+        log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        await write_log(log)
+    return result
 
 
 async def fetch_metrics(minutes: int = 60) -> dict:
@@ -359,7 +551,8 @@ async def fetch_metrics(minutes: int = 60) -> dict:
     return result
 
 
-async def send_logs(webhook_url: str, n_item: int, payload: dict):
+async def send_logs(webhook_url: str, n_item: int, payload: dict) -> int:
+    """Deliver the alert payload to the webhook; returns the HTTP status."""
     import aiohttp
 
     async with aiohttp.ClientSession() as session:
@@ -376,3 +569,4 @@ async def send_logs(webhook_url: str, n_item: int, payload: dict):
                 f"[{datetime.now(UTC).isoformat()}][INFO] "
                 f"{result_msg} sending."
             )
+            return response.status

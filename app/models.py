@@ -77,3 +77,7 @@ class RedirectCheckRequest(BaseModel):
     urls: list[str] | None = Field(None, max_length=100)
 
     model_config = {"extra": "forbid"}
+
+
+class LogBulkDelete(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=500)

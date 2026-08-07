@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import {
   Activity,
   Ban,
+  FileSearch,
   GitBranch,
   LayoutDashboard,
   ListFilter,
@@ -10,6 +11,7 @@ import {
   Moon,
   Network,
   Radar,
+  ScrollText,
   Sun,
   X,
   type LucideIcon,
@@ -66,7 +68,15 @@ export function useTheme() {
  * Navigation model
  * ════════════════════════════════════════════════════════════════ */
 
-export type View = "dashboard" | "patterns" | "findings" | "graph" | "blacklist" | "redirects"
+export type View =
+  | "dashboard"
+  | "query"
+  | "patterns"
+  | "findings"
+  | "graph"
+  | "blacklist"
+  | "redirects"
+  | "logs"
 
 export interface NavItem {
   view: View
@@ -76,11 +86,13 @@ export interface NavItem {
 
 export const DEFAULT_NAV: NavItem[] = [
   { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { view: "query", label: "Query", icon: FileSearch },
   { view: "patterns", label: "Patterns", icon: ListFilter },
   { view: "findings", label: "Findings", icon: Radar },
   { view: "graph", label: "Graph", icon: Network },
   { view: "blacklist", label: "Blacklist", icon: Ban },
   { view: "redirects", label: "Redirects", icon: GitBranch },
+  { view: "logs", label: "Logs", icon: ScrollText },
 ]
 
 /* ════════════════════════════════════════════════════════════════

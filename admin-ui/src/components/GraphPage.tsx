@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  ArrowDown,
-  ArrowUp,
   ArrowUpRight,
   Ban,
   Link2,
@@ -29,12 +27,12 @@ import {
   Button,
   EmptyState,
   Input,
-  Pagination,
   Select,
   Skeleton,
   StatCard,
   useToast,
 } from "./ui"
+import { DataTable } from "./DataTable"
 import { type View } from "./Sidebar"
 import { cn, useDebounce } from "../lib/utils"
 
@@ -166,50 +164,6 @@ function edgePath(a: LayoutNode, b: LayoutNode) {
   return `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`
 }
 
-/* ── Table sorting helpers ─────────────────────────────────────────── */
-
-type SortKey = "endpoint" | "kind" | "accesses"
-type SortDir = "asc" | "desc"
-
-function compareValues(a: unknown, b: unknown): number {
-  if (a === b) return 0
-  if (a === undefined || a === null || a === "") return 1
-  if (b === undefined || b === null || b === "") return -1
-  if (typeof a === "number" && typeof b === "number") return a - b
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
-}
-
-function SortableTh({
-  label,
-  sortKey,
-  sortBy,
-  sortDir,
-  onSort,
-}: {
-  label: string
-  sortKey: SortKey
-  sortBy: SortKey | null
-  sortDir: SortDir
-  onSort: (key: SortKey) => void
-}) {
-  const active = sortBy === sortKey
-  const Icon = active && sortDir === "asc" ? ArrowUp : ArrowDown
-  return (
-    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-        aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
-        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-      >
-        {label}
-        <Icon className={active ? "h-3 w-3 opacity-100" : "h-3 w-3 opacity-30"} aria-hidden="true" />
-      </button>
-    </th>
-  )
-}
-
 export function GraphPage({
   onNavigate,
 }: {
@@ -234,9 +188,6 @@ export function GraphPage({
 
   // Table state (endpoints derived from the graph nodes).
   const [tablePage, setTablePage] = useState(0)
-  const [sortBy, setSortBy] = useState<SortKey | null>("accesses")
-  const [sortDir, setSortDir] = useState<SortDir>("desc")
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
 
   const viewportRef = useRef<HTMLDivElement>(null)
@@ -268,7 +219,6 @@ export function GraphPage({
   // Reset client-side table state whenever the underlying graph changes.
   useEffect(() => {
     setTablePage(0)
-    setSelectedIds(new Set())
   }, [graph])
 
   const layout = useMemo(() => (graph ? buildLayout(graph) : null), [graph])
@@ -451,57 +401,12 @@ export function GraphPage({
     return allNodes.filter((n) => n.label.toLowerCase().includes(q))
   }, [q, allNodes])
 
-  const sortedNodes = useMemo(() => {
-    const sorted = [...filteredNodes]
-    if (!sortBy) return sorted
-    const dir = sortDir === "asc" ? 1 : -1
-    sorted.sort((a, b) => {
-      const av = sortBy === "endpoint" ? a.label : sortBy === "kind" ? a.kind : a.count
-      const bv = sortBy === "endpoint" ? b.label : sortBy === "kind" ? b.kind : b.count
-      return compareValues(av, bv) * dir
-    })
-    return sorted
-  }, [filteredNodes, sortBy, sortDir])
-
-  const pageItems = useMemo(
-    () => sortedNodes.slice(tablePage * PAGE_SIZE, (tablePage + 1) * PAGE_SIZE),
-    [sortedNodes, tablePage],
-  )
-
-  // Drop selections for nodes no longer present after a refetch/search change.
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev
-      const visible = new Set(allNodes.map((n) => n.id))
-      const next = new Set([...prev].filter((id) => visible.has(id)))
-      return next.size === prev.size ? prev : next
-    })
-  }, [allNodes])
-
   useEffect(() => {
     setTablePage(0)
-  }, [q, sortBy, sortDir])
+  }, [q])
 
-  const allSelected = pageItems.length > 0 && pageItems.every((n) => selectedIds.has(n.id))
-  const someSelected = selectedIds.size > 0 && !allSelected
-
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(pageItems.map((n) => n.id)))
-  }
-
-  const toggleSelectOne = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const handleBulkBlacklist = async () => {
-    // Use allNodes (not the search-filtered set) so every selected endpoint is
-    // blacklisted, matching the "N selected" count shown in the bulk bar.
-    const nodes = allNodes.filter((n) => selectedIds.has(n.id) && n.label.trim())
+  const handleBulkBlacklist = async (ids: Set<string | number>) => {
+    const nodes = filteredNodes.filter((n) => ids.has(n.id) && n.label.trim())
     if (!nodes.length) return
     setBulkBusy(true)
     try {
@@ -513,22 +418,11 @@ export function GraphPage({
           : "Already in blacklist",
         variant: added ? "success" : "info",
       })
-      setSelectedIds(new Set())
     } catch (e) {
       toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBulkBusy(false)
     }
-  }
-
-  const handleSort = (key: SortKey) => {
-    if (sortBy === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
-    } else {
-      setSortBy(key)
-      setSortDir(key === "accesses" ? "desc" : "asc")
-    }
-    setTablePage(0)
   }
 
   const shareOf = (n: GraphNode) =>
@@ -887,16 +781,6 @@ export function GraphPage({
           </div>
         </div>
 
-        {selectedIds.size > 0 && (
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
-            <span className="font-medium">{selectedIds.size} selected</span>
-            <Button size="sm" variant="outline" onClick={handleBulkBlacklist} disabled={bulkBusy}>
-              <Ban className="h-3.5 w-3.5" />
-              Add to blacklist
-            </Button>
-          </div>
-        )}
-
         {loading ? (
           <div className="space-y-3" aria-busy="true">
             <Skeleton className="h-48 w-full rounded-lg" />
@@ -914,95 +798,85 @@ export function GraphPage({
             }
           />
         ) : (
-          <>
-            <div className="overflow-x-auto rounded-lg border border-border bg-card">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      <label className="inline-flex items-center gap-2 uppercase tracking-wide">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = someSelected
-                          }}
-                          onChange={toggleSelectAll}
-                          disabled={bulkBusy || pageItems.length === 0}
-                          aria-label="Select all endpoints"
-                          className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                        />
-                        <span className="sr-only">Select</span>
-                      </label>
-                    </th>
-                    <SortableTh label="Kind" sortKey="kind" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                    <SortableTh label="Endpoint" sortKey="endpoint" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                    <SortableTh label="Accesses" sortKey="accesses" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
-                      <span className="uppercase tracking-wide">Share</span>
-                    </th>
-                    <th className="px-4 py-3 text-right font-medium text-muted-foreground">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pageItems.map((n) => (
-                    <tr
-                      key={n.id}
-                      className={cn(
-                        "border-b border-border transition-colors hover:bg-muted/30",
-                        selectedIds.has(n.id) && "bg-muted/40",
-                      )}
-                    >
-                      <td className="px-4 py-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(n.id)}
-                          onChange={() => toggleSelectOne(n.id)}
-                          disabled={bulkBusy}
-                          aria-label={`Select ${n.label}`}
-                          className="h-4 w-4 rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={KIND_BADGE[n.kind]}>{KIND_LABEL[n.kind]}</Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs" title={n.label}>
-                          {truncate(n.label, 56)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 tabular-nums">{n.count.toLocaleString()}</td>
-                      <td className="px-4 py-3 tabular-nums text-muted-foreground">
-                        {shareOf(n)}%
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                          onClick={() => openFindings(n)}
-                          aria-label={`View findings for ${n.label}`}
-                        >
-                          <ArrowUpRight className="h-4 w-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {sortedNodes.length > PAGE_SIZE && (
-              <Pagination
-                page={tablePage}
-                pageSize={PAGE_SIZE}
-                total={sortedNodes.length}
-                onPageChange={setTablePage}
-              />
-            )}
-          </>
+          <DataTable
+            columns={[
+              {
+                id: "kind",
+                header: "Kind",
+                accessor: (n) => n.kind,
+                defaultSortDir: "asc",
+                cell: (n) => <Badge variant={KIND_BADGE[n.kind]}>{KIND_LABEL[n.kind]}</Badge>,
+                width: "w-24",
+              },
+              {
+                id: "endpoint",
+                header: "Endpoint",
+                accessor: (n) => n.label,
+                defaultSortDir: "asc",
+                cell: (n) => (
+                  <span className="font-mono text-xs" title={n.label}>
+                    {truncate(n.label, 56)}
+                  </span>
+                ),
+              },
+              {
+                id: "accesses",
+                header: "Accesses",
+                accessor: (n) => n.count,
+                cell: (n) => <span className="tabular-nums">{n.count.toLocaleString()}</span>,
+                align: "right",
+                width: "w-24",
+                defaultSortDir: "desc",
+              },
+              {
+                id: "share",
+                header: "Share",
+                enableSorting: false,
+                cell: (n) => (
+                  <span className="tabular-nums text-muted-foreground">{shareOf(n)}%</span>
+                ),
+                align: "right",
+                width: "w-20",
+              },
+              {
+                id: "actions",
+                header: <span className="sr-only">Actions</span>,
+                enableSorting: false,
+                align: "right",
+                width: "w-16",
+                cell: (n) => (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => openFindings(n)}
+                    aria-label={`View findings for ${n.label}`}
+                  >
+                    <ArrowUpRight className="h-4 w-4" />
+                  </Button>
+                ),
+              },
+            ]}
+            data={filteredNodes}
+            rowId={(n) => n.id}
+            selectable
+            busy={bulkBusy}
+            internalPagination
+            bulkActions={[
+              {
+                label: "Add to blacklist",
+                icon: Ban,
+                variant: "outline",
+                onClick: handleBulkBlacklist,
+              },
+            ]}
+            defaultSortBy="accesses"
+            defaultSortDir="desc"
+            page={tablePage}
+            pageSize={PAGE_SIZE}
+            onPageChange={setTablePage}
+            ariaLabel="Endpoints"
+          />
         )}
       </div>
 

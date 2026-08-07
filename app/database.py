@@ -100,6 +100,28 @@ async def init_db():
         )
     """)
 
+    # Audit trail for ES queries + webhook deliveries. Every poll writes one
+    # row recording the exact query DSL, match counts and webhook outcome;
+    # ad-hoc Query page runs are stored with kind='query' (no webhook).
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS monitor_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL DEFAULT 'poll',       -- 'poll' | 'query'
+            started_at TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            minutes INTEGER,
+            es_online INTEGER NOT NULL DEFAULT 1,
+            matches INTEGER NOT NULL DEFAULT 0,      -- raw ES hits
+            filtered INTEGER NOT NULL DEFAULT 0,     -- after whitelist/ALLOW
+            stored INTEGER NOT NULL DEFAULT 0,       -- findings persisted (polls)
+            es_query TEXT,                           -- JSON DSL sent to ES
+            webhook_url TEXT,
+            webhook_status INTEGER,
+            webhook_error TEXT,
+            error TEXT
+        )
+    """)
+
     # Migration: normalize blacklist entries to bare FQDN / IPv4 (protocol,
     # port, path and query stripped) so the plain-text feeds stay clean.
     # Idempotent — safe to run on every startup. Rows that cannot be parsed
