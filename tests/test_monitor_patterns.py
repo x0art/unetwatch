@@ -87,6 +87,20 @@ def test_build_logs_query_escapes_block_patterns():
     assert q["size"] == 50
 
 
+def test_build_logs_query_narrows_matches_when_search_given():
+    q = build_logs_query(["*porn*"], 10, 50, search=" 1.2.3.4   bad.example ")
+    must = q["query"]["bool"]["must"]
+    # Tokenized, whitespace-collapsed, and escaped — must never break grammar.
+    assert len(must) == 2  # block-pattern clause + search clause
+    search_qs = must[1]["query_string"]["query"]
+    assert "(url:*1.2.3.4* OR client_ip:*1.2.3.4* OR server_ip:*1.2.3.4*)" in search_qs
+    assert "(url:*bad.example* OR client_ip:*bad.example* OR server_ip:*bad.example*)" in search_qs
+
+    # No search term → only the block-pattern clause.
+    plain = build_logs_query(["*porn*"], 10, 50)
+    assert len(plain["query"]["bool"]["must"]) == 1
+
+
 # ── apply_filters resilience ───────────────────────────────────────────────
 
 

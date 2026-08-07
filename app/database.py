@@ -118,9 +118,20 @@ async def init_db():
             webhook_url TEXT,
             webhook_status INTEGER,
             webhook_error TEXT,
+            webhook_reason TEXT,                     -- why the webhook was NOT called
             error TEXT
         )
     """)
+
+    # Migration: add webhook_reason to databases that predate the column
+    # (explains why a delivery was skipped: no URL configured, nothing to
+    # send after filtering, etc.).
+    cursor = await db.execute("PRAGMA table_info(monitor_logs)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "webhook_reason" not in columns:
+        await db.execute(
+            "ALTER TABLE monitor_logs ADD COLUMN webhook_reason TEXT"
+        )
 
     # Migration: normalize blacklist entries to bare FQDN / IPv4 (protocol,
     # port, path and query stripped) so the plain-text feeds stay clean.

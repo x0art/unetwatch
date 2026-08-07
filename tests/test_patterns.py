@@ -389,7 +389,7 @@ async def test_findings_bulk_delete(client):
 def test_findings_graph_empty(client):
     resp = client.get("/api/findings/graph")
     assert resp.status_code == 200
-    assert resp.json() == {"nodes": [], "links": []}
+    assert resp.json() == {"nodes": [], "links": [], "flows": []}
 
 
 def test_findings_graph_invalid_limit(client):
@@ -442,10 +442,24 @@ async def test_findings_graph_shape(client):
         await db.close()
 
     data = client.get("/api/findings/graph").json()
-    assert set(data.keys()) == {"nodes", "links"}
+    assert set(data.keys()) == {"nodes", "links", "flows"}
 
     kinds = {n["kind"] for n in data["nodes"]}
     assert kinds == {"ip", "server", "url"}
+
+    # Per-triple flows mirror the same top-N cut as the graph.
+    assert {
+        "client_ip": "1.2.3.4",
+        "server_ip": "10.0.0.1",
+        "url": "http://evil.example/a",
+        "count": 1,
+    } in data["flows"]
+    assert {
+        "client_ip": "9.9.9.9",
+        "server_ip": "",
+        "url": "http://nohost.example/d",
+        "count": 1,
+    } in data["flows"]
 
     # Client IP node carries its total access count (2 accesses).
     ip_node = next(n for n in data["nodes"] if n["kind"] == "ip" and n["label"] == "1.2.3.4")

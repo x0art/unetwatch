@@ -99,11 +99,38 @@ def _escape_query_string(term: str) -> str:
     return _QUERY_STRING_SPECIAL.sub(r"\\\1", term) if term else term
 
 
-def build_logs_query(block_patterns: list[str], minutes: int, size: int) -> dict:
-    """ES query that flags URLs matching any block pattern within the window."""
+def build_logs_query(
+    block_patterns: list[str], minutes: int, size: int, search: str | None = None
+) -> dict:
+    """ES query that flags URLs matching any block pattern within the window.
+
+    ``search`` (optional) narrows the result set *at the ES level*: every
+    whitespace-separated token must appear as a substring of the URL, client
+    IP or server IP. Tokens are escaped so the operator can never break out
+    of the query_string grammar.
+    """
     query_string = " OR ".join(
         f"url : {_escape_query_string(p)}" for p in block_patterns
     )
+    must: list[dict] = [
+        {"query_string": {"query": query_string, "analyze_wildcard": True}}
+    ]
+    terms = [t for t in re.split(r"\s+", search.strip()) if t] if search else []
+    if terms:
+        clauses = [
+            "("
+            "url:*{t}* OR client_ip:*{t}* OR server_ip:*{t}*"
+            ")".format(t=_escape_query_string(term))
+            for term in terms
+        ]
+        must.append(
+            {
+                "query_string": {
+                    "query": " AND ".join(clauses),
+                    "analyze_wildcard": True,
+                }
+            }
+        )
     return {
         "size": size,
         "query": {
@@ -111,9 +138,7 @@ def build_logs_query(block_patterns: list[str], minutes: int, size: int) -> dict
                 "filter": [
                     {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
                 ],
-                "must": [
-                    {"query_string": {"query": query_string, "analyze_wildcard": True}}
-                ],
+                "must": must,
             }
         },
     }
@@ -273,16 +298,20 @@ async def fetch_logs(minutes: int = 10):
         log["matches"] = len(hits)
 
         if not hits:
+            log["webhook_reason"] = "No matches in window — nothing to send"
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No matches found.")
             return
 
         df = apply_filters(pd.DataFrame([h["_source"] for h in hits]), whitelist_regex)
+        log["filtered"] = len(df)
 
         if df.empty:
+            log["webhook_reason"] = (
+                f"{len(hits)} matches, all excluded by whitelist/ALLOW filter — "
+                "nothing to send"
+            )
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No filtered matches.")
             return
-
-        log["filtered"] = len(df)
 
         required_columns = [
             "@timestamp", "client_ip", "server_ip", "url",
@@ -324,11 +353,20 @@ async def fetch_logs(minutes: int = 10):
             log["error"] = f"Failed to store findings: {e}"
             print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")
 
-        try:
-            log["webhook_status"] = await send_logs(settings.webhook_url, total_sum, payload)
-        except Exception as e:
-            log["webhook_error"] = str(e)
-            print(f"[{datetime.now(UTC).isoformat()}][WARN] Webhook failed: {e}")
+        if not settings.webhook_url:
+            log["webhook_reason"] = "Webhook URL not configured — nothing sent"
+            print(
+                f"[{datetime.now(UTC).isoformat()}][INFO] "
+                "Webhook URL not configured, skipping delivery."
+            )
+        else:
+            try:
+                log["webhook_status"] = await send_logs(
+                    settings.webhook_url, total_sum, payload
+                )
+            except Exception as e:
+                log["webhook_error"] = str(e)
+                print(f"[{datetime.now(UTC).isoformat()}][WARN] Webhook failed: {e}")
 
     except Exception as e:
         log["error"] = str(e)
@@ -441,12 +479,21 @@ def _build_items(
     return items
 
 
-async def run_query(minutes: int = 60, limit: int = 500) -> dict:
+async def run_query(
+    minutes: int = 60,
+    limit: int = 500,
+    search: str | None = None,
+    exclude_whitelist: bool = False,
+) -> dict:
     """Run the block-pattern ES query and return a rich payload for the Query page.
 
-    Returns the matching documents (table), aggregates (stat cards + charts)
-    and a client_ip → base_url flow. Elasticsearch failures degrade gracefully
-    (``es_online: False``) and are recorded in ``monitor_logs``.
+    ``search`` narrows the query *inside Elasticsearch* (URL/IP substring)
+    instead of changing the time window; ``exclude_whitelist`` drops
+    whitelisted matches server-side so the whole result set (table, charts,
+    flow, stats) shrinks. Returns the matching documents (table), aggregates
+    (stat cards + charts) and a client_ip → base_url flow. Elasticsearch
+    failures degrade gracefully (``es_online: False``) and are recorded in
+    ``monitor_logs``.
     """
     started = datetime.now(UTC)
     settings = get_settings()
@@ -484,7 +531,9 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
             return result
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
-        query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        query = build_logs_query(
+            block_patterns, minutes, settings.es_query_size, search=search
+        )
         result["query"] = query
         log["es_query"] = query
 
@@ -504,16 +553,16 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
         if not hits:
             return result
 
-        # Raw matches (whitelisted docs included, badged in the UI) so the
-        # table shows everything the query actually returned.
+        # By default raw matches are returned (whitelisted docs badged in the
+        # UI); the user can opt into excluding them so fewer rows come back.
         df = apply_filters(
             pd.DataFrame([h["_source"] for h in hits]),
             whitelist_regex,
-            exclude_whitelist=False,
+            exclude_whitelist=exclude_whitelist,
         )
+        log["filtered"] = len(df)
         if df.empty:
             return result
-        log["filtered"] = len(df)
 
         result["total_requests"] = int(len(df))
         result["unique_ips"] = int(df["client_ip"].nunique())
@@ -542,6 +591,8 @@ async def run_query(minutes: int = 60, limit: int = 500) -> dict:
         print(f"[{datetime.now(UTC).isoformat()}][WARN] Query run failed: {e}")
     finally:
         log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        if log["webhook_status"] is None and not log["webhook_error"]:
+            log["webhook_reason"] = "Query runs don't trigger webhook delivery"
         await write_log(log)
     return result
 

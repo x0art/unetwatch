@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   CheckCircle2,
+  CircleSlash,
   Eraser,
   Eye,
   FileJson,
@@ -77,6 +78,16 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
         <Badge variant={ok ? "success" : "destructive"}>
           {ok ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <XCircle className="mr-1 h-3 w-3" />}
           {log.webhook_status}
+        </Badge>
+      </span>
+    )
+  }
+  if (log.webhook_reason) {
+    return (
+      <span title={log.webhook_reason}>
+        <Badge variant="secondary">
+          <CircleSlash className="mr-1 h-3 w-3" />
+          Skipped
         </Badge>
       </span>
     )
@@ -466,7 +477,9 @@ export function LogsPage() {
                       ? `Delivery failed: ${detail.webhook_error}`
                       : detail.webhook_status !== null && detail.webhook_status !== undefined
                         ? `HTTP ${detail.webhook_status}`
-                        : "No webhook call was made"}
+                        : detail.webhook_reason
+                          ? detail.webhook_reason
+                          : "No webhook call was made"}
                   </p>
                 </div>
               </div>

@@ -50,9 +50,17 @@ export interface GraphLink {
   count: number
 }
 
+export interface GraphFlow {
+  client_ip: string
+  server_ip: string
+  url: string
+  count: number
+}
+
 export interface FindingsGraph {
   nodes: GraphNode[]
   links: GraphLink[]
+  flows: GraphFlow[]
 }
 
 export interface BlacklistSet {
@@ -189,8 +197,15 @@ export interface QueryResult {
   error?: string
 }
 
-export async function runQuery(minutes: number): Promise<QueryResult> {
-  return request(`/query/run?minutes=${minutes}`)
+export async function runQuery(
+  minutes: number,
+  opts?: { q?: string; excludeWhitelist?: boolean },
+): Promise<QueryResult> {
+  const params = new URLSearchParams({ minutes: String(minutes) })
+  const q = opts?.q?.trim()
+  if (q) params.set("q", q)
+  if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
+  return request(`/query/run?${params}`)
 }
 
 /* ── Monitor logs (ES query + webhook audit trail) ───────────────── */
@@ -209,6 +224,7 @@ export interface MonitorLog {
   webhook_url: string | null
   webhook_status: number | null
   webhook_error: string | null
+  webhook_reason: string | null
   error: string | null
 }
 

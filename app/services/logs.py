@@ -27,8 +27,9 @@ async def write_log(entry: dict) -> None:
         await db.execute(
             "INSERT INTO monitor_logs"
             " (kind, started_at, duration_ms, minutes, es_online, matches, filtered,"
-            "  stored, es_query, webhook_url, webhook_status, webhook_error, error)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  stored, es_query, webhook_url, webhook_status, webhook_error,"
+            "  webhook_reason, error)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.get("kind", "poll"),
                 entry.get("started_at") or datetime.now(UTC).isoformat(),
@@ -42,6 +43,7 @@ async def write_log(entry: dict) -> None:
                 entry.get("webhook_url"),
                 entry.get("webhook_status"),
                 entry.get("webhook_error"),
+                entry.get("webhook_reason"),
                 entry.get("error"),
             ),
         )
@@ -119,5 +121,6 @@ def default_log(kind: str, minutes: int | None) -> dict:
         "webhook_url": settings.webhook_url or None,
         "webhook_status": None,
         "webhook_error": None,
+        "webhook_reason": None,
         "error": None,
     }

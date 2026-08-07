@@ -45,6 +45,11 @@ const WINDOW_OPTIONS = [
   { value: "1440", label: "Last 24 hours" },
 ]
 
+const WHITELIST_OPTIONS = [
+  { value: "include", label: "Include whitelisted" },
+  { value: "exclude", label: "Exclude whitelisted" },
+]
+
 function formatTime(iso: string) {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
@@ -240,29 +245,38 @@ function buildFlowGroups(flow: QueryFlow) {
 export function QueryPage() {
   const { toast } = useToast()
   const [windowMinutes, setWindowMinutes] = useState("60")
+  const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
+  const [esSearch, setEsSearch] = useState("")
+  const debouncedEsSearch = useDebounce(esSearch, 400)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchQuery = useCallback(async (minutes: number) => {
+  const fetchQuery = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      setResult(await runQuery(minutes))
+      const q = debouncedEsSearch.trim() || undefined
+      setResult(
+        await runQuery(Number(windowMinutes), {
+          q,
+          excludeWhitelist: whitelistMode === "exclude",
+        }),
+      )
     } catch (e) {
       setError((e as Error).message)
       setResult(null)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [windowMinutes, whitelistMode, debouncedEsSearch])
 
+  // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => {
-    fetchQuery(Number(windowMinutes))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    fetchQuery()
+  }, [fetchQuery])
 
-  const handleRun = () => fetchQuery(Number(windowMinutes))
+  const handleRun = () => fetchQuery()
 
   const flowGroups = useMemo(
     () => (result?.flow ? buildFlowGroups(result.flow) : []),
@@ -442,6 +456,33 @@ export function QueryPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Filter inside ES (IP / URL)..."
+              value={esSearch}
+              onChange={(e) => setEsSearch(e.target.value)}
+              className="w-56 pl-8 pr-8"
+              aria-label="Filter results inside Elasticsearch"
+            />
+            {esSearch && (
+              <button
+                type="button"
+                onClick={() => setEsSearch("")}
+                aria-label="Clear ES filter"
+                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Select
+            value={whitelistMode}
+            onChange={(v) => setWhitelistMode(v as "include" | "exclude")}
+            options={WHITELIST_OPTIONS}
+            className="w-44"
+            aria-label="Whitelisted matches"
+          />
           <span className="text-xs text-muted-foreground">Window</span>
           <Select
             value={windowMinutes}

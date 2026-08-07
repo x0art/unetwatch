@@ -132,7 +132,20 @@ async def findings_graph(
             for (a, b), c in ip_url.items()
         ]
     )
-    return {"nodes": nodes, "links": links}
+    # Per-triple flows for the Traffic page table — same top-N cut as the
+    # graph nodes so the table always matches what the visualization shows.
+    flows = [
+        {
+            "client_ip": r["client_ip"],
+            "server_ip": r["server_ip"] or "",
+            "url": r["url"],
+            "count": r["count"],
+        }
+        for r in rows
+        if r["client_ip"] in top_ips and r["url"] in top_urls
+    ]
+    flows.sort(key=lambda f: -f["count"])
+    return {"nodes": nodes, "links": links, "flows": flows}
 
 
 @router.delete("/", status_code=204)

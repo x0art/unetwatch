@@ -880,6 +880,79 @@ export function GraphPage({
         )}
       </div>
 
+      {/* Per-triple access flows table */}
+      <div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold tracking-tight">Access flows</h3>
+            <p className="text-xs text-muted-foreground">
+              Client → server → URL triples for the flagged URLs shown above
+            </p>
+          </div>
+        </div>
+        {loading ? (
+          <div className="space-y-3" aria-busy="true">
+            <Skeleton className="h-48 w-full rounded-lg" />
+          </div>
+        ) : graph && graph.flows.length > 0 ? (
+          <DataTable
+            columns={[
+              {
+                id: "client_ip",
+                header: "Client IP",
+                accessor: (f) => f.client_ip,
+                defaultSortDir: "asc",
+                cell: (f) => <span className="font-mono text-xs">{f.client_ip}</span>,
+              },
+              {
+                id: "server_ip",
+                header: "Server IP",
+                accessor: (f) => f.server_ip,
+                defaultSortDir: "asc",
+                cell: (f) =>
+                  f.server_ip ? (
+                    <span className="font-mono text-xs text-muted-foreground">{f.server_ip}</span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/50">—</span>
+                  ),
+              },
+              {
+                id: "url",
+                header: "URL",
+                accessor: (f) => f.url,
+                defaultSortDir: "asc",
+                cell: (f) => (
+                  <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
+                    {f.url}
+                  </span>
+                ),
+              },
+              {
+                id: "count",
+                header: "Accesses",
+                accessor: (f) => f.count,
+                defaultSortDir: "desc",
+                cell: (f) => <span className="tabular-nums">{f.count.toLocaleString()}</span>,
+                align: "right",
+                width: "w-24",
+              },
+            ]}
+            data={graph.flows}
+            rowId={(f) => `${f.client_ip}|${f.server_ip}|${f.url}`}
+            internalPagination
+            defaultSortBy="count"
+            defaultSortDir="desc"
+            ariaLabel="Access flows"
+          />
+        ) : (
+          <EmptyState
+            icon={Network}
+            title="No access flows"
+            description="Per-triple flows appear here once the graph has traffic data."
+          />
+        )}
+      </div>
+
       {/* Rich tooltip (fixed-positioned outside the scroll container) */}
       {tip && (
         <div

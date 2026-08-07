@@ -34,8 +34,11 @@ async def list_logs(
         where.append("kind = ?")
         params.append(kind)
     if search:
-        where.append("(error LIKE ? OR webhook_error LIKE ? OR es_query LIKE ?)")
-        params.extend([f"%{search}%"] * 3)
+        where.append(
+            "(error LIKE ? OR webhook_error LIKE ? OR webhook_reason LIKE ?"
+            " OR es_query LIKE ?)"
+        )
+        params.extend([f"%{search}%"] * 4)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     count_cursor = await db.execute(
