@@ -198,23 +198,30 @@ export function GraphPage({
   // Spotlight target: keyboard focus takes precedence over hover.
   const activeId = focused ?? hovered
 
-  const fetchGraph = useCallback(async () => {
+  const fetchGraph = useCallback(() => {
+    let cancelled = false
     setLoading(true)
     setError(null)
     setTip(null) // drop a stale tooltip when the graph is replaced
-    try {
-      setGraph(await getFindingsGraph(Number(limit)))
-    } catch (e) {
-      setError((e as Error).message)
-      setGraph(null)
-    } finally {
-      setLoading(false)
+    getFindingsGraph(Number(limit))
+      .then((g) => {
+        if (!cancelled) setGraph(g)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError((e as Error).message)
+          setGraph(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
   }, [limit])
 
-  useEffect(() => {
-    fetchGraph()
-  }, [fetchGraph])
+  useEffect(() => fetchGraph(), [fetchGraph])
 
   // Reset client-side table state whenever the underlying graph changes.
   useEffect(() => {

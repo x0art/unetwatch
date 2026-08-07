@@ -252,29 +252,34 @@ export function QueryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchQuery = useCallback(async () => {
+  const fetchQuery = useCallback(() => {
+    let cancelled = false
     setLoading(true)
     setError(null)
-    try {
-      const q = debouncedEsSearch.trim() || undefined
-      setResult(
-        await runQuery(Number(windowMinutes), {
-          q,
-          excludeWhitelist: whitelistMode === "exclude",
-        }),
-      )
-    } catch (e) {
-      setError((e as Error).message)
-      setResult(null)
-    } finally {
-      setLoading(false)
+    const q = debouncedEsSearch.trim() || undefined
+    runQuery(Number(windowMinutes), {
+      q,
+      excludeWhitelist: whitelistMode === "exclude",
+    })
+      .then((res) => {
+        if (!cancelled) setResult(res)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setError((e as Error).message)
+          setResult(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
     }
   }, [windowMinutes, whitelistMode, debouncedEsSearch])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
-  useEffect(() => {
-    fetchQuery()
-  }, [fetchQuery])
+  useEffect(() => fetchQuery(), [fetchQuery])
 
   const handleRun = () => fetchQuery()
 
