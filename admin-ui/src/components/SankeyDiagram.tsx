@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef } from "react"
-import * as echarts from "echarts/core"
-import { SankeyChart } from "echarts/charts"
-import { TooltipComponent } from "echarts/components"
-import { CanvasRenderer } from "echarts/renderers"
+// Root import: the modular subpaths (echarts/core, echarts/charts, …) are
+// not resolvable under every echarts install / bundler setup, so use the
+// full package (which registers the sankey chart + tooltip + canvas by
+// default). Cost is a larger bundle; reliability is guaranteed.
+import * as echarts from "echarts"
 import { useTheme } from "./Sidebar"
-
-echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 
 /* ════════════════════════════════════════════════════════════════
  * SankeyDiagram — reusable ECharts Sankey wrapper
