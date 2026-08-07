@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     es_query_size: int = 5000
     redirect_check_interval_minutes: int = 60
     redirect_timeout_seconds: int = 10
+    # Monitor log audit trail bounds: prune rows older than this many days,
+    # and never keep more than this many rows (newest wins).
+    log_retention_days: int = 30
+    log_max_rows: int = 1000
     database_url: str = "sqlite:///./elk_monitoring.db"
     api_key: str = ""
     admin_user: str = "admin"

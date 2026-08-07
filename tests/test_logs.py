@@ -81,6 +81,89 @@ def test_logs_delete_one_404(client):
     assert client.delete("/api/logs/9999").status_code == 404
 
 
+async def test_prune_logs_by_max_rows(client):
+    from app.services.logs import prune_logs, write_log
+
+    for i in range(5):
+        await write_log({"kind": "query", "minutes": 60, "matches": i})
+    assert client.get("/api/logs/").json()["total"] == 5
+
+    res = await prune_logs(max_rows=2)
+    assert res["by_count"] == 3
+
+    data = client.get("/api/logs/").json()
+    assert data["total"] == 2
+    # Newest two survive (inserted last).
+    assert sorted(r["matches"] for r in data["items"]) == [3, 4]
+
+
+async def test_prune_logs_by_retention(client):
+    # Insert directly (bypassing write_log's auto-prune) so the old row
+    # survives until we prune explicitly.
+    from datetime import UTC, datetime
+
+    from app.database import get_db
+    from app.services.logs import prune_logs
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO monitor_logs (kind, started_at, matches)"
+            " VALUES ('query', ?, 1)",
+            ("2020-01-01T00:00:00+00:00",),
+        )
+        await db.execute(
+            "INSERT INTO monitor_logs (kind, started_at, matches)"
+            " VALUES ('query', ?, 2)",
+            (datetime.now(UTC).isoformat(),),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    res = await prune_logs(retention_days=1)
+    assert res["by_age"] == 1
+
+    data = client.get("/api/logs/").json()
+    assert data["total"] == 1
+    assert data["items"][0]["matches"] == 2
+
+
+async def test_write_log_auto_prunes_old_rows(client):
+    """The default prune runs after every write, so stale rows never linger."""
+
+    from app.database import get_db
+    from app.services.logs import write_log
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO monitor_logs (kind, started_at, matches)"
+            " VALUES ('query', ?, 99)",
+            ("2020-01-01T00:00:00+00:00",),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    await write_log({"kind": "query", "minutes": 60, "matches": 1})
+
+    data = client.get("/api/logs/").json()
+    assert data["total"] == 1
+    assert data["items"][0]["matches"] == 1
+
+
+async def test_prune_logs_defaults_noop(client):
+    """Default settings keep recent rows; nothing is pruned unexpectedly."""
+    from app.services.logs import prune_logs, write_log
+
+    for i in range(3):
+        await write_log({"kind": "query", "minutes": 60, "matches": i})
+    res = await prune_logs()
+    assert res == {"by_age": 0, "by_count": 0}
+    assert client.get("/api/logs/").json()["total"] == 3
+
+
 async def test_query_run_records_log_and_degrades_gracefully(client, monkeypatch):
     """ES unreachable → 200 with es_online=False, and a query log is written."""
     from app.services import monitor as svc

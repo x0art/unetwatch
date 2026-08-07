@@ -166,6 +166,12 @@ async def init_db():
     await db.commit()
     await db.close()
 
+    # Keep the monitor_logs audit trail bounded on every startup (handles
+    # rows written by earlier versions / long uptimes).
+    from app.services.logs import prune_logs
+
+    await prune_logs()
+
 
 async def seed_defaults():
     """Seed DB with patterns from existing main.py lists."""
