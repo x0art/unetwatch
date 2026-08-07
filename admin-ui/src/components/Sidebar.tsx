@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   Activity,
   Ban,
@@ -25,6 +25,11 @@ import { Button } from "./ui"
  * Default: dark. Toggle adds/removes `light` class on <html>.
  * Persisted in localStorage("elk-theme"). The <html> element carries
  * `dark` by default; `.light` opts in to light tokens (see index.css).
+ *
+ * The theme state lives in a context provider so every consumer (the
+ * sidebar toggle, the chart palette, …) shares ONE source of truth.
+ * A per-hook useState would leave each consumer with its own isolated
+ * theme — toggling would update only the sidebar, never the charts.
  * ════════════════════════════════════════════════════════════════ */
 
 export type Theme = "dark" | "light"
@@ -48,7 +53,15 @@ function readInitialTheme(): Theme {
   return stored === "light" ? "light" : "dark"
 }
 
-export function useTheme() {
+interface ThemeContextValue {
+  theme: Theme
+  setTheme: (t: Theme) => void
+  toggle: () => void
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null)
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme())
 
   useEffect(() => {
@@ -60,8 +73,22 @@ export function useTheme() {
     }
   }, [theme])
 
-  const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"))
-  return { theme, setTheme, toggle }
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      theme,
+      setTheme,
+      toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
+    }),
+    [theme],
+  )
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+}
+
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext)
+  if (!ctx) throw new Error("useTheme must be used within <ThemeProvider>")
+  return ctx
 }
 
 /* ════════════════════════════════════════════════════════════════

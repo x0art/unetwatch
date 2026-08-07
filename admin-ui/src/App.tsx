@@ -18,7 +18,7 @@ import { RedirectsPage } from "./components/RedirectsPage"
 import { QueryPage } from "./components/QueryPage"
 import { LogsPage } from "./components/LogsPage"
 import { AppShell } from "./components/AppShell"
-import { type View } from "./components/Sidebar"
+import { ThemeProvider, type View } from "./components/Sidebar"
 import { Button, ToastProvider, useToast } from "./components/ui"
 import { RotateCcw } from "lucide-react"
 
@@ -148,9 +148,11 @@ function AppRoutes() {
 
 function App() {
   return (
-    <ToastProvider>
-      <AppRoutes />
-    </ToastProvider>
+    <ThemeProvider>
+      <ToastProvider>
+        <AppRoutes />
+      </ToastProvider>
+    </ThemeProvider>
   )
 }
 
