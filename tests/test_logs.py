@@ -190,6 +190,10 @@ async def test_query_run_records_log_and_degrades_gracefully(client, monkeypatch
     logs = client.get("/api/logs/?kind=query").json()
     assert logs["total"] == 1
     assert logs["items"][0]["es_online"] == 0
+    # A failed run records the error but must NOT be labelled as a skipped
+    # delivery — nothing was skipped, the run itself failed.
+    assert logs["items"][0]["error"] is not None
+    assert logs["items"][0]["webhook_reason"] is None
 
 
 async def test_query_run_annotates_lists(client, monkeypatch):

@@ -596,7 +596,13 @@ async def run_query(
         print(f"[{datetime.now(UTC).isoformat()}][WARN] Query run failed: {e}")
     finally:
         log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
-        if log["webhook_status"] is None and not log["webhook_error"]:
+        # Only label the delivery skip when the run actually completed —
+        # a failed run (log["error"]) wasn't "skipped", it never got there.
+        if (
+            not log["error"]
+            and log["webhook_status"] is None
+            and not log["webhook_error"]
+        ):
             log["webhook_reason"] = "Query runs don't trigger webhook delivery"
         await write_log(log)
     return result

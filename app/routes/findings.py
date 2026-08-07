@@ -139,6 +139,7 @@ async def findings_graph(
             "client_ip": r["client_ip"],
             "server_ip": r["server_ip"] or "",
             "url": r["url"],
+            "base_url": r["base_url"],
             "count": r["count"],
         }
         for r in rows

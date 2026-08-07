@@ -452,12 +452,14 @@ async def test_findings_graph_shape(client):
         "client_ip": "1.2.3.4",
         "server_ip": "10.0.0.1",
         "url": "http://evil.example/a",
+        "base_url": "evil.example",
         "count": 1,
     } in data["flows"]
     assert {
         "client_ip": "9.9.9.9",
         "server_ip": "",
         "url": "http://nohost.example/d",
+        "base_url": "nohost.example",
         "count": 1,
     } in data["flows"]
 

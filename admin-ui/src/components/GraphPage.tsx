@@ -945,7 +945,7 @@ export function GraphPage({
               },
             ]}
             data={graph.flows}
-            rowId={(f) => `${f.client_ip}|${f.server_ip}|${f.url}`}
+            rowId={(f) => `${f.client_ip}|${f.server_ip}|${f.url}|${f.base_url}`}
             internalPagination
             defaultSortBy="count"
             defaultSortDir="desc"

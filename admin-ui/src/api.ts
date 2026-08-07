@@ -54,6 +54,7 @@ export interface GraphFlow {
   client_ip: string
   server_ip: string
   url: string
+  base_url: string
   count: number
 }
 
