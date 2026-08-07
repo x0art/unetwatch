@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import {
   type RedirectGraph,
+  type RedirectLink,
   type TrackedUrl,
   type UrlRedirectHistory,
   addBaseUrlToBlacklist,
@@ -74,24 +75,71 @@ function directNodes(graph: RedirectGraph | null): RedirectGraph["nodes"] {
     .sort((a, b) => a.label.localeCompare(b.label))
 }
 
-/* Sankey input: every tracked URL that currently lands elsewhere links to
- * its final destination; the destination nodes carry the flow totals. */
+/* Layered (alluvial) input for the redirect flow.
+ *
+ * The backend graph exposes every hop of every chain as a `links` edge
+ * (source → target, http_status). Layering by longest-path depth turns
+ * those hops into a true alluvial flow, so chains longer than one hop
+ * show their intermediate destinations:
+ *
+ *   [] url1  final_url1 []
+ *   [] url2  [] url2_1  [] url2_2  final_url2 []
+ *
+ * Only `active` edges render — historical (superseded) hops stay in the
+ * table + per-URL history drawer, not in the live flow. */
 function toSankey(graph: RedirectGraph | null): {
   nodes: SankeyNode[]
   links: SankeyLink[]
 } {
   if (!graph) return { nodes: [], links: [] }
 
-  const nodes: SankeyNode[] = graph.nodes.map((n) => ({ id: n.id, name: n.label }))
-  const links: SankeyLink[] = []
-  for (const n of graph.nodes) {
-    if (n.final_url && n.final_url !== n.id) {
-      if (!nodes.some((x) => x.id === n.final_url)) {
-        nodes.push({ id: n.final_url, name: n.final_url })
-      }
-      links.push({ source: n.id, target: n.final_url, value: 1 })
-    }
+  const active = graph.links.filter((l) => l.active)
+  if (active.length === 0) return { nodes: [], links: [] }
+
+  // Adjacency for depth computation.
+  const outgoing = new Map<string, RedirectLink[]>()
+  const incoming = new Map<string, RedirectLink[]>()
+  for (const l of active) {
+    if (!outgoing.has(l.source)) outgoing.set(l.source, [])
+    if (!incoming.has(l.target)) incoming.set(l.target, [])
+    outgoing.get(l.source)!.push(l)
+    incoming.get(l.target)!.push(l)
   }
+
+  // Every URL that appears in an active hop is a node; drop nodes with no
+  // active edges (e.g. stale tracked URLs whose chain moved on).
+  const nodeIds = new Set<string>()
+  for (const l of active) {
+    nodeIds.add(l.source)
+    nodeIds.add(l.target)
+  }
+
+  // Longest-path depth: a node's layer is the farthest a chain can reach
+  // before it, so roots sit at 0 and terminals on the last layer.
+  const depth = new Map<string, number>()
+  const visit = (id: string): number => {
+    const cached = depth.get(id)
+    if (cached !== undefined) return cached
+    const parents = incoming.get(id) ?? []
+    const d = parents.length === 0 ? 0 : 1 + Math.max(...parents.map((p) => visit(p.source)))
+    depth.set(id, d)
+    return d
+  }
+  for (const id of nodeIds) visit(id)
+
+  const nodes: SankeyNode[] = [...nodeIds].map((id) => ({
+    id,
+    name: graph.nodes.find((n) => n.id === id)?.label ?? id,
+    layer: depth.get(id) ?? 0,
+  }))
+
+  const links: SankeyLink[] = active.map((l) => ({
+    source: l.source,
+    target: l.target,
+    value: 1,
+    name: `${l.http_status} →`,
+  }))
+
   return { nodes, links }
 }
 

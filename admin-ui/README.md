@@ -1,6 +1,6 @@
-# ELK Monitoring — Admin Console
+# uNetWatch — Admin Console
 
-The web admin UI for the ELK Monitoring project. Built with React + TypeScript,
+The web admin UI for the uNetWatch project. Built with React + TypeScript,
 Vite, Tailwind CSS v4, and Radix UI primitives (no external CDN).
 
 ## Development

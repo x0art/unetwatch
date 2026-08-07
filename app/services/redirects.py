@@ -28,7 +28,7 @@ async def _request_once(
         url,
         allow_redirects=False,
         timeout=timeout,
-        headers={"User-Agent": "elk-monitor/0.1"},
+        headers={"User-Agent": "unetwatch/1.0.0"},
     ) as resp:
         return resp.status, resp.headers.get("Location")
 

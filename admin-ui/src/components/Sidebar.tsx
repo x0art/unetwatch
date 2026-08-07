@@ -23,8 +23,10 @@ import { Button } from "./ui"
  * Theme management
  *
  * Default: dark. Toggle adds/removes `light` class on <html>.
- * Persisted in localStorage("elk-theme"). The <html> element carries
- * `dark` by default; `.light` opts in to light tokens (see index.css).
+ * Persisted in localStorage("unetwatch-theme"). The <html> element
+ * carries `dark` by default; `.light` opts in to light tokens (see
+ * index.css). The old "elk-theme" key is read as a fallback so existing
+ * installs keep their theme across the uNetWatch upgrade.
  *
  * The theme state lives in a context provider so every consumer (the
  * sidebar toggle, the chart palette, …) shares ONE source of truth.
@@ -34,7 +36,8 @@ import { Button } from "./ui"
 
 export type Theme = "dark" | "light"
 
-const THEME_KEY = "elk-theme"
+const THEME_KEY = "unetwatch-theme"
+const LEGACY_THEME_KEY = "elk-theme"
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement
@@ -49,7 +52,9 @@ function applyTheme(theme: Theme) {
 
 function readInitialTheme(): Theme {
   if (typeof window === "undefined") return "dark"
-  const stored = window.localStorage.getItem(THEME_KEY)
+  const stored =
+    window.localStorage.getItem(THEME_KEY) ??
+    window.localStorage.getItem(LEGACY_THEME_KEY)
   return stored === "light" ? "light" : "dark"
 }
 
@@ -171,7 +176,7 @@ function SidebarContent({
           <Activity className="h-5 w-5 text-sidebar-active" aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold tracking-tight">ELK Monitor</p>
+          <p className="truncate text-sm font-semibold tracking-tight">uNetWatch</p>
           <p className="truncate text-[11px] text-sidebar-muted">Pattern console</p>
         </div>
       </div>

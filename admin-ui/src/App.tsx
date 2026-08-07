@@ -108,7 +108,7 @@ function AppRoutes() {
       currentView={view}
       onNavigate={handleNavigate}
       onLogout={handleLogout}
-      title="ELK Monitoring"
+      title="uNetWatch"
       description="Pattern console"
       actions={
         <Button

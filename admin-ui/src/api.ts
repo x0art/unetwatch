@@ -298,14 +298,22 @@ const API = "/api"
 
 let _token: string | null = null
 
+const TOKEN_KEY = "unetwatch_token"
+const LEGACY_TOKEN_KEY = "elk_token"
+
 export function setToken(t: string | null) {
   _token = t
-  if (t) localStorage.setItem("elk_token", t)
-  else localStorage.removeItem("elk_token")
+  if (t) localStorage.setItem(TOKEN_KEY, t)
+  else {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+  }
 }
 
 export function getToken(): string | null {
-  if (!_token) _token = localStorage.getItem("elk_token")
+  if (!_token) {
+    _token = localStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(LEGACY_TOKEN_KEY)
+  }
   return _token
 }
 

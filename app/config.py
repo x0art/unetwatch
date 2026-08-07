@@ -3,13 +3,17 @@ from secrets import compare_digest
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import APIKeyHeader, HTTPBasic, HTTPBasicCredentials
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 security_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
 basic_scheme = HTTPBasic(auto_error=False)
 
+WEAK_PASSWORDS = {"changeme", "admin", "password", "123456", "secret"}
+
 
 class Settings(BaseSettings):
+    app_env: str = "development"
     elastic_host: str = "http://localhost:9200"
     elastic_index: str = "logstash-proxy-*"
     elastic_user: str = "elastic"
@@ -23,12 +27,37 @@ class Settings(BaseSettings):
     # and never keep more than this many rows (newest wins).
     log_retention_days: int = 30
     log_max_rows: int = 1000
-    database_url: str = "sqlite:///./elk_monitoring.db"
+    database_url: str = "sqlite:///./unetwatch.db"
     api_key: str = ""
     admin_user: str = "admin"
     admin_pass: str = "changeme"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def _validate_production(self):
+        """Fail fast in production: refuse weak/default credentials and
+        require an API key and a configured Elasticsearch endpoint."""
+        if self.app_env != "production":
+            return self
+
+        if not self.admin_pass or self.admin_pass.lower() in WEAK_PASSWORDS:
+            raise ValueError(
+                "APP_ENV=production requires a strong ADMIN_PASS "
+                "(not changeme/admin/password/123456/secret)."
+            )
+        if not self.api_key:
+            raise ValueError(
+                "APP_ENV=production requires a non-empty API_KEY for programmatic access."
+            )
+        if not self.elastic_host or self.elastic_host.startswith("http://localhost"):
+            raise ValueError(
+                "APP_ENV=production requires an explicit ELASTIC_HOST (not localhost)."
+            )
+        if not self.elastic_index:
+            raise ValueError("APP_ENV=production requires a non-empty ELASTIC_INDEX.")
+        return self
 
 
 @lru_cache

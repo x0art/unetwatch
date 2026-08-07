@@ -72,7 +72,7 @@ export function DashboardPage({
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            ELK monitoring system overview
+            uNetWatch monitoring system overview
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">

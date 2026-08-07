@@ -60,7 +60,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
               <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 Admin Console
               </p>
-              <h1 className="mt-1 text-xl font-bold tracking-tight">ELK Monitoring</h1>
+              <h1 className="mt-1 text-xl font-bold tracking-tight">uNetWatch</h1>
               <p className="mt-1 text-sm text-muted-foreground">Sign in to continue</p>
             </div>
 

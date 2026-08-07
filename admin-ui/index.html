@@ -4,13 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="URL pattern monitoring for Elasticsearch logs" />
-    <title>ELK Monitoring</title>
+    <meta name="description" content="URL pattern monitoring and redirect tracking for Elasticsearch proxy logs" />
+    <title>uNetWatch</title>
     <script>
       // Apply theme before paint to avoid FOUC. Defaults to dark.
+      // Reads the legacy "elk-theme" key as a fallback for existing installs.
       (function () {
         try {
-          var t = localStorage.getItem("elk-theme");
+          var t = localStorage.getItem("unetwatch-theme") || localStorage.getItem("elk-theme");
           if (t === "light") {
             document.documentElement.classList.add("light");
           } else {

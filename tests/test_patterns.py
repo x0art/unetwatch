@@ -4,7 +4,10 @@
 def test_health(client):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] in ("ok", "degraded")
+    assert body["version"] == "1.0.0"
+    assert "database" in body["dependencies"]
 
 
 def test_create_pattern(client):

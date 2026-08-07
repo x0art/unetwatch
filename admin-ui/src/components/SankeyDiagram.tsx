@@ -44,6 +44,8 @@ export interface SankeyLink {
   source: string
   target: string
   value: number
+  /** Optional edge label shown in the tooltip (e.g. "302 →"). */
+  name?: string
 }
 
 /* Static fallback palette (dark theme). Used when the live CSS token is
@@ -231,9 +233,17 @@ function buildOption(
       textStyle: { color: palette.label, fontSize: 12 },
       formatter: (params: TooltipComponentFormatterCallbackParams) => {
         const p = Array.isArray(params) ? params[0] : params
-        return p.dataType === "edge"
-          ? `${p.name} · ${Number(p.value ?? 0).toLocaleString()}`
-          : p.name
+        if (p.dataType === "edge") {
+          // Redirect hops carry a "302 →" style name; fall back to
+          // "source → target" when no name is set. Sankey edges expose
+          // source/target at runtime even though the base param type
+          // doesn't declare them.
+          const src = (p as { source?: string }).source ?? ""
+          const tgt = (p as { target?: string }).target ?? ""
+          if (p.name) return `${p.name} ${src} → ${tgt}`
+          return src ? `${src} → ${tgt}` : p.name
+        }
+        return p.name
       },
     },
     series: [

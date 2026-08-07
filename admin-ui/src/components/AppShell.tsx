@@ -22,7 +22,7 @@ import { cn } from "../lib/utils"
  *
  * Theme: useTheme() is invoked here and the toggle is wired into the
  * sidebar footer. The hook applies `dark`/`light` on <html> and
- * persists to localStorage("elk-theme"); default is dark.
+ * persists to localStorage("unetwatch-theme"); default is dark.
  * ════════════════════════════════════════════════════════════════ */
 
 export function AppShell({

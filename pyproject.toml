@@ -1,9 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "elk-monitoring"
-version = "0.2.0"
-description = "FastAPI-based ELK URL pattern monitoring with CRUD admin"
+name = "unetwatch"
+version = "1.0.0"
+description = "URL pattern monitoring and redirect tracking for Elasticsearch proxy logs"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Yusuf Umar" }]
+keywords = ["elasticsearch", "monitoring", "url-patterns", "redirect-tracking", "fastapi"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Monitoring",
+]
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
@@ -14,6 +31,12 @@ dependencies = [
     "aiohttp>=3.10.0",
     "apscheduler>=3.10.0",
 ]
+
+[project.scripts]
+unetwatch = "app.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
 
 [project.optional-dependencies]
 dev = [
