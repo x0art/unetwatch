@@ -89,7 +89,7 @@ export const DEFAULT_NAV: NavItem[] = [
   { view: "query", label: "Query", icon: FileSearch },
   { view: "patterns", label: "Patterns", icon: ListFilter },
   { view: "findings", label: "Findings", icon: Radar },
-  { view: "graph", label: "Graph", icon: Network },
+  { view: "graph", label: "Traffic", icon: Network },
   { view: "blacklist", label: "Blacklist", icon: Ban },
   { view: "redirects", label: "Redirects", icon: GitBranch },
   { view: "logs", label: "Logs", icon: ScrollText },

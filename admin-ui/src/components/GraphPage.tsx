@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  ArrowUpRight,
-  Ban,
   Link2,
   Maximize,
   MousePointerClick,
@@ -19,11 +17,9 @@ import {
   type FindingsGraph,
   type GraphLink,
   type GraphNode,
-  addBaseUrlToBlacklist,
   getFindingsGraph,
 } from "../api"
 import {
-  Badge,
   Button,
   EmptyState,
   Input,
@@ -51,12 +47,19 @@ interface GraphTransform {
   ty: number
 }
 
-/* ── Layer geometry (fixed 3-column flow: client IP → server IP → URL) ── */
+/* ── Layer geometry (hierarchical flow: client IP → server IP → URL) ──
+ *
+ * The three layers are deliberately asymmetric. Client IPs (many, small)
+ * funnel into a narrow server-junction layer (the hub every request passes
+ * through), then fan out to a wide URL layer (long strings, varied hosts).
+ * The widths and gaps make that convergence visually obvious instead of
+ * three equal lists side by side.
+ */
 
 const KIND_COLUMN: Record<Kind, { x: number; width: number; label: string }> = {
-  ip: { x: 24, width: 180, label: "Client IP" },
-  server: { x: 268, width: 180, label: "Server IP" },
-  url: { x: 512, width: 380, label: "URL" },
+  ip: { x: 24, width: 160, label: "Client IP" },
+  server: { x: 232, width: 150, label: "Server IP" },
+  url: { x: 430, width: 400, label: "URL" },
 }
 
 const KIND_LABEL: Record<Kind, string> = {
@@ -71,16 +74,10 @@ const KIND_PLURAL: Record<Kind, string> = {
   url: "URLs",
 }
 
-const KIND_BADGE: Record<Kind, "secondary" | "warning" | "destructive"> = {
-  ip: "secondary",
-  server: "warning",
-  url: "destructive",
-}
-
 const NODE_HEIGHT = 40
 const TOP_PAD = 84
 const BOTTOM_PAD = 32
-const CANVAS_WIDTH = 512 + 380 + 40
+const CANVAS_WIDTH = 24 + 160 + 48 + 150 + 48 + 400 + 24
 const MAX_CANVAS_HEIGHT = 760
 
 const LIMIT_OPTIONS = [
@@ -104,7 +101,6 @@ const EDGE_STYLES: Record<Kind, string> = {
 
 const MIN_SCALE = 0.2
 const MAX_SCALE = 3
-const PAGE_SIZE = 25
 
 function clampScale(s: number) {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s))
@@ -132,20 +128,98 @@ function buildLayout(graph: FindingsGraph): {
     byKind[k].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
   }
 
-  const maxPerLayer = Math.max(1, ...Object.values(byKind).map((l) => l.length))
+  // Bipartite adjacency: which clients reach which servers, and which
+  // servers answer which URLs. Used to cluster the outer layers around
+  // their junction so the convergence reads as a flow, not three lists.
+  const clientServers = new Map<string, string[]>() // client id → server ids
+  const serverUrls = new Map<string, string[]>() // server id → url ids
+  for (const l of graph.links) {
+    const sKind = kindOf(l.source)
+    const tKind = kindOf(l.target)
+    if (sKind === "ip" && tKind === "server") {
+      const list = clientServers.get(l.source) ?? []
+      list.push(l.target)
+      clientServers.set(l.source, list)
+    } else if (sKind === "server" && tKind === "url") {
+      const list = serverUrls.get(l.source) ?? []
+      list.push(l.target)
+      serverUrls.set(l.source, list)
+    }
+  }
+
+  // Server throughput = total access count of everything it fronts, used
+  // to order hubs by importance (not just count).
+  const serverFlow = new Map<string, number>()
+  for (const l of graph.links) {
+    if (kindOf(l.source) === "server") {
+      serverFlow.set(l.source, (serverFlow.get(l.source) ?? 0) + l.count)
+    }
+  }
+
+  const maxPerLayer = Math.max(
+    1,
+    byKind.ip.length,
+    byKind.server.length,
+    byKind.url.length,
+  )
   const slot = Math.max(
     52,
     Math.min(66, Math.floor((MAX_CANVAS_HEIGHT - TOP_PAD - BOTTOM_PAD) / maxPerLayer)),
   )
   const height = Math.max(360, TOP_PAD + maxPerLayer * slot + BOTTOM_PAD)
 
+  // Primary server per client = the one carrying the most traffic to it,
+  // so clients visually attach to their dominant junction.
+  const primaryServer = new Map<string, string>()
+  for (const [client, servers] of clientServers) {
+    let best: string | null = null
+    let bestFlow = -1
+    for (const s of servers) {
+      const f = serverFlow.get(s) ?? 0
+      if (f > bestFlow) {
+        bestFlow = f
+        best = s
+      }
+    }
+    if (best) primaryServer.set(client, best)
+  }
+
+  // Order servers by throughput; their index gives the vertical band.
+  const orderedServers = [...byKind.server].sort(
+    (a, b) => (serverFlow.get(b.id) ?? 0) - (serverFlow.get(a.id) ?? 0),
+  )
+  const serverY = new Map(orderedServers.map((n, i) => [n.id, i]))
+
   const nodes: LayoutNode[] = graph.nodes.map((n) => {
-    const idx = byKind[n.kind].indexOf(n)
     const col = KIND_COLUMN[n.kind]
+    let x = col.x
+    let y = TOP_PAD
+    if (n.kind === "server") {
+      // Junction hub — centered on its throughput band.
+      y = TOP_PAD + (serverY.get(n.id) ?? 0) * slot + (slot - NODE_HEIGHT) / 2
+    } else if (n.kind === "ip") {
+      // Cluster under the primary server: band = server index, offset by
+      // client order within that band so converging edges are visible.
+      const primary = primaryServer.get(n.id)
+      const band = primary ? serverY.get(primary) ?? 0 : 0
+      const idx = byKind.ip.indexOf(n)
+      y = TOP_PAD + band * slot + (idx % 3) * 14
+    } else {
+      // URL — fan out from its most-trafficked server's band.
+      let band = 0
+      for (const [sid, urls] of serverUrls) {
+        if (urls.includes(n.id)) {
+          band = serverY.get(sid) ?? 0
+          break
+        }
+      }
+      const idx = byKind.url.indexOf(n)
+      y = TOP_PAD + band * slot + (idx % 3) * 14
+    }
     return {
       ...n,
-      x: col.x,
-      y: TOP_PAD + idx * slot + (slot - NODE_HEIGHT) / 2,
+      x,
+      y,
       width: col.width,
       height: NODE_HEIGHT,
     }
@@ -186,10 +260,6 @@ export function GraphPage({
   // Rich tooltip: content + cursor position (fixed coords, clamped to graph).
   const [tip, setTip] = useState<{ node: LayoutNode; x: number; y: number } | null>(null)
 
-  // Table state (endpoints derived from the graph nodes).
-  const [tablePage, setTablePage] = useState(0)
-  const [bulkBusy, setBulkBusy] = useState(false)
-
   const viewportRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
 
@@ -222,11 +292,6 @@ export function GraphPage({
   }, [limit])
 
   useEffect(() => fetchGraph(), [fetchGraph])
-
-  // Reset client-side table state whenever the underlying graph changes.
-  useEffect(() => {
-    setTablePage(0)
-  }, [graph])
 
   const layout = useMemo(() => (graph ? buildLayout(graph) : null), [graph])
   const layoutById = useMemo(
@@ -399,51 +464,14 @@ export function GraphPage({
     setDragging(false)
   }
 
-  /* ── Endpoint table (client-side over graph nodes) ───────────────── */
-
-  const allNodes = useMemo(() => graph?.nodes ?? [], [graph])
-
-  const filteredNodes = useMemo(() => {
-    if (!q) return allNodes
-    return allNodes.filter((n) => n.label.toLowerCase().includes(q))
-  }, [q, allNodes])
-
-  useEffect(() => {
-    setTablePage(0)
-  }, [q])
-
-  const handleBulkBlacklist = async (ids: Set<string | number>) => {
-    const nodes = filteredNodes.filter((n) => ids.has(n.id) && n.label.trim())
-    if (!nodes.length) return
-    setBulkBusy(true)
-    try {
-      const results = await Promise.all(nodes.map((n) => addBaseUrlToBlacklist(n.label)))
-      const added = results.reduce((sum, r) => sum + r.added.length, 0)
-      toast({
-        title: added
-          ? `${added} entr${added === 1 ? "y" : "ies"} added to blacklist`
-          : "Already in blacklist",
-        variant: added ? "success" : "info",
-      })
-    } catch (e) {
-      toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
-    } finally {
-      setBulkBusy(false)
-    }
-  }
-
-  const shareOf = (n: GraphNode) =>
-    layerTotals[n.kind] > 0 ? Math.round((n.count / layerTotals[n.kind]) * 100) : 0
-
   const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
-  const tableEmpty = !loading && (!!error || filteredNodes.length === 0)
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Traffic Graph</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">Traffic</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Flow of flagged URLs being accessed by client IPs (from persisted findings)
           </p>
@@ -507,6 +535,26 @@ export function GraphPage({
           </div>
           {graph && !graphEmpty && (
             <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  placeholder="Highlight by IP or URL..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 w-52 pl-8 pr-8"
+                  aria-label="Highlight graph nodes"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="Clear highlight"
+                    className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
               {q.length > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
                   {matchCount} match{matchCount === 1 ? "" : "es"}
@@ -738,7 +786,7 @@ export function GraphPage({
                         fontSize={11}
                         className={cn(KIND_STYLES[n.kind].label, "font-mono")}
                       >
-                        {truncate(n.label, n.kind === "url" ? 44 : 21)}
+                        {truncate(n.label, n.kind === "url" ? 52 : 20)}
                       </text>
                       <text
                         x={n.x + n.width / 2}
@@ -756,135 +804,6 @@ export function GraphPage({
             </div>
           </div>
         ) : null}
-      </div>
-
-      {/* Endpoints table */}
-      <div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-sm text-muted-foreground">
-            {filteredNodes.length.toLocaleString()} endpoint
-            {filteredNodes.length !== 1 ? "s" : ""}
-            {q.length > 0 && ` matching "${debouncedSearch.trim()}"`}
-          </p>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Search endpoints..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-64 pl-8 pr-8"
-              aria-label="Search endpoints"
-            />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch("")}
-                aria-label="Clear search"
-                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-48 w-full rounded-lg" />
-          </div>
-        ) : tableEmpty ? (
-          <EmptyState
-            icon={SearchX}
-            title={error ? "Unable to load endpoints" : q ? "No matching endpoints" : "No endpoints"}
-            description={
-              error
-                ? error
-                : q
-                  ? "Try adjusting your search."
-                  : "Endpoints appear here once the graph has traffic data."
-            }
-          />
-        ) : (
-          <DataTable
-            columns={[
-              {
-                id: "kind",
-                header: "Kind",
-                accessor: (n) => n.kind,
-                defaultSortDir: "asc",
-                cell: (n) => <Badge variant={KIND_BADGE[n.kind]}>{KIND_LABEL[n.kind]}</Badge>,
-                width: "w-24",
-              },
-              {
-                id: "endpoint",
-                header: "Endpoint",
-                accessor: (n) => n.label,
-                defaultSortDir: "asc",
-                cell: (n) => (
-                  <span className="font-mono text-xs" title={n.label}>
-                    {truncate(n.label, 56)}
-                  </span>
-                ),
-              },
-              {
-                id: "accesses",
-                header: "Accesses",
-                accessor: (n) => n.count,
-                cell: (n) => <span className="tabular-nums">{n.count.toLocaleString()}</span>,
-                align: "right",
-                width: "w-24",
-                defaultSortDir: "desc",
-              },
-              {
-                id: "share",
-                header: "Share",
-                enableSorting: false,
-                cell: (n) => (
-                  <span className="tabular-nums text-muted-foreground">{shareOf(n)}%</span>
-                ),
-                align: "right",
-                width: "w-20",
-              },
-              {
-                id: "actions",
-                header: <span className="sr-only">Actions</span>,
-                enableSorting: false,
-                align: "right",
-                width: "w-16",
-                cell: (n) => (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                    onClick={() => openFindings(n)}
-                    aria-label={`View findings for ${n.label}`}
-                  >
-                    <ArrowUpRight className="h-4 w-4" />
-                  </Button>
-                ),
-              },
-            ]}
-            data={filteredNodes}
-            rowId={(n) => n.id}
-            selectable
-            busy={bulkBusy}
-            internalPagination
-            bulkActions={[
-              {
-                label: "Add to blacklist",
-                icon: Ban,
-                variant: "outline",
-                onClick: handleBulkBlacklist,
-              },
-            ]}
-            defaultSortBy="accesses"
-            defaultSortDir="desc"
-            page={tablePage}
-            pageSize={PAGE_SIZE}
-            onPageChange={setTablePage}
-            ariaLabel="Endpoints"
-          />
-        )}
       </div>
 
       {/* Per-triple access flows table */}
