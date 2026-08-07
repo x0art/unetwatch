@@ -176,29 +176,13 @@ function contentHeight(nodes: SankeyNode[], nodeHeight = 30, nodeGap = 16, pad =
   return Math.max(240, Math.min(700, pad + max * nodeHeight + (max - 1) * nodeGap))
 }
 
-/* Label formatting + measurement. The rightmost layer's labels are
- * rendered to the right of their nodes, outside the series area — the
- * callers' overflow-hidden cards clip anything past the right edge. We
- * measure those labels with the same mono font and reserve the width as
- * the series `right` margin so the text always shows. This is pure
- * measurement (no layout side effects), so it's safe during render. */
+/* Label formatting. Long names are truncated to keep the diagram tidy;
+ * the truncation is a pure function, so it's safe during render. */
 const MAX_LABEL = 42
-const LABEL_FONT = "11px ui-monospace, SFMono-Regular, monospace"
 
 function formatLabel(name: string): string {
   return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
 }
-
-function measureLabelWidth(text: string): number {
-  if (typeof document === "undefined") return text.length * 6.6
-  // Lazy, cached measurement canvas — created once, reused. It is NOT
-  // attached to the DOM, so this has no render-phase side effects.
-  const ctx = measureLabelWidth.ctx ?? (measureLabelWidth.ctx = document.createElement("canvas").getContext("2d"))
-  if (!ctx) return text.length * 6.6
-  ctx.font = LABEL_FONT
-  return ctx.measureText(text).width
-}
-measureLabelWidth.ctx = undefined as CanvasRenderingContext2D | null | undefined
 
 function buildOption(
   nodes: SankeyNode[],
@@ -222,15 +206,19 @@ function buildOption(
           color: resolveColor(layerColors[String(n.layer ?? 0)] ?? paletteColors[0]),
         })
       : undefined
-  const data = nodes.map((n) => (nodeItemStyle ? { ...n, itemStyle: nodeItemStyle(n) } : n))
-
-  /* Rightmost layer: labels hang off the right edge of their nodes, so
-   * reserve enough `right` margin for the widest one — otherwise the
-   * caller's overflow-hidden card clips the text. */
+  /* Last layer: labels point LEFT into the chart (per-node label
+   * override) so the diagram uses the full container width. The widest
+   * last-layer label no longer needs to be reserved as `right` margin.
+   * Other layers inherit the series-level `position: "right"`. */
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
-  const lastLayerLabels = nodes.filter((n) => (n.layer ?? 0) === maxLayer).map((n) => formatLabel(n.name))
-  const rightLabelWidth = lastLayerLabels.reduce((m, t) => Math.max(m, measureLabelWidth(t)), 0)
-  const rightMargin = 12 + rightLabelWidth + 8
+  const data = nodes.map((n) => {
+    const item: (SankeyNode & { itemStyle?: { color: string }; label?: { position: "left" } }) = {
+      ...n,
+      ...(nodeItemStyle ? { itemStyle: nodeItemStyle(n) } : {}),
+      ...((n.layer ?? 0) === maxLayer ? { label: { position: "left" } } : {}),
+    }
+    return item
+  })
 
   return {
     animationDuration: 500,
@@ -254,7 +242,7 @@ function buildOption(
         data,
         links,
         left: 8,
-        right: rightMargin,
+        right: 8,
         top: 12,
         bottom: 12,
         nodeWidth: 16,
@@ -270,6 +258,8 @@ function buildOption(
           color: palette.label,
           fontFamily: "ui-monospace, SFMono-Regular, monospace",
           fontSize: 11,
+          // Default position for non-last-layer nodes; last-layer nodes
+          // override this to "left" via their per-node `label`.
           position: "right",
           formatter: (p: { name: string }) => formatLabel(p.name),
         },
