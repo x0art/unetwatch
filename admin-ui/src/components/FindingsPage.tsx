@@ -6,7 +6,6 @@ import {
   Eraser,
   History,
   SearchX,
-  Search,
   RefreshCcw,
   Trash2,
 } from "lucide-react"
@@ -24,7 +23,7 @@ import {
   listTrackedUrls,
   type Pattern,
 } from "../api"
-import { Button, ConfirmDialog, Input, useToast } from "./ui"
+import { Button, ConfirmDialog, PageHeader, SearchInput, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 
@@ -154,8 +153,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     return cancel
   }, [refetchBlacklist])
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value)
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
     setPage(0)
   }
 
@@ -449,40 +448,32 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Findings</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {total.toLocaleString()} finding{total !== 1 ? "s" : ""} detected
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Search IP or URL..."
-              value={search}
-              onChange={handleSearchChange}
-              className="pl-8 w-64"
-              aria-label="Search findings"
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={total === 0 || loading || busy}
-            onClick={() => setConfirmClear(true)}
-            className="text-destructive hover:text-destructive"
-          >
-            <Eraser className="h-4 w-4" />
-            Clear all
-          </Button>
-          <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Findings"
+        description={`${total.toLocaleString()} finding${total !== 1 ? "s" : ""} detected`}
+      >
+        <SearchInput
+          placeholder="Search IP or URL..."
+          value={search}
+          onChange={handleSearchChange}
+          className="w-64"
+          aria-label="Search findings"
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={total === 0 || loading || busy}
+          onClick={() => setConfirmClear(true)}
+          className="text-destructive hover:text-destructive"
+        >
+          <Eraser className="h-4 w-4" />
+          Clear all
+        </Button>
+        <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </PageHeader>
 
       <DataTable
         columns={columns}

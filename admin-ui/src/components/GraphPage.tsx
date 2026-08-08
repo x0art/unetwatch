@@ -4,11 +4,9 @@ import {
   MousePointerClick,
   Network,
   RefreshCcw,
-  Search,
   SearchX,
   Server,
   Users,
-  X,
 } from "lucide-react"
 import {
   type FindingsGraph,
@@ -18,7 +16,8 @@ import {
 import {
   Button,
   EmptyState,
-  Input,
+  PageHeader,
+  SearchInput,
   Select,
   Skeleton,
   StatCard,
@@ -133,27 +132,22 @@ export function GraphPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Traffic</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Flow of flagged URLs being accessed by client IPs (from persisted findings)
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            value={limit}
-            onChange={setLimit}
-            options={LIMIT_OPTIONS}
-            className="w-32"
-            aria-label="Nodes per layer"
-          />
-          <Button variant="outline" size="sm" onClick={fetchGraph} disabled={loading}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Traffic"
+        description="Flow of flagged URLs being accessed by client IPs (from persisted findings)"
+      >
+        <Select
+          value={limit}
+          onChange={setLimit}
+          options={LIMIT_OPTIONS}
+          className="w-32"
+          aria-label="Nodes per layer"
+        />
+        <Button variant="outline" size="sm" onClick={fetchGraph} disabled={loading}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </PageHeader>
 
       {/* Summary chips */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -199,26 +193,13 @@ export function GraphPage() {
           </div>
           {graph && !graphEmpty && (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  placeholder="Highlight by IP or URL..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="h-9 w-52 pl-8 pr-8"
-                  aria-label="Highlight graph nodes"
-                />
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch("")}
-                    aria-label="Clear highlight"
-                    className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+              <SearchInput
+                placeholder="Highlight by IP or URL..."
+                value={search}
+                onChange={setSearch}
+                className="w-52 [&_input]:h-9"
+                aria-label="Highlight graph nodes"
+              />
               {q.length > 0 && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
                   {matchCount} match{matchCount === 1 ? "" : "es"}

@@ -7,7 +7,6 @@ import {
   RefreshCcw,
   Search,
   Trash2,
-  X,
 } from "lucide-react"
 import {
   addBaseUrlToBlacklist,
@@ -28,6 +27,7 @@ import {
   EmptyState,
   Input,
   Label,
+  SearchInput,
   Skeleton,
   useToast,
 } from "./ui"
@@ -405,26 +405,13 @@ export function BlacklistPage() {
 
       {/* Search */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search URLs or IPs..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-72 pl-8 pr-8"
-            aria-label="Search blacklist entries"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => setSearch("")}
-              aria-label="Clear search"
-              className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <SearchInput
+          placeholder="Search URLs or IPs..."
+          value={search}
+          onChange={setSearch}
+          className="w-72"
+          aria-label="Search blacklist entries"
+        />
         {q && (
           <span className="text-xs text-muted-foreground">
             {filteredUrls.length + filteredIps.length} match

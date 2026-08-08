@@ -18,6 +18,7 @@ import {
   Info,
   AlertTriangle,
   CheckCircle2,
+  Search,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -685,6 +686,149 @@ export function EmptyState({
         <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>
       )}
       {action && <div className="mt-5">{action}</div>}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * SearchInput
+ *
+ * Text input with a search icon on the left and a clear (×) button when
+ * non-empty. Used consistently across every page's filter/search field.
+ *
+ *   <SearchInput value={search} onChange={setSearch} placeholder="Search…" />
+ * ════════════════════════════════════════════════════════════════ */
+
+export function SearchInput({
+  value,
+  onChange,
+  placeholder,
+  className,
+  id,
+  "aria-label": ariaLabel,
+  autoFocus,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  className?: string
+  id?: string
+  "aria-label"?: string
+  autoFocus?: boolean
+}) {
+  return (
+    <div className={cn("relative", className)}>
+      <Search
+        className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <Input
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        autoFocus={autoFocus}
+        className="pl-8 pr-8"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Clear search"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * PageHeader
+ *
+ * Standard page heading block: title + description on the left, an
+ * optional actions row on the right. Every page uses the same layout so
+ * the heading hierarchy and spacing stay consistent app-wide.
+ *
+ *   <PageHeader title="Findings" description="…">
+ *     <Button>Refresh</Button>
+ *   </PageHeader>
+ * ════════════════════════════════════════════════════════════════ */
+
+export function PageHeader({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string
+  description?: string
+  /** Optional actions rendered on the right of the header. */
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("flex flex-wrap items-center justify-between gap-3", className)}>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+        {description && (
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        )}
+      </div>
+      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * Panel
+ *
+ * Consistent content container used for cards/sections across pages
+ * (dashboard summaries, query charts, graph visualizations). Provides
+ * the same border + surface + shadow treatment everywhere.
+ *
+ *   <Panel title="Requests over time" description="Hover for details">
+ *     {children}
+ *   </Panel>
+ * ════════════════════════════════════════════════════════════════ */
+
+export function Panel({
+  title,
+  description,
+  icon: Icon,
+  className,
+  children,
+  action,
+}: {
+  title?: string
+  description?: string
+  /** Optional leading icon next to the title. */
+  icon?: LucideIcon
+  className?: string
+  children: ReactNode
+  /** Optional element rendered on the right of the header row. */
+  action?: ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6",
+        className,
+      )}
+    >
+      {(title || action) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+          {title && <h3 className="text-sm font-semibold tracking-tight">{title}</h3>}
+          {description && (
+            <span className="ml-auto text-xs text-muted-foreground">{description}</span>
+          )}
+          {action && <div className="ml-auto">{action}</div>}
+        </div>
+      )}
+      {children}
     </div>
   )
 }

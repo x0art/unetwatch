@@ -23,6 +23,7 @@ import {
   Button,
   ConfirmDialog,
   Dialog,
+  PageHeader,
   Select,
   Skeleton,
   useToast,
@@ -320,41 +321,35 @@ export function LogsPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Logs</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Audit trail of every Elasticsearch query and webhook delivery — what was sent,
-            how many matched, and whether the alert landed.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            value={kind}
-            onChange={(v) => {
-              setKind(v)
-              setPage(0)
-            }}
-            options={KIND_OPTIONS}
-            className="w-40"
-            aria-label="Filter log kind"
-          />
-          <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={total === 0 || loading || busy}
-            onClick={() => setConfirmClear(true)}
-            className="text-destructive hover:text-destructive"
-          >
-            <Eraser className="h-4 w-4" />
-            Clear all
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Logs"
+        description="Audit trail of every Elasticsearch query and webhook delivery — what was sent, how many matched, and whether the alert landed."
+      >
+        <Select
+          value={kind}
+          onChange={(v) => {
+            setKind(v)
+            setPage(0)
+          }}
+          options={KIND_OPTIONS}
+          className="w-40"
+          aria-label="Filter log kind"
+        />
+        <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={total === 0 || loading || busy}
+          onClick={() => setConfirmClear(true)}
+          className="text-destructive hover:text-destructive"
+        >
+          <Eraser className="h-4 w-4" />
+          Clear all
+        </Button>
+      </PageHeader>
 
       {loading && items.length === 0 ? (
         <div className="space-y-3" aria-busy="true">

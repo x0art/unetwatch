@@ -8,11 +8,9 @@ import {
   Network,
   Play,
   RefreshCcw,
-  Search,
   SearchX,
   Server,
   Users,
-  X,
   Zap,
 } from "lucide-react"
 import { useDebounce } from "../lib/utils"
@@ -27,7 +25,9 @@ import {
   Badge,
   Button,
   EmptyState,
-  Input,
+  PageHeader,
+  Panel,
+  SearchInput,
   Select,
   Skeleton,
   StatCard,
@@ -429,60 +429,41 @@ export function QueryPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Query</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Live Elasticsearch queries against the block patterns — inspect raw matches,
-            whitelisted and blacklisted coverage.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Filter inside ES (IP / URL)..."
-              value={esSearch}
-              onChange={(e) => setEsSearch(e.target.value)}
-              className="w-56 pl-8 pr-8"
-              aria-label="Filter results inside Elasticsearch"
-            />
-            {esSearch && (
-              <button
-                type="button"
-                onClick={() => setEsSearch("")}
-                aria-label="Clear ES filter"
-                className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <Select
-            value={whitelistMode}
-            onChange={(v) => setWhitelistMode(v as "include" | "exclude")}
-            options={WHITELIST_OPTIONS}
-            className="w-44"
-            aria-label="Whitelisted matches"
-          />
-          <span className="text-xs text-muted-foreground">Window</span>
-          <Select
-            value={windowMinutes}
-            onChange={setWindowMinutes}
-            options={WINDOW_OPTIONS}
-            className="w-44"
-            aria-label="Query time window"
-          />
-          <Button onClick={handleRun} disabled={loading}>
-            <Play className="h-4 w-4" />
-            Run
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Query"
+        description="Live Elasticsearch queries against the block patterns — inspect raw matches, whitelisted and blacklisted coverage."
+      >
+        <SearchInput
+          placeholder="Filter inside ES (IP / URL)..."
+          value={esSearch}
+          onChange={setEsSearch}
+          className="w-56"
+          aria-label="Filter results inside Elasticsearch"
+        />
+        <Select
+          value={whitelistMode}
+          onChange={(v) => setWhitelistMode(v as "include" | "exclude")}
+          options={WHITELIST_OPTIONS}
+          className="w-44"
+          aria-label="Whitelisted matches"
+        />
+        <span className="text-xs text-muted-foreground">Window</span>
+        <Select
+          value={windowMinutes}
+          onChange={setWindowMinutes}
+          options={WINDOW_OPTIONS}
+          className="w-44"
+          aria-label="Query time window"
+        />
+        <Button onClick={handleRun} disabled={loading}>
+          <Play className="h-4 w-4" />
+          Run
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </PageHeader>
 
       {/* Summary chips */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -539,12 +520,7 @@ export function QueryPage() {
       ) : !result ? null : (
         <>
           {/* Timeline chart */}
-          <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <Network className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              <h3 className="text-sm font-semibold tracking-tight">Requests over time</h3>
-              <span className="ml-auto text-xs text-muted-foreground">Hover for details</span>
-            </div>
+          <Panel title="Requests over time" icon={Network} description="Hover for details">
             {result.timeline.length > 0 ? (
               <TimelineChart points={result.timeline} />
             ) : (
@@ -552,35 +528,24 @@ export function QueryPage() {
                 No timestamped matches in this window
               </p>
             )}
-          </div>
+          </Panel>
 
           {/* Top rankings */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6">
-              <div className="mb-4 flex items-center gap-2">
-                <Globe className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                <h3 className="text-sm font-semibold tracking-tight">Top URLs</h3>
-              </div>
+            <Panel title="Top URLs" icon={Globe}>
               <RankBars rows={result.top_urls.map((u) => ({ label: u.url, count: u.count }))} />
-            </div>
-            <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6">
-              <div className="mb-4 flex items-center gap-2">
-                <Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                <h3 className="text-sm font-semibold tracking-tight">Top client IPs</h3>
-              </div>
+            </Panel>
+            <Panel title="Top client IPs" icon={Users}>
               <RankBars rows={result.top_ips.map((u) => ({ label: u.client_ip, count: u.count }))} />
-            </div>
+            </Panel>
           </div>
 
           {/* Flow visualization */}
-          <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <FileSearch className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              <h3 className="text-sm font-semibold tracking-tight">Access flow</h3>
-              <span className="ml-auto text-xs text-muted-foreground">
-                Client IPs clustered by destination host
-              </span>
-            </div>
+          <Panel
+            title="Access flow"
+            icon={FileSearch}
+            description="Client IPs clustered by destination host"
+          >
             {esOffline ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 Flow unavailable — Elasticsearch unreachable.
@@ -600,7 +565,7 @@ export function QueryPage() {
                 No traffic in this window to visualize
               </p>
             )}
-          </div>
+          </Panel>
 
           {/* Documents table */}
           <div>
@@ -625,26 +590,13 @@ export function QueryPage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
-                    placeholder="Filter by IP or URL..."
-                    value={docSearch}
-                    onChange={(e) => setDocSearch(e.target.value)}
-                    className="w-64 pl-8 pr-8"
-                    aria-label="Filter documents by IP or URL"
-                  />
-                  {docSearch && (
-                    <button
-                      type="button"
-                      onClick={() => setDocSearch("")}
-                      aria-label="Clear document filter"
-                      className="absolute right-2 top-2.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
+                <SearchInput
+                  placeholder="Filter by IP or URL..."
+                  value={docSearch}
+                  onChange={setDocSearch}
+                  className="w-64"
+                  aria-label="Filter documents by IP or URL"
+                />
                 <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Server className="h-3.5 w-3.5" aria-hidden="true" />
                   {result.es_online ? "Elasticsearch online" : "Elasticsearch unreachable"}

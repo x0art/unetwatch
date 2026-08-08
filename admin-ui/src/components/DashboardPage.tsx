@@ -9,7 +9,7 @@ import {
   RefreshCcw,
   SearchX,
 } from "lucide-react"
-import { Button, Select, StatCard } from "./ui"
+import { Button, Panel, Select, StatCard } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { type View } from "./Sidebar"
 
@@ -151,50 +151,52 @@ export function DashboardPage({
       </div>
 
       {/* ── Findings summary ── */}
-      <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm backdrop-blur-[1px] sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
-              <SearchX className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Detected matches</p>
-              <p className="text-2xl font-bold tabular-nums tracking-tight">
-                {status ? status.findings_count.toLocaleString() : "—"}
-              </p>
-              <p className="text-xs text-muted-foreground/60">
-                Findings persisted by the ES poll
-              </p>
-            </div>
-          </div>
+      <Panel
+        action={
           <Button variant="outline" onClick={() => onNavigate("findings")}>
             View findings
             <ArrowRight className="h-4 w-4" />
           </Button>
+        }
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
+            <SearchX className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">Detected matches</p>
+            <p className="text-2xl font-bold tabular-nums tracking-tight">
+              {status ? status.findings_count.toLocaleString() : "—"}
+            </p>
+            <p className="text-xs text-muted-foreground/60">
+              Findings persisted by the ES poll
+            </p>
+          </div>
         </div>
-      </div>
+      </Panel>
 
       {/* ── Query console link ── */}
-      <div className="rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm backdrop-blur-[1px] sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
-              <FileSearch className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Query console</p>
-              <p className="text-2xl font-bold tabular-nums tracking-tight">Live ES queries</p>
-              <p className="text-xs text-muted-foreground/60">
-                Run, chart and inspect flagged traffic directly from Elasticsearch
-              </p>
-            </div>
-          </div>
+      <Panel
+        action={
           <Button variant="outline" onClick={() => onNavigate("query")}>
             Open Query
             <ArrowRight className="h-4 w-4" />
           </Button>
+        }
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
+            <FileSearch className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">Query console</p>
+            <p className="text-2xl font-bold tabular-nums tracking-tight">Live ES queries</p>
+            <p className="text-xs text-muted-foreground/60">
+              Run, chart and inspect flagged traffic directly from Elasticsearch
+            </p>
+          </div>
         </div>
-      </div>
+      </Panel>
     </div>
   )
 }

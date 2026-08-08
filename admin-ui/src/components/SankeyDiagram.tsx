@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef } from "react"
-// Root import: the modular subpaths (echarts/core, echarts/charts, …) are
-// not resolvable under every echarts install / bundler setup, so use the
-// full package (which registers the sankey chart + tooltip + canvas by
-// default). Cost is a larger bundle; reliability is guaranteed.
-import * as echarts from "echarts"
+// Modular echarts: import only the sankey chart, the tooltip component and
+// the canvas renderer instead of the full bundle. This keeps the shared
+// chunk small — the full "echarts" root import was pulling in every chart
+// type and pushing the bundle over the warning threshold.
+import * as echarts from "echarts/core"
+import { SankeyChart } from "echarts/charts"
+import { TooltipComponent } from "echarts/components"
+import { CanvasRenderer } from "echarts/renderers"
 import type { ECharts, EChartsOption, TooltipComponentFormatterCallbackParams } from "echarts"
 import { useTheme } from "./Sidebar"
+
+echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 
 /* ════════════════════════════════════════════════════════════════
  * SankeyDiagram — reusable ECharts Sankey wrapper

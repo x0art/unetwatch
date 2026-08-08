@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react"
 import {
   type MonitorStatus,
   type PatternCounts,
@@ -8,19 +8,50 @@ import {
   getToken,
   setToken,
 } from "./api"
-import { PatternTable } from "./components/PatternTable"
 import { LoginPage } from "./components/LoginPage"
-import { DashboardPage } from "./components/DashboardPage"
-import { FindingsPage } from "./components/FindingsPage"
-import { GraphPage } from "./components/GraphPage"
-import { BlacklistPage } from "./components/BlacklistPage"
-import { RedirectsPage } from "./components/RedirectsPage"
-import { QueryPage } from "./components/QueryPage"
-import { LogsPage } from "./components/LogsPage"
 import { AppShell } from "./components/AppShell"
 import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
-import { ToastProvider, useToast } from "./components/ui"
+import { ToastProvider, useToast, Skeleton } from "./components/ui"
+
+/* ── Code-split views ──────────────────────────────────────────────
+ * Each page is loaded lazily so the initial bundle stays small — the
+ * dashboard + shell load first, and the heavier pages (query, graph,
+ * redirects with echarts) arrive in their own chunk only when visited. */
+const DashboardPage = lazy(() =>
+  import("./components/DashboardPage").then((m) => ({ default: m.DashboardPage })),
+)
+const FindingsPage = lazy(() =>
+  import("./components/FindingsPage").then((m) => ({ default: m.FindingsPage })),
+)
+const GraphPage = lazy(() =>
+  import("./components/GraphPage").then((m) => ({ default: m.GraphPage })),
+)
+const BlacklistPage = lazy(() =>
+  import("./components/BlacklistPage").then((m) => ({ default: m.BlacklistPage })),
+)
+const RedirectsPage = lazy(() =>
+  import("./components/RedirectsPage").then((m) => ({ default: m.RedirectsPage })),
+)
+const QueryPage = lazy(() =>
+  import("./components/QueryPage").then((m) => ({ default: m.QueryPage })),
+)
+const LogsPage = lazy(() =>
+  import("./components/LogsPage").then((m) => ({ default: m.LogsPage })),
+)
+const PatternTable = lazy(() =>
+  import("./components/PatternTable").then((m) => ({ default: m.PatternTable })),
+)
+
+function PageFallback() {
+  return (
+    <div className="space-y-4" aria-busy="true">
+      <Skeleton className="h-10 w-64 rounded-lg" />
+      <Skeleton className="h-56 w-full rounded-lg" />
+      <Skeleton className="h-56 w-full rounded-lg" />
+    </div>
+  )
+}
 
 function AppRoutes() {
   const { toast } = useToast()
@@ -121,26 +152,28 @@ function AppRoutes() {
         </>
       }
     >
-      {view === "dashboard" && (
-        <DashboardPage
-          remaining={remaining}
-          intervalSec={intervalSec}
-          status={status}
-          counts={counts}
-          loadingRun={loadingRun}
-          lastUpdated={lastUpdated}
-          onRefresh={fetchStats}
-          onManualRun={handleManualRun}
-          onNavigate={setView}
-        />
-      )}
-      {view === "query" && <QueryPage />}
-      {view === "patterns" && <PatternTable />}
-      {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
-      {view === "graph" && <GraphPage />}
-      {view === "blacklist" && <BlacklistPage />}
-      {view === "redirects" && <RedirectsPage />}
-      {view === "logs" && <LogsPage />}
+      <Suspense fallback={<PageFallback />}>
+        {view === "dashboard" && (
+          <DashboardPage
+            remaining={remaining}
+            intervalSec={intervalSec}
+            status={status}
+            counts={counts}
+            loadingRun={loadingRun}
+            lastUpdated={lastUpdated}
+            onRefresh={fetchStats}
+            onManualRun={handleManualRun}
+            onNavigate={setView}
+          />
+        )}
+        {view === "query" && <QueryPage />}
+        {view === "patterns" && <PatternTable />}
+        {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
+        {view === "graph" && <GraphPage />}
+        {view === "blacklist" && <BlacklistPage />}
+        {view === "redirects" && <RedirectsPage />}
+        {view === "logs" && <LogsPage />}
+      </Suspense>
     </AppShell>
   )
 }

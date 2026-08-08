@@ -5,7 +5,6 @@ import {
   GitBranch,
   History,
   RefreshCcw,
-  Search,
   SearchX,
   Trash2,
   Zap,
@@ -30,6 +29,8 @@ import {
   Dialog,
   EmptyState,
   Input,
+  PageHeader,
+  SearchInput,
   Skeleton,
   StatCard,
   useToast,
@@ -229,8 +230,8 @@ export function RedirectsPage() {
     setPage(0)
   }
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value)
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
     setPage(0)
   }
 
@@ -554,41 +555,35 @@ export function RedirectsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Redirect Tracker</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            URLs under watch for redirects — chains are followed, destinations monitored, and
-            target changes recorded over time.
-          </p>
+      <PageHeader
+        title="Redirect Tracker"
+        description="URLs under watch for redirects — chains are followed, destinations monitored, and target changes recorded over time."
+      >
+        <div className="relative">
+          <CornerUpRight className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            value={addUrl}
+            onChange={(e) => setAddUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleAdd()
+            }}
+            placeholder="http://example.com/path"
+            className="w-72 pl-8"
+            aria-label="Add URL to redirect tracking"
+          />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative">
-            <CornerUpRight className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              value={addUrl}
-              onChange={(e) => setAddUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAdd()
-              }}
-              placeholder="http://example.com/path"
-              className="w-72 pl-8"
-              aria-label="Add URL to redirect tracking"
-            />
-          </div>
-          <Button onClick={handleAdd} disabled={busy || !addUrl.trim()}>
-            Track URL
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleCheckNow} disabled={busy || loading}>
-            <Zap className="h-4 w-4" />
-            Check now
-          </Button>
-          <Button variant="outline" size="sm" onClick={reload} disabled={busy}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
-      </div>
+        <Button onClick={handleAdd} disabled={busy || !addUrl.trim()}>
+          Track URL
+        </Button>
+        <Button variant="outline" size="sm" onClick={handleCheckNow} disabled={busy || loading}>
+          <Zap className="h-4 w-4" />
+          Check now
+        </Button>
+        <Button variant="outline" size="sm" onClick={reload} disabled={busy}>
+          <RefreshCcw className="h-4 w-4" />
+          Refresh
+        </Button>
+      </PageHeader>
 
       {/* Summary chips */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -688,16 +683,13 @@ export function RedirectsPage() {
             {total.toLocaleString()} tracked URL{total === 1 ? "" : "s"}
             {debouncedSearch && ` matching "${debouncedSearch}"`}
           </p>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Search URLs..."
-              value={search}
-              onChange={handleSearchChange}
-              className="w-64 pl-8"
-              aria-label="Search tracked URLs"
-            />
-          </div>
+          <SearchInput
+            placeholder="Search URLs..."
+            value={search}
+            onChange={handleSearchChange}
+            className="w-64"
+            aria-label="Search tracked URLs"
+          />
         </div>
 
         {tableEmpty ? (

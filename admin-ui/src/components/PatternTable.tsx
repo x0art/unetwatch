@@ -14,13 +14,13 @@ import {
   Select,
   Label,
   ConfirmDialog,
+  SearchInput,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
 import {
-  Search,
   Upload,
   Pencil,
   Trash2,
@@ -98,8 +98,8 @@ export function PatternTable() {
 
   /* ── Handlers ───────────────────────────────────────────────────── */
 
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value)
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
     setPage(0)
   }
 
@@ -284,16 +284,13 @@ export function PatternTable() {
     <div className="space-y-4">
       {/* ── Toolbar ── */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search patterns..."
-            value={search}
-            onChange={handleSearchChange}
-            className="pl-8 max-w-xs"
-            aria-label="Search patterns"
-          />
-        </div>
+        <SearchInput
+          placeholder="Search patterns..."
+          value={search}
+          onChange={handleSearchChange}
+          className="max-w-xs"
+          aria-label="Search patterns"
+        />
         <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
         <AddPatternButton onOpen={() => setCreateOpen(true)} />
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
