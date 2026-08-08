@@ -1,6 +1,6 @@
 # uNetWatch
 
-[![CI](https://github.com/x0art/elk-monitoring/actions/workflows/ci.yml/badge.svg)](https://github.com/x0art/elk-monitoring/actions/workflows/ci.yml)
+[![CI](https://github.com/x0art/unetwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/x0art/unetwatch/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/unetwatch)](https://pypi.org/project/unetwatch/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
