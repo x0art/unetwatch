@@ -18,9 +18,9 @@ import { RedirectsPage } from "./components/RedirectsPage"
 import { QueryPage } from "./components/QueryPage"
 import { LogsPage } from "./components/LogsPage"
 import { AppShell } from "./components/AppShell"
+import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
-import { Button, ToastProvider, useToast } from "./components/ui"
-import { RotateCcw } from "lucide-react"
+import { ToastProvider, useToast } from "./components/ui"
 
 function AppRoutes() {
   const { toast } = useToast()
@@ -31,6 +31,7 @@ function AppRoutes() {
   const [counts, setCounts] = useState<PatternCounts | null>(null)
   const [loadingRun, setLoadingRun] = useState(false)
   const [lastUpdated, setLastUpdated] = useState(Date.now())
+  const [patternDialogOpen, setPatternDialogOpen] = useState(false)
 
   // Countdown timer
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
@@ -111,15 +112,13 @@ function AppRoutes() {
       title="uNetWatch"
       description="Pattern console"
       actions={
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={fetchStats}
-          aria-label="Refresh dashboard"
-          className="h-9 w-9"
-        >
-          <RotateCcw className="h-4 w-4" />
-        </Button>
+        <>
+          <AddPatternButton onOpen={() => setPatternDialogOpen(true)} />
+          <AddPatternDialog
+            open={patternDialogOpen}
+            onClose={() => setPatternDialogOpen(false)}
+          />
+        </>
       }
     >
       {view === "dashboard" && (

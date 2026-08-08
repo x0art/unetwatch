@@ -16,6 +16,7 @@ from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
 from app.routes import auth as auth_routes
 from app.routes import blacklist, findings, logs, monitor, patterns, query, redirects
+from app.services.feeds import sync_regenerate
 
 scheduler = AsyncIOScheduler()
 
@@ -42,6 +43,16 @@ setup_logging()
 async def lifespan(app: FastAPI):
     await init_db()
     await seed_defaults()
+
+    # Regenerate the static blacklist feeds from the DB so the public
+    # /api/blacklist/{urls,ips}.txt files match on every startup.
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        await sync_regenerate(db)
+    finally:
+        await db.close()
 
     settings = get_settings()
     from app.services.monitor import fetch_logs
@@ -131,7 +142,9 @@ async def security_headers(request: Request, call_next):
 app.include_router(patterns.router, dependencies=[Depends(verify_admin)])
 app.include_router(monitor.router, dependencies=[Depends(verify_admin)])
 app.include_router(findings.router, dependencies=[Depends(verify_admin)])
-app.include_router(blacklist.router, dependencies=[Depends(verify_admin)])
+# Blacklist router is mounted without auth: the .txt feed routes are public
+# for external integrations; write/list routes opt back in per-route.
+app.include_router(blacklist.router)
 app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])

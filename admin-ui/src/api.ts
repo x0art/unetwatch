@@ -64,6 +64,21 @@ export interface FindingsGraph {
   flows: GraphFlow[]
 }
 
+export interface BlacklistBulkAddResult {
+  added: string[]
+  skipped: string[]
+  errors: { value: string; error: string }[]
+}
+
+export interface BlacklistBulkDeleteResult {
+  deleted: number
+}
+
+export interface BlacklistEntryRef {
+  kind: "url" | "ip"
+  value: string
+}
+
 export interface BlacklistSet {
   urls: string[]
   ips: string[]
@@ -489,6 +504,20 @@ export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[]
   if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
+}
+
+export async function bulkAddBlacklist(values: string[]): Promise<BlacklistBulkAddResult> {
+  return request("/blacklist/bulk", {
+    method: "POST",
+    body: JSON.stringify({ values }),
+  })
+}
+
+export async function bulkDeleteBlacklist(entries: BlacklistEntryRef[]): Promise<BlacklistBulkDeleteResult> {
+  return request("/blacklist/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ entries }),
+  })
 }
 
 /* ── Redirect tracker ──────────────────────────────────────────── */

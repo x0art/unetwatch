@@ -327,8 +327,10 @@ export function Dialog({
         />
         <DialogPrimitive.Content
           className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
-            "rounded-lg border border-border bg-popover p-6 text-popover-foreground shadow-xl",
+            // Constrain to the viewport and scroll internally so tall content
+            // (e.g. the logs run-details dialog) never overflows the screen.
+            "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col",
+            "overflow-hidden rounded-lg border border-border bg-popover p-6 text-popover-foreground shadow-xl",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             className,
           )}
@@ -341,7 +343,8 @@ export function Dialog({
               {description}
             </DialogPrimitive.Description>
           )}
-          <div className="mt-4">{children}</div>
+          {/* Scrollable body: only this scrolls, title stays pinned. */}
+          <div className="mt-4 min-h-0 flex-1 overflow-y-auto">{children}</div>
           <DialogPrimitive.Close
             aria-label="Close dialog"
             className={cn(

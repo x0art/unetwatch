@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Ban, Copy, Link2, RefreshCcw, Search, Trash2, X } from "lucide-react"
+import {
+  Ban,
+  Copy,
+  Link2,
+  ListPlus,
+  RefreshCcw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react"
 import {
   addBaseUrlToBlacklist,
+  bulkAddBlacklist,
+  bulkDeleteBlacklist,
   deleteBlacklistEntry,
   getBlacklistIps,
   getBlacklistUrls,
@@ -13,8 +24,10 @@ import {
   CardHeader,
   CardTitle,
   ConfirmDialog,
+  Dialog,
   EmptyState,
   Input,
+  Label,
   Skeleton,
   useToast,
 } from "./ui"
@@ -31,6 +44,13 @@ interface FeedCardProps {
   onRefresh: () => void
   onCopy: () => void
   onDelete: (kind: "url" | "ip", value: string) => void
+  /** Selection mode for bulk delete. */
+  selectMode?: boolean
+  selected?: Set<string>
+  onToggleSelect?: (value: string) => void
+  onEnterSelectMode?: () => void
+  onClearSelection?: () => void
+  onDeleteSelected?: () => void
   disabled?: boolean
 }
 
@@ -45,6 +65,12 @@ function FeedCard({
   onRefresh,
   onCopy,
   onDelete,
+  selectMode = false,
+  selected = new Set(),
+  onToggleSelect,
+  onEnterSelectMode,
+  onClearSelection,
+  onDeleteSelected,
   disabled,
 }: FeedCardProps) {
   return (
@@ -64,40 +90,91 @@ function FeedCard({
           </code>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
-            <RefreshCcw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={onCopy} disabled={loading || entries.length === 0}>
-            <Copy className="h-3.5 w-3.5" />
-            Copy
-          </Button>
+          {selectMode ? (
+            <Button variant="outline" size="sm" onClick={onClearSelection} disabled={disabled}>
+              Cancel
+            </Button>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={onEnterSelectMode} disabled={loading || entries.length === 0}>
+                <Trash2 className="h-3.5 w-3.5" />
+                Select
+              </Button>
+              <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>
+                <RefreshCcw className="h-3.5 w-3.5" />
+                Refresh
+              </Button>
+              <Button variant="outline" size="sm" onClick={onCopy} disabled={loading || entries.length === 0}>
+                <Copy className="h-3.5 w-3.5" />
+                Copy
+              </Button>
+            </>
+          )}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {/* Bulk-select toolbar */}
+        {selectMode ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <span className="text-xs font-medium tabular-nums text-muted-foreground">
+              {selected.size} selected
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={onClearSelection} disabled={disabled}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={onDeleteSelected}
+                disabled={selected.size === 0 || disabled}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         {loading ? (
           <Skeleton className="h-40 w-full" />
         ) : entries.length > 0 ? (
           <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border bg-muted/30">
-            {entries.map((value) => (
-              <li
-                key={value}
-                className="group flex items-center gap-2 px-3 py-1.5 transition-colors hover:bg-muted/40"
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
-                  {value}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onDelete(kind, value)}
-                  disabled={disabled}
-                  aria-label={`Remove ${value} from blacklist`}
-                  className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            {entries.map((value) => {
+              const isSelected = selected.has(value)
+              return (
+                <li
+                  key={value}
+                  className={`group flex items-center gap-2 px-3 py-1.5 transition-colors ${
+                    isSelected ? "bg-primary/10" : "hover:bg-muted/40"
+                  }`}
                 >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </li>
-            ))}
+                  {selectMode && onToggleSelect && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onToggleSelect(value)}
+                      aria-label={`Select ${value}`}
+                      className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                    />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
+                    {value}
+                  </span>
+                  {!selectMode && (
+                    <button
+                      type="button"
+                      onClick={() => onDelete(kind, value)}
+                      disabled={disabled}
+                      aria-label={`Remove ${value} from blacklist`}
+                      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         ) : searchActive ? (
           <EmptyState
@@ -126,6 +203,17 @@ export function BlacklistPage() {
     kind: "url" | "ip"
     value: string
   } | null>(null)
+
+  // Bulk add
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkValue, setBulkValue] = useState("")
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
+
+  // Bulk delete (per-feed selection)
+  const [selectFeed, setSelectFeed] = useState<"url" | "ip" | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+
   const { toast } = useToast()
 
   const splitLines = useCallback((text: string) => {
@@ -212,6 +300,77 @@ export function BlacklistPage() {
     setDeleteTarget({ kind, value })
   }, [])
 
+  /* ── Bulk add ─────────────────────────────────────────────────── */
+  const bulkLines = useMemo(
+    () => bulkValue.split("\n").map((l) => l.trim()).filter(Boolean),
+    [bulkValue],
+  )
+
+  const handleBulkAdd = async () => {
+    if (bulkLines.length === 0) return
+    setBulkSubmitting(true)
+    try {
+      const res = await bulkAddBlacklist(bulkLines)
+      const parts: string[] = []
+      if (res.added.length) parts.push(`${res.added.length} added`)
+      if (res.skipped.length) parts.push(`${res.skipped.length} already present`)
+      if (res.errors.length) parts.push(`${res.errors.length} invalid`)
+      toast({
+        title: "Bulk add complete",
+        description: parts.join(" · ") || "Nothing to add",
+        variant: res.errors.length ? "error" : "success",
+      })
+      setBulkOpen(false)
+      setBulkValue("")
+      await load()
+    } catch (e) {
+      toast({ title: "Bulk add failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBulkSubmitting(false)
+    }
+  }
+
+  /* ── Bulk delete ──────────────────────────────────────────────── */
+  const enterSelectMode = (kind: "url" | "ip") => {
+    setSelectFeed(kind)
+    setSelected(new Set())
+  }
+
+  const exitSelectMode = () => {
+    setSelectFeed(null)
+    setSelected(new Set())
+  }
+
+  const toggleSelect = useCallback((value: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(value)) next.delete(value)
+      else next.add(value)
+      return next
+    })
+  }, [])
+
+  const handleBulkDelete = async () => {
+    if (!selectFeed || selected.size === 0) return
+    const kind = selectFeed
+    const values = [...selected]
+    setConfirmBulkDelete(false)
+    setDeleting(true)
+    try {
+      const res = await bulkDeleteBlacklist(values.map((v) => ({ kind, value: v })))
+      toast({
+        title: `Removed ${res.deleted} entr${res.deleted === 1 ? "y" : "ies"} from ${kind} blacklist`,
+        variant: "success",
+      })
+      exitSelectMode()
+    } catch (e) {
+      toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      await load()
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2.5">
@@ -224,17 +383,23 @@ export function BlacklistPage() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <Input
-          value={addValue}
-          onChange={(e) => setAddValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") add()
-          }}
-          placeholder="Add URL or IP — saved as bare host"
-        />
-        <Button onClick={add} disabled={adding || !addValue.trim()}>
-          Add
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-1 gap-2">
+          <Input
+            value={addValue}
+            onChange={(e) => setAddValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") add()
+            }}
+            placeholder="Add URL or IP — saved as bare host"
+          />
+          <Button onClick={add} disabled={adding || !addValue.trim()}>
+            Add
+          </Button>
+        </div>
+        <Button variant="outline" onClick={() => setBulkOpen(true)}>
+          <ListPlus className="h-4 w-4" />
+          Bulk add
         </Button>
       </div>
 
@@ -280,6 +445,12 @@ export function BlacklistPage() {
           onRefresh={load}
           onCopy={() => copy(urls.join("\n"), "URLs")}
           onDelete={requestDelete}
+          selectMode={selectFeed === "url"}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onEnterSelectMode={() => enterSelectMode("url")}
+          onClearSelection={exitSelectMode}
+          onDeleteSelected={() => setConfirmBulkDelete(true)}
           disabled={deleting}
         />
         <FeedCard
@@ -293,10 +464,17 @@ export function BlacklistPage() {
           onRefresh={load}
           onCopy={() => copy(ips.join("\n"), "IPs")}
           onDelete={requestDelete}
+          selectMode={selectFeed === "ip"}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onEnterSelectMode={() => enterSelectMode("ip")}
+          onClearSelection={exitSelectMode}
+          onDeleteSelected={() => setConfirmBulkDelete(true)}
           disabled={deleting}
         />
       </div>
 
+      {/* Per-row delete confirm */}
       <ConfirmDialog
         open={!!deleteTarget}
         title="Remove from blacklist?"
@@ -310,6 +488,50 @@ export function BlacklistPage() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Delete selected entries?"
+        description={
+          selectFeed
+            ? `${selected.size} selected entr${selected.size === 1 ? "y" : "ies"} will be removed from the ${selectFeed} blacklist. This cannot be undone.`
+            : undefined
+        }
+        confirmLabel="Delete selected"
+        variant="destructive"
+        onConfirm={handleBulkDelete}
+        onCancel={() => setConfirmBulkDelete(false)}
+      />
+
+      {/* Bulk add dialog */}
+      <Dialog open={bulkOpen} onClose={() => setBulkOpen(false)} title="Bulk add to blacklist">
+        <div className="space-y-4">
+          <div>
+            <Label>Values (one per line)</Label>
+            <textarea
+              className="flex min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={bulkValue}
+              onChange={(e) => setBulkValue(e.target.value)}
+              placeholder={"http://example.com/foo\n1.2.3.4"}
+              autoFocus
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {bulkLines.length === 0
+                ? "Enter URLs or IPs, one per line. Each is saved as a bare host."
+                : `${bulkLines.length} line${bulkLines.length === 1 ? "" : "s"} will be added`}
+            </p>
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setBulkOpen(false)} disabled={bulkSubmitting}>
+              Cancel
+            </Button>
+            <Button onClick={handleBulkAdd} disabled={bulkLines.length === 0 || bulkSubmitting}>
+              {bulkSubmitting ? "Adding…" : `Add${bulkLines.length > 0 ? ` (${bulkLines.length})` : ""}`}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   )
 }

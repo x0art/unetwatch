@@ -96,6 +96,7 @@ are optional and have safe defaults for development.
 | `LOG_RETENTION_DAYS`              | `30`                             | Prune monitor-log rows older than N days |
 | `LOG_MAX_ROWS`                    | `1000`                           | Max monitor-log rows kept (newest wins) |
 | `DATABASE_URL`                    | `sqlite:///./unetwatch.db`       | SQLite location                      |
+| `BLACKLIST_DIR`                   | `./data`                         | Directory for the static blacklist feed files (`urls.txt`/`ips.txt`) |
 | `ADMIN_USER`                      | `admin`                          | Dashboard login username             |
 | `ADMIN_PASS`                      | `changeme`                       | Dashboard login password             |
 | `API_KEY`                         | _(empty)_                        | Static API key for programmatic use  |
@@ -108,8 +109,11 @@ are optional and have safe defaults for development.
 ## API
 
 The API is documented interactively at `http://localhost:8000/docs` (Swagger UI).
-All endpoints except `/health` and the auth flow require a valid `X-API-Key`
-header, Basic Auth, or a dashboard session token.
+All endpoints except `/health`, the auth flow, and the blacklist `.txt` feeds
+require a valid `X-API-Key` header, Basic Auth, or a dashboard session token.
+The feeds (`/api/blacklist/urls.txt` and `/api/blacklist/ips.txt`) are public
+so external integrations (nginx, fail2ban, firewall scripts) can consume them
+without credentials.
 
 ### URL Patterns
 
@@ -152,7 +156,11 @@ matches a single character, and everything else is literal.
 | GET    | `/api/findings/`                | List persisted findings            |
 | GET    | `/api/findings/graph`           | Client → server → URL flow graph   |
 | GET    | `/api/blacklist/`               | List blacklisted URLs / IPs        |
+| GET    | `/api/blacklist/urls.txt`       | Public plain-text URL feed (real file) |
+| GET    | `/api/blacklist/ips.txt`        | Public plain-text IP feed (real file)  |
 | POST   | `/api/blacklist/`               | Add a blacklist entry              |
+| POST   | `/api/blacklist/bulk`           | Add many blacklist entries at once |
+| POST   | `/api/blacklist/bulk-delete`    | Delete many blacklist entries at once |
 | DELETE | `/api/blacklist/{kind}/{value}` | Remove a blacklist entry           |
 | POST   | `/api/query/`                   | Run an ad-hoc ES query             |
 | GET    | `/api/logs/`                    | Monitor-log audit trail            |

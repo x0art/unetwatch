@@ -23,8 +23,11 @@ RUN pip install --no-cache-dir .
 # Copy the built admin UI from the build stage.
 COPY --from=ui-build /build/dist ./admin-ui/dist
 
-# Non-root user.
+# Non-root user. /app/data (the blacklist feed files, mounted as a named
+# volume in docker-compose) must exist and be owned by the app user, or the
+# first volume mount would come up root-owned and feed writes would fail.
 RUN useradd --create-home --uid 1000 unetwatch && \
+    mkdir -p /app/data && \
     chown -R unetwatch:unetwatch /app
 USER unetwatch
 

@@ -64,6 +64,7 @@ def test_blacklist_add_invalid_value(client):
 
 async def test_blacklist_urls_endpoint_returns_urls_only(client):
     from app.database import get_db
+    from app.services.feeds import sync_regenerate
 
     db = await get_db()
     try:
@@ -75,6 +76,9 @@ async def test_blacklist_urls_endpoint_returns_urls_only(client):
             " VALUES ('url', 'only.example')"
         )
         await db.commit()
+        # Direct DB inserts bypass the API, which is what normally
+        # regenerates the feed files — do it here so the files match.
+        await sync_regenerate(db)
     finally:
         await db.close()
 
@@ -88,6 +92,7 @@ async def test_blacklist_urls_endpoint_returns_urls_only(client):
 
 async def test_blacklist_ips_endpoint_returns_ips_only(client):
     from app.database import get_db
+    from app.services.feeds import sync_regenerate
 
     db = await get_db()
     try:
@@ -99,6 +104,9 @@ async def test_blacklist_ips_endpoint_returns_ips_only(client):
             " VALUES ('url', 'only.example')"
         )
         await db.commit()
+        # Direct DB inserts bypass the API, which is what normally
+        # regenerates the feed files — do it here so the files match.
+        await sync_regenerate(db)
     finally:
         await db.close()
 
@@ -175,6 +183,77 @@ async def test_blacklist_migration_normalizes_legacy_entries(db_path):
     assert not any(k == "url" and v.startswith("http") for k, v in entries)
 
 
+def test_blacklist_bulk_add(client):
+    resp = client.post(
+        "/api/blacklist/bulk",
+        json={
+            "values": [
+                "http://a.example/foo",
+                "b.example",
+                "1.2.3.4",
+                "http://1.2.3.4/x",  # normalizes to the same IP -> skipped
+                "not a url or ip",  # invalid -> error
+            ]
+        },
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert sorted(data["added"]) == ["1.2.3.4", "a.example", "b.example"]
+    # http://1.2.3.4/x normalizes to the same IP -> skipped (already added in this batch)
+    assert data["skipped"] == ["1.2.3.4"]
+    assert len(data["errors"]) == 1
+    assert data["errors"][0]["value"] == "not a url or ip"
+
+    # Feeds were regenerated from the DB.
+    assert "a.example" in client.get("/api/blacklist/urls.txt").text
+    assert "1.2.3.4" in client.get("/api/blacklist/ips.txt").text
+
+
+def test_blacklist_bulk_add_duplicate_within_batch(client):
+    resp = client.post(
+        "/api/blacklist/bulk",
+        json={"values": ["x.example", "http://x.example/", "x.example"]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["added"] == ["x.example"]
+    # Both later occurrences are within-batch duplicates.
+    assert data["skipped"] == ["x.example", "x.example"]
+    assert data["errors"] == []
+
+
+def test_blacklist_bulk_add_invalid_payload(client):
+    resp = client.post("/api/blacklist/bulk", json={"values": []})
+    assert resp.status_code == 422
+
+
+def test_blacklist_bulk_delete(client):
+    client.post("/api/blacklist/bulk", json={"values": ["a.example", "b.example", "1.2.3.4"]})
+
+    resp = client.post(
+        "/api/blacklist/bulk-delete",
+        json={
+            "entries": [
+                {"kind": "url", "value": "a.example"},
+                {"kind": "ip", "value": "1.2.3.4"},
+                {"kind": "url", "value": "missing.example"},  # not present -> skipped
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == 2
+
+    # Feeds were regenerated.
+    assert "a.example" not in client.get("/api/blacklist/urls.txt").text
+    assert "1.2.3.4" not in client.get("/api/blacklist/ips.txt").text
+    assert "b.example" in client.get("/api/blacklist/urls.txt").text
+
+
+def test_blacklist_bulk_delete_invalid_payload(client):
+    resp = client.post("/api/blacklist/bulk-delete", json={"entries": []})
+    assert resp.status_code == 422
+
+
 def test_blacklist_delete_entry(client):
     client.post("/api/blacklist/", json={"value": "http://del.example/x"})
     assert "del.example" in client.get("/api/blacklist/urls.txt").text
@@ -203,13 +282,20 @@ def test_blacklist_delete_invalid_kind(client):
     assert resp.status_code == 422
 
 
-def test_blacklist_requires_auth(db_path):
-    """Endpoints are mounted with verify_admin; requests without auth -> 401."""
+def test_blacklist_feeds_are_public(db_path):
+    """The .txt feeds are served as real files without auth for external
+    integrations; write/list routes still require auth."""
     asyncio.run(init_db())
 
     with TestClient(app, raise_server_exceptions=False) as c:
         c.headers.clear()
+        # Feed files exist (regenerated at startup) and are public.
         r = c.get("/api/blacklist/urls.txt")
-        assert r.status_code == 401
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/plain")
         r2 = c.get("/api/blacklist/ips.txt")
-        assert r2.status_code == 401
+        assert r2.status_code == 200
+        assert r2.headers["content-type"].startswith("text/plain")
+        # Write/list routes still require auth.
+        assert c.post("/api/blacklist/", json={"value": "http://x.example"}).status_code == 401
+        assert c.get("/api/blacklist/entries").status_code == 401

@@ -56,6 +56,27 @@ class BlacklistEntryCreate(BaseModel):
     finding_id: int | None = None
 
 
+class BlacklistBulkAdd(BaseModel):
+    """Bulk-add model: raw values are normalized like single adds; each line
+    becomes its own entry (bare FQDN / IPv4)."""
+
+    values: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class BlacklistEntryRef(BaseModel):
+    """An existing entry identified by its stored kind + value (both are
+    normalized — the frontend sends back what the list endpoint returned)."""
+
+    kind: str = Field(..., pattern="^(url|ip)$")
+    value: str = Field(..., min_length=1, max_length=500)
+
+
+class BlacklistBulkDelete(BaseModel):
+    """Bulk-delete model: entries to remove, keyed by kind+value."""
+
+    entries: list[BlacklistEntryRef] = Field(..., min_length=1, max_length=500)
+
+
 class BlacklistEntryResponse(BaseModel):
     id: int
     kind: str

@@ -6,9 +6,10 @@ import pytest_asyncio
 
 @pytest_asyncio.fixture(autouse=True)
 async def db_path(tmp_path):
-    """Point the app at a temp SQLite DB for tests."""
+    """Point the app at a temp SQLite DB and feed dir for tests."""
     dbfile = tmp_path / "test.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{dbfile}"
+    os.environ["BLACKLIST_DIR"] = str(tmp_path / "feeds")
 
     # Set auth creds for testing
     os.environ["ADMIN_USER"] = "admin"
@@ -21,6 +22,7 @@ async def db_path(tmp_path):
 
     yield str(dbfile)
     os.environ.pop("DATABASE_URL", None)
+    os.environ.pop("BLACKLIST_DIR", None)
     os.environ.pop("ADMIN_USER", None)
     os.environ.pop("ADMIN_PASS", None)
     get_settings.cache_clear()

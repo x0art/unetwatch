@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     log_retention_days: int = 30
     log_max_rows: int = 1000
     database_url: str = "sqlite:///./unetwatch.db"
+    # Directory holding the static blacklist feed files (urls.txt / ips.txt).
+    # Files here are regenerated from the DB on startup and after every change,
+    # and are served as real files at /api/blacklist/{urls,ips}.txt.
+    # Relative to the working directory: resolves to ./data locally and to
+    # /app/data in the container (the volume mounted in docker-compose.yml).
+    blacklist_dir: str = "./data"
     api_key: str = ""
     admin_user: str = "admin"
     admin_pass: str = "changeme"

@@ -16,6 +16,9 @@ wheels/
 *.db
 *.sqlite3
 
+# Static blacklist feed files (regenerated from the DB)
+/data/
+
 # Node modules (for admin UI)
 node_modules/
 dist/

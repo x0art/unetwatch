@@ -3,7 +3,6 @@ import {
   type Pattern,
   listPatterns,
   deletePattern,
-  createPattern,
   updatePattern,
   bulkImport,
 } from "../api"
@@ -19,9 +18,9 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
+import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
 import {
   Search,
-  Plus,
   Upload,
   Pencil,
   Trash2,
@@ -50,11 +49,8 @@ export function PatternTable() {
   const [editType, setEditType] = useState("block")
   const [editSaving, setEditSaving] = useState(false)
 
-  // ── Create dialog ──
+  // ── Create dialog (shared AddPatternDialog) ──
   const [createOpen, setCreateOpen] = useState(false)
-  const [createValue, setCreateValue] = useState("")
-  const [createType, setCreateType] = useState("block")
-  const [createSaving, setCreateSaving] = useState(false)
 
   // ── Bulk import dialog ──
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -174,23 +170,6 @@ export function PatternTable() {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
       setEditSaving(false)
-    }
-  }
-
-  // Create
-  const handleCreate = async () => {
-    if (!createValue.trim()) return
-    setCreateSaving(true)
-    try {
-      await createPattern({ pattern: createValue, pattern_type: createType })
-      toast({ title: "Pattern created", variant: "success" })
-      setCreateOpen(false)
-      setCreateValue("")
-      fetchPatterns()
-    } catch (e) {
-      toast({ title: "Error", description: (e as Error).message, variant: "error" })
-    } finally {
-      setCreateSaving(false)
     }
   }
 
@@ -316,10 +295,7 @@ export function PatternTable() {
           />
         </div>
         <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          Add Pattern
-        </Button>
+        <AddPatternButton onOpen={() => setCreateOpen(true)} />
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk Import
@@ -425,33 +401,12 @@ export function PatternTable() {
         </div>
       </Dialog>
 
-      {/* ── Create Dialog ── */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Add Pattern">
-        <div className="space-y-4">
-          <div>
-            <Label>Pattern</Label>
-            <Input
-              value={createValue}
-              onChange={(e) => setCreateValue(e.target.value)}
-              placeholder="*porn*"
-              autoFocus
-            />
-          </div>
-          <div>
-            <Label>Type</Label>
-            <Select value={createType} onChange={setCreateType} options={editTypeOptions} />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createSaving}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreate} disabled={!createValue.trim() || createSaving}>
-              {createSaving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-              Create
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+      {/* ── Add Pattern Dialog (shared, also used from the header) ── */}
+      <AddPatternDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={fetchPatterns}
+      />
 
       {/* ── Bulk Import Dialog ── */}
       <Dialog open={bulkOpen} onClose={() => setBulkOpen(false)} title="Bulk Import Patterns">
