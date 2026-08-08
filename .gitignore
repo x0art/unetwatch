@@ -34,3 +34,8 @@ htmlcov/
 
 # graphify skill output
 graphify-out/
+
+# AI agent tooling state (autoskills / local agent skills)
+.agents/
+.claude/skills/
+skills-lock.json
