@@ -2,29 +2,6 @@ import { useState, type ReactNode } from "react"
 import { MobileSidebar, MobileMenuButton, Sidebar, useTheme, type View } from "./Sidebar"
 import { cn } from "../lib/utils"
 
-/* ════════════════════════════════════════════════════════════════
- * AppShell
- *
- * Persistent dark sidebar + main content area. On mobile the sidebar
- * collapses into an overlay drawer toggled by a hamburger button in the
- * in-content header. The header also hosts the page title and an
- * optional `actions` slot (refresh, last-updated, etc.).
- *
- *   <AppShell
- *     currentView="dashboard"
- *     onNavigate={setView}
- *     onLogout={handleLogout}
- *     title="Dashboard"
- *     actions={<Button>Refresh</Button>}
- *   >
- *     {pageContent}
- *   </AppShell>
- *
- * Theme: useTheme() is invoked here and the toggle is wired into the
- * sidebar footer. The hook applies `dark`/`light` on <html> and
- * persists to localStorage("unetwatch-theme"); default is dark.
- * ════════════════════════════════════════════════════════════════ */
-
 export function AppShell({
   currentView,
   onNavigate,

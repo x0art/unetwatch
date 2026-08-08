@@ -35,9 +35,6 @@ const LIMIT_OPTIONS = [
   { value: "100", label: "Top 100" },
 ]
 
-/* Build the sankey input: three fixed layers (client → server → URL).
- * ECharts spreads nodes within each layer so the URL column never
- * overlaps, and the container sizes to content. */
 function toSankey(graph: FindingsGraph): {
   nodes: SankeyNode[]
   links: SankeyLink[]

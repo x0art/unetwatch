@@ -1,8 +1,4 @@
 import { useEffect, useMemo, useRef } from "react"
-// Modular echarts: import only the sankey chart, the tooltip component and
-// the canvas renderer instead of the full bundle. This keeps the shared
-// chunk small — the full "echarts" root import was pulling in every chart
-// type and pushing the bundle over the warning threshold.
 import * as echarts from "echarts/core"
 import { SankeyChart } from "echarts/charts"
 import { TooltipComponent } from "echarts/components"
@@ -11,32 +7,6 @@ import type { ECharts, EChartsOption, TooltipComponentFormatterCallbackParams } 
 import { useTheme } from "./Sidebar"
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
-
-/* ════════════════════════════════════════════════════════════════
- * SankeyDiagram — reusable ECharts Sankey wrapper
- *
- * Renders a layered flow (client IP → server IP → URL, redirect source
- * → final URL, …) as an ECharts sankey/alluvial diagram. The container
- * sizes to its content: height is derived from the number of nodes so
- * a small flow never renders a huge empty box, and the node layers are
- * spread across the available width (no overlap).
- *
- * App colors are oklch() CSS vars, which ECharts' canvas renderer can't
- * parse. They are converted to sRGB here with the standard OKLab → sRGB
- * math (Björn Ottosson, as used by CSS Color 4) — pure functions, no DOM
- * access, so it's safe to call from render.
- *
- * Chart lifecycle — the two-effect split matters:
- *   • A mount effect creates the ECharts instance ONCE and wires resize
- *     observers; it never re-runs.
- *   • A sync effect pushes option only when the props actually changed
- *     by content. The parent re-renders constantly (the countdown timer
- *     in App re-renders the whole tree once a second, and callers pass
- *     fresh array/object literals every render), and those re-renders
- *     MUST NOT touch the chart. A dispose+init or a notMerge setOption
- *     on identical data restarts the 500ms enter animation, which is
- *     exactly the "blinking" bug. Content is diffed by value here.
- * ════════════════════════════════════════════════════════════════ */
 
 export interface SankeyNode {
   id: string
@@ -53,8 +23,6 @@ export interface SankeyLink {
   name?: string
 }
 
-/* Static fallback palette (dark theme). Used when the live CSS token is
- * not a parseable oklch()/color(). Kept legible on dark surfaces. */
 const FALLBACK: Record<string, string> = {
   "--color-info": "#5b8def",
   "--color-warning": "#e8a33d",
@@ -66,19 +34,6 @@ const FALLBACK: Record<string, string> = {
   "--color-card": "#232331",
   "--color-border": "#3f3f4d",
 }
-
-/* ── oklch() → sRGB ─────────────────────────────────────────────
- * ECharts' canvas renderer (zrender) cannot parse oklch()/color()
- * strings, and browsers serialize computed colors as oklch() in modern
- * engines — so a getComputedStyle-based "probe" returns oklch back and
- * the chart fails to render. Convert numerically instead.
- *
- * The math is the standard OKLab → sRGB (Björn Ottosson, CSS Color 4):
- *   OKLab → LMS (cube-root encoded) → cube → linear LMS → linear sRGB
- *   → gamma-encoded sRGB. The cube step is critical: without it the
- *   values stay in the compressed cube-root space and dark colors come
- *   out far too light.
- * ────────────────────────────────────────────────────────────────── */
 
 function parseOklch(input: string): [number, number, number] | null {
   const m = input.match(/^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
@@ -112,9 +67,6 @@ function oklchToSrgb(L: number, C: number, Hdeg: number): string {
   return `rgb(${clamp(r_lin)}, ${clamp(g_lin)}, ${clamp(b_lin)})`
 }
 
-/* Resolve a `var(--token)` to a color ECharts can consume. Reads the
- * live CSS custom property (theme-aware) and converts oklch → sRGB.
- * Pure function — safe to call during render. */
 function resolveColor(raw: string): string {
   const m = raw.match(/var\((--[\w-]+)\)/)
   if (!m) return raw
@@ -131,10 +83,6 @@ function resolveColor(raw: string): string {
   return live
 }
 
-/* Content equality for the props that matter. The parent re-renders
- * constantly (countdown ticker, stats refresh) and passes fresh array /
- * object literals; compare by value so those re-renders are no-ops for
- * the chart instead of a rebuild. */
 function sameNodes(a: SankeyNode[], b: SankeyNode[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
@@ -167,12 +115,6 @@ function sameLayerColors(a?: Record<string, string>, b?: Record<string, string>)
   return true
 }
 
-/* Derive a diagram height from the largest layer. The height is the
- * main lever for readable nodes: ECharts sizes sankey node heights
- * proportional to their value share of the chart, so when a layer has
- * few nodes a short container shrinks each node until the 11px label
- * text no longer fits. Keep a generous minimum and a roomy per-node
- * budget so even a handful of connections renders labels at full size. */
 function contentHeight(nodes: SankeyNode[], nodeHeight = 30, nodeGap = 16, pad = 44) {
   const byLayer: Record<number, number> = {}
   for (const n of nodes) {
@@ -183,8 +125,6 @@ function contentHeight(nodes: SankeyNode[], nodeHeight = 30, nodeGap = 16, pad =
   return Math.max(240, Math.min(700, pad + max * nodeHeight + (max - 1) * nodeGap))
 }
 
-/* Label formatting. Long names are truncated to keep the diagram tidy;
- * the truncation is a pure function, so it's safe during render. */
 const MAX_LABEL = 42
 
 function formatLabel(name: string): string {
@@ -197,11 +137,6 @@ function buildOption(
   layerColors: Record<string, string> | undefined,
   palette: { label: string; muted: string; card: string; border: string },
 ): EChartsOption {
-  /* Sankey layer colors are applied per-node (itemStyle.color on each
-   * data item) — a sankey series does NOT accept a per-layer color map
-   * on the series `color` option (that's a plain palette array). Without
-   * a layerColors prop we fall back to the classic info/warning/danger
-   * palette. */
   const paletteColors = [
     resolveColor("var(--color-info)"),
     resolveColor("var(--color-warning)"),
@@ -213,10 +148,6 @@ function buildOption(
           color: resolveColor(layerColors[String(n.layer ?? 0)] ?? paletteColors[0]),
         })
       : undefined
-  /* Last layer: labels point LEFT into the chart (per-node label
-   * override) so the diagram uses the full container width. The widest
-   * last-layer label no longer needs to be reserved as `right` margin.
-   * Other layers inherit the series-level `position: "right"`. */
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
   const data = nodes.map((n) => {
     const item: (SankeyNode & { itemStyle?: { color: string }; label?: { position: "left" } }) = {
@@ -239,10 +170,6 @@ function buildOption(
       formatter: (params: TooltipComponentFormatterCallbackParams) => {
         const p = Array.isArray(params) ? params[0] : params
         if (p.dataType === "edge") {
-          // Redirect hops carry a "302 →" style name; fall back to
-          // "source → target" when no name is set. Sankey edges expose
-          // source/target at runtime even though the base param type
-          // doesn't declare them.
           const src = (p as { source?: string }).source ?? ""
           const tgt = (p as { target?: string }).target ?? ""
           if (p.name) return `${p.name} ${src} → ${tgt}`
@@ -273,8 +200,6 @@ function buildOption(
           color: palette.label,
           fontFamily: "ui-monospace, SFMono-Regular, monospace",
           fontSize: 11,
-          // Default position for non-last-layer nodes; last-layer nodes
-          // override this to "left" via their per-node `label`.
           position: "right",
           formatter: (p: { name: string }) => formatLabel(p.name),
         },
@@ -323,9 +248,6 @@ export function SankeyDiagram({
     [theme],
   )
 
-  /* Create the chart once. Cleanup disposes it on unmount only — this
-   * effect has no props in its deps, so parent re-renders never touch
-   * the instance. */
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -346,10 +268,6 @@ export function SankeyDiagram({
     }
   }, [])
 
-  /* Push option only when the content actually changed. The parent may
-   * re-render every second with identical data (fresh literals); those
-   * renders must not re-run setOption, because notMerge on identical
-   * data restarts the enter animation → the diagram blinks. */
   const prevNodes = useRef<SankeyNode[] | null>(null)
   const prevLinks = useRef<SankeyLink[] | null>(null)
   const prevLayerColors = useRef<Record<string, string> | undefined>(undefined)

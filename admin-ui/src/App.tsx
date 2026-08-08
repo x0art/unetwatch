@@ -14,10 +14,6 @@ import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialo
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { ToastProvider, useToast, Skeleton } from "./components/ui"
 
-/* ── Code-split views ──────────────────────────────────────────────
- * Each page is loaded lazily so the initial bundle stays small — the
- * dashboard + shell load first, and the heavier pages (query, graph,
- * redirects with echarts) arrive in their own chunk only when visited. */
 const DashboardPage = lazy(() =>
   import("./components/DashboardPage").then((m) => ({ default: m.DashboardPage })),
 )

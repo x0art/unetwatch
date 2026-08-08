@@ -19,20 +19,10 @@ import {
 import { cn } from "../lib/utils"
 import { Button } from "./ui"
 
-/* ════════════════════════════════════════════════════════════════
- * Theme management
- *
- * Default: dark. Toggle adds/removes `light` class on <html>.
- * Persisted in localStorage("unetwatch-theme"). The <html> element
- * carries `dark` by default; `.light` opts in to light tokens (see
- * index.css). The old "elk-theme" key is read as a fallback so existing
- * installs keep their theme across the uNetWatch upgrade.
- *
- * The theme state lives in a context provider so every consumer (the
- * sidebar toggle, the chart palette, …) shares ONE source of truth.
- * A per-hook useState would leave each consumer with its own isolated
- * theme — toggling would update only the sidebar, never the charts.
- * ════════════════════════════════════════════════════════════════ */
+/* Theme lives in a context provider so the sidebar toggle and the chart
+ * palette share one source of truth. Default dark, persisted to
+ * localStorage("unetwatch-theme"); legacy "elk-theme" is read as a
+ * fallback for existing installs. */
 
 export type Theme = "dark" | "light"
 
