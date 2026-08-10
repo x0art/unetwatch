@@ -26,7 +26,8 @@ async def findings_graph(
     """
     cursor = await db.execute(
         """
-        SELECT client_ip, server_ip, url, base_url, COUNT(*) AS count
+        SELECT client_ip, server_ip, url, base_url, COUNT(*) AS count,
+               MAX(log_timestamp) AS last_seen
         FROM findings
         WHERE client_ip != '' AND url != ''
         GROUP BY client_ip, server_ip, url, base_url
@@ -141,6 +142,7 @@ async def findings_graph(
             "url": r["url"],
             "base_url": r["base_url"],
             "count": r["count"],
+            "last_seen": r["last_seen"],
         }
         for r in rows
         if r["client_ip"] in top_ips and r["url"] in top_urls

@@ -27,6 +27,12 @@ import { DataTable } from "./DataTable"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import { useDebounce } from "../lib/utils"
 
+function formatDetected(ts: string) {
+  const date = new Date(ts)
+  if (Number.isNaN(date.getTime())) return ts
+  return date.toLocaleString()
+}
+
 type Kind = GraphNode["kind"]
 
 const LIMIT_OPTIONS = [
@@ -333,6 +339,17 @@ export function GraphPage() {
                 cell: (f) => <span className="tabular-nums">{f.count.toLocaleString()}</span>,
                 align: "right",
                 width: "w-24",
+              },
+              {
+                id: "last_seen",
+                header: "Timestamp",
+                accessor: (f) => f.last_seen,
+                cell: (f) => (
+                  <span className="whitespace-nowrap text-muted-foreground">
+                    {formatDetected(f.last_seen)}
+                  </span>
+                ),
+                width: "w-44",
               },
             ]}
             data={graph.flows}
