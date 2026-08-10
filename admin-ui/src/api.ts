@@ -56,6 +56,7 @@ export interface GraphFlow {
   url: string
   base_url: string
   count: number
+  last_seen: string
 }
 
 export interface FindingsGraph {
