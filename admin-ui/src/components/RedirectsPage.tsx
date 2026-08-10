@@ -26,6 +26,7 @@ import {
   Badge,
   Button,
   ConfirmDialog,
+  CopyUrlButton,
   Dialog,
   EmptyState,
   Input,
@@ -440,8 +441,11 @@ export function RedirectsPage() {
       accessor: (i) => i.url,
       defaultSortDir: "asc",
       cell: (i) => (
-        <span className="block max-w-[320px] truncate font-mono text-xs" title={i.url}>
-          {i.url}
+        <span className="flex items-center gap-1.5">
+          <span className="block max-w-[320px] truncate font-mono text-xs" title={i.url}>
+            {i.url}
+          </span>
+          <CopyUrlButton value={i.url} label="URL" />
         </span>
       ),
     },
@@ -473,8 +477,11 @@ export function RedirectsPage() {
       accessor: (i) => i.final_url,
       cell: (i) =>
         i.final_url && i.final_url !== i.url ? (
-          <span className="block max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={i.final_url}>
-            {i.final_url}
+          <span className="flex items-center gap-1.5">
+            <span className="block max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={i.final_url}>
+              {i.final_url}
+            </span>
+            <CopyUrlButton value={i.final_url} label="Final URL" />
           </span>
         ) : (
           <span className="text-xs text-muted-foreground/60">—</span>
