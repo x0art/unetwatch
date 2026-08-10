@@ -23,14 +23,27 @@ async def _list_values(db, kind: str) -> list[str]:
 
 @router.get("/urls.txt")
 async def list_blacklist_urls():
-    """Serve the on-disk URL feed as a real file (public)."""
-    return FileResponse(_feed_path("url"), media_type="text/plain")
+    """Serve the on-disk URL feed as a real file (public).
+
+    ``no-store``: the admin UI reloads the feeds after every add/delete, and
+    downstream integrations (nginx, fail2ban) depend on the current list.
+    FileResponse's ETag/Last-Modified would otherwise make browsers apply
+    heuristic caching and serve a stale feed (missing the newest entries).
+    """
+    return FileResponse(
+        _feed_path("url"), media_type="text/plain", headers={"Cache-Control": "no-store"}
+    )
 
 
 @router.get("/ips.txt")
 async def list_blacklist_ips():
-    """Serve the on-disk IP feed as a real file (public)."""
-    return FileResponse(_feed_path("ip"), media_type="text/plain")
+    """Serve the on-disk IP feed as a real file (public).
+
+    Same ``no-store`` rationale as the URL feed — see list_blacklist_urls.
+    """
+    return FileResponse(
+        _feed_path("ip"), media_type="text/plain", headers={"Cache-Control": "no-store"}
+    )
 
 
 @router.get("/entries", dependencies=[Depends(verify_admin)])
