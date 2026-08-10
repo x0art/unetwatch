@@ -263,6 +263,25 @@ def test_blacklist_delete_entry(client):
     assert "del.example" not in client.get("/api/blacklist/urls.txt").text
 
 
+def test_blacklist_feeds_are_never_heuristically_cached(client):
+    """The admin UI reloads the plain-text feeds after every add/delete, and
+    external integrations (nginx, fail2ban) depend on the current list. Without
+    a Cache-Control header, FileResponse's ETag/Last-Modified make browsers
+    apply *heuristic* caching (freshness ~ 10% of time since the file was last
+    written), so a feed rewritten only at startup/mutation can be served stale
+    from cache — the newly added entry never appears. The feeds must be
+    explicitly marked non-cacheable."""
+    for path in ("/api/blacklist/urls.txt", "/api/blacklist/ips.txt"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers.get("cache-control") == "no-store"
+
+    # Sanity: a re-fetch after an add still returns the new entry.
+    resp = client.post("/api/blacklist/", json={"value": "http://fresh.example/x"})
+    assert resp.status_code == 201
+    assert "fresh.example" in client.get("/api/blacklist/urls.txt").text
+
+
 def test_blacklist_delete_ip_entry(client):
     client.post("/api/blacklist/", json={"value": "5.6.7.8"})
     assert "5.6.7.8" in client.get("/api/blacklist/ips.txt").text
