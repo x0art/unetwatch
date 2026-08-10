@@ -24,6 +24,7 @@ import {
 import {
   Badge,
   Button,
+  CopyUrlButton,
   EmptyState,
   PageHeader,
   Panel,
@@ -339,8 +340,11 @@ export function QueryPage() {
       accessor: (d) => d.url,
       defaultSortDir: "asc",
       cell: (d) => (
-        <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
-          {d.url}
+        <span className="flex items-center gap-1.5">
+          <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
+            {d.url}
+          </span>
+          <CopyUrlButton value={d.url} label="URL" />
         </span>
       ),
     },
@@ -349,7 +353,14 @@ export function QueryPage() {
       header: "Base URL",
       accessor: (d) => d.base_url,
       defaultSortDir: "asc",
-      cell: (d) => <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>{d.base_url}</span>,
+      cell: (d) => (
+        <span className="flex items-center gap-1.5">
+          <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
+            {d.base_url}
+          </span>
+          <CopyUrlButton value={d.base_url} label="Base URL" />
+        </span>
+      ),
     },
     {
       id: "duration",
