@@ -39,15 +39,26 @@ import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram
 const PAGE_SIZE = 25
 
 const WINDOW_OPTIONS = [
-  { value: "15", label: "Last 15 minutes" },
+  { value: "30", label: "Last 30 minutes" },
   { value: "60", label: "Last hour" },
   { value: "360", label: "Last 6 hours" },
+  { value: "720", label: "Last 12 hours" },
   { value: "1440", label: "Last 24 hours" },
+  { value: "2880", label: "Last 2 days" },
+  { value: "4320", label: "Last 3 days" },
+  { value: "10080", label: "Last 7 days" },
+  { value: "20160", label: "Last 14 days" },
 ]
 
 const WHITELIST_OPTIONS = [
   { value: "include", label: "Include whitelisted" },
   { value: "exclude", label: "Exclude whitelisted" },
+]
+
+const ACTION_FILTER_OPTIONS = [
+  { value: "all", label: "All actions" },
+  { value: "ALLOW", label: "ALLOW" },
+  { value: "DENY", label: "DENY" },
 ]
 
 function formatTime(iso: string) {
@@ -226,6 +237,7 @@ export function QueryPage() {
   const { toast } = useToast()
   const [windowMinutes, setWindowMinutes] = useState("60")
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
+  const [actionFilter, setActionFilter] = useState<"all" | "ALLOW" | "DENY">("all")
   const [esSearch, setEsSearch] = useState("")
   const debouncedEsSearch = useDebounce(esSearch, 400)
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -424,6 +436,12 @@ export function QueryPage() {
     )
   }, [result, q])
 
+  // Client-side action filter (ALLOW / DENY) layered on top of the doc search.
+  const actionFilteredItems = useMemo(() => {
+    if (actionFilter === "all") return visibleItems
+    return visibleItems.filter((d) => d.action === actionFilter)
+  }, [visibleItems, actionFilter])
+
   const esOffline = result !== null && !result.es_online
 
   return (
@@ -446,6 +464,13 @@ export function QueryPage() {
           options={WHITELIST_OPTIONS}
           className="w-44"
           aria-label="Whitelisted matches"
+        />
+        <Select
+          value={actionFilter}
+          onChange={(v) => setActionFilter(v as "all" | "ALLOW" | "DENY")}
+          options={ACTION_FILTER_OPTIONS}
+          className="w-40"
+          aria-label="Filter by action"
         />
         <span className="text-xs text-muted-foreground">Window</span>
         <Select
@@ -573,19 +598,19 @@ export function QueryPage() {
               <div>
                 <h3 className="text-sm font-semibold tracking-tight">Matching documents</h3>
                 <p className="text-xs text-muted-foreground">
-                  {visibleItems.length.toLocaleString()}
+                  {actionFilteredItems.length.toLocaleString()}
                   {q ? ` of ${result.items.length.toLocaleString()}` : ""} matching doc
-                  {visibleItems.length === 1 ? "" : "s"} ·{" "}
+                  {actionFilteredItems.length === 1 ? "" : "s"} ·{" "}
                   <span className="text-warning">
-                    {visibleItems.filter((d) => d.blocked_by.length > 0).length} blocked
+                    {actionFilteredItems.filter((d) => d.blocked_by.length > 0).length} blocked
                   </span>{" "}
                   ·{" "}
                   <span className="text-success">
-                    {visibleItems.filter((d) => d.whitelisted).length} whitelisted
+                    {actionFilteredItems.filter((d) => d.whitelisted).length} whitelisted
                   </span>{" "}
                   ·{" "}
                   <span className="text-destructive">
-                    {visibleItems.filter((d) => d.blacklisted).length} blacklisted
+                    {actionFilteredItems.filter((d) => d.blacklisted).length} blacklisted
                   </span>
                 </p>
               </div>
@@ -621,7 +646,7 @@ export function QueryPage() {
             </div>
             <DataTable
               columns={columns}
-              data={visibleItems}
+              data={actionFilteredItems}
               rowId={rowId}
               selectable
               busy={loading}
