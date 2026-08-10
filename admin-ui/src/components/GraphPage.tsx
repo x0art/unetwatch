@@ -15,6 +15,7 @@ import {
 } from "../api"
 import {
   Button,
+  CopyUrlButton,
   EmptyState,
   PageHeader,
   SearchInput,
@@ -316,8 +317,11 @@ export function GraphPage() {
                 accessor: (f) => f.url,
                 defaultSortDir: "asc",
                 cell: (f) => (
-                  <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
-                    {f.url}
+                  <span className="flex items-center gap-1.5">
+                    <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
+                      {f.url}
+                    </span>
+                    <CopyUrlButton value={f.url} label="URL" />
                   </span>
                 ),
               },
