@@ -121,11 +121,17 @@ function contentHeight(nodes: SankeyNode[], nodeHeight = 30, nodeGap = 16, pad =
     const layer = n.layer ?? 0
     byLayer[layer] = (byLayer[layer] ?? 0) + 1
   }
-  const max = Math.max(1, ...Object.values(byLayer))
-  return Math.max(240, Math.min(700, pad + max * nodeHeight + (max - 1) * nodeGap))
+  const counts = Object.values(byLayer)
+  const maxLayerNodes = Math.max(1, ...counts)
+  const numLayers = Math.max(1, counts.length)
+  // Height must fit the densest layer *and* give every layer vertical room:
+  // dense layers drive per-node height, and more layers add inter-layer gap.
+  const nodesSpace = maxLayerNodes * nodeHeight + (maxLayerNodes - 1) * nodeGap
+  const layersSpace = (numLayers - 1) * 12
+  return Math.max(240, Math.min(720, pad + nodesSpace + layersSpace))
 }
 
-const MAX_LABEL = 42
+const MAX_LABEL = 60
 
 function formatLabel(name: string): string {
   return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
@@ -149,6 +155,14 @@ function buildOption(
         })
       : undefined
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
+  const layerCounts: Record<number, number> = {}
+  for (const n of nodes) {
+    const layer = n.layer ?? 0
+    layerCounts[layer] = (layerCounts[layer] ?? 0) + 1
+  }
+  const maxLayerNodes = Math.max(1, ...Object.values(layerCounts))
+  // Give packed layers more breathing room so adjacent nodes don't collide.
+  const nodeGap = maxLayerNodes > 14 ? 20 : maxLayerNodes > 8 ? 18 : 16
   const data = nodes.map((n) => {
     const item: (SankeyNode & { itemStyle?: { color: string }; label?: { position: "left" } }) = {
       ...n,
@@ -188,7 +202,7 @@ function buildOption(
         top: 12,
         bottom: 12,
         nodeWidth: 16,
-        nodeGap: 16,
+        nodeGap,
         layoutIterations: 32,
         emphasis: { focus: "adjacency" },
         lineStyle: {
