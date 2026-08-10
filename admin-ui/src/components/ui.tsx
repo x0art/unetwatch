@@ -25,7 +25,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
-import { cn } from "../lib/utils"
+import { cn, copyText } from "../lib/utils"
 
 /* ════════════════════════════════════════════════════════════════
  * Button
@@ -103,10 +103,10 @@ export function CopyUrlButton({
 }) {
   const { toast } = useToast()
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
+    const ok = await copyText(value)
+    if (ok) {
       toast({ title: "Copied", description: value, variant: "success" })
-    } catch {
+    } else {
       toast({ title: "Copy failed", variant: "error" })
     }
   }
@@ -115,7 +115,7 @@ export function CopyUrlButton({
       variant="ghost"
       size={size}
       onClick={handleCopy}
-      className={cn("h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground", className)}
+      className={cn("h-6 w-6 px-0 shrink-0 text-muted-foreground hover:text-foreground", className)}
       aria-label={label ? `Copy ${label}` : "Copy"}
     >
       <Copy className="h-3.5 w-3.5" />
