@@ -420,10 +420,10 @@ export function QueryPage() {
   const debouncedDocSearch = useDebounce(docSearch, 200)
   const q = debouncedDocSearch.trim().toLowerCase()
 
-  // Reset to the first page whenever a new query result or search arrives.
+  // Reset to the first page whenever a new query result, search, or action filter arrives.
   useEffect(() => {
     setPage(0)
-  }, [result, debouncedDocSearch])
+  }, [result, debouncedDocSearch, actionFilter])
 
   // Client-side substring filter across IPs and URLs.
   const visibleItems = useMemo(() => {
