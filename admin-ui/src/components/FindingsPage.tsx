@@ -23,7 +23,7 @@ import {
   listTrackedUrls,
   type Pattern,
 } from "../api"
-import { Button, ConfirmDialog, PageHeader, SearchInput, useToast } from "./ui"
+import { Button, ConfirmDialog, CopyUrlButton, PageHeader, SearchInput, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 
@@ -358,6 +358,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       cell: (f) => (
         <div className="flex items-center gap-2">
           <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
+          <CopyUrlButton value={f.base_url} label="Base URL" />
           {whitelistIndex[f.base_url] ? (
             <span
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
