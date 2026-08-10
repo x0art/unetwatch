@@ -148,9 +148,21 @@ def test_apply_filters_handles_nasty_whitelist_patterns():
     assert list(out["url"]) == ["http://evil.example/a"]
 
 
-def test_apply_filters_no_whitelist_keeps_all_allow():
-    out = apply_filters(_df(), "")
-    assert list(out["url"]) == [
-        "http://evil.example/a",
-        "http://safe-porn-ads.example/b",
-    ]
+def test_apply_filters_actions_param():
+    df = pd.DataFrame(
+        [
+            {"url": "http://allow.example/a", "action": "ALLOW",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "http://deny.example/b", "action": "DENY",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+        ]
+    )
+    # Default keeps the old ALLOW-only behavior.
+    out = apply_filters(df, "")
+    assert out["action"].tolist() == ["ALLOW"]
+    # actions=None keeps every row.
+    out_all = apply_filters(df, "", actions=None)
+    assert out_all["action"].tolist() == ["ALLOW", "DENY"]
+    # A specific action filters to that action.
+    out_deny = apply_filters(df, "", actions=("DENY",))
+    assert out_deny["action"].tolist() == ["DENY"]

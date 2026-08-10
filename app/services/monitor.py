@@ -208,14 +208,20 @@ def _safe_number(value) -> float | None:
 
 
 def apply_filters(
-    df: pd.DataFrame, whitelist_regex: str, *, exclude_whitelist: bool = True
+    df: pd.DataFrame,
+    whitelist_regex: str,
+    *,
+    exclude_whitelist: bool = True,
+    actions: tuple[str, ...] | None = ("ALLOW",),
 ) -> pd.DataFrame:
-    """Apply whitelist + ALLOW filters and derive base_url.
+    """Apply whitelist + action filters and derive base_url.
 
     Missing columns are tolerated (filled with empty strings) so a single odd
-    document can never crash a whole poll. The Query page runs with
-    ``exclude_whitelist=False`` so whitelisted matches are still surfaced
-    (badged in the UI) instead of silently dropped.
+    document can never crash a whole poll. ``exclude_whitelist=False`` keeps
+    whitelisted matches so the Query page can badge them in the UI instead of
+    silently dropping them. ``actions`` restricts to the given actions
+    (default ALLOW-only, which the findings/webhook flow relies on); pass
+    ``actions=None`` to keep every row regardless of action.
     """
     df = df.copy()
     for col in ("url", "client_ip", "action", "@timestamp"):
@@ -224,7 +230,9 @@ def apply_filters(
     df["base_url"] = df["url"].astype(str).apply(_extract_base_url)
     if whitelist_regex and exclude_whitelist:
         df = df[~df["url"].astype(str).str.contains(whitelist_regex, case=False)]
-    return df[df["action"] == "ALLOW"]
+    if actions is not None:
+        df = df[df["action"].isin(actions)]
+    return df
 
 
 async def store_findings(db, df: pd.DataFrame) -> int:
