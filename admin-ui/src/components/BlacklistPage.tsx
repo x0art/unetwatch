@@ -23,6 +23,7 @@ import {
   CardHeader,
   CardTitle,
   ConfirmDialog,
+  CopyUrlButton,
   Dialog,
   EmptyState,
   Input,
@@ -162,15 +163,18 @@ function FeedCard({
                     {value}
                   </span>
                   {!selectMode && (
-                    <button
-                      type="button"
-                      onClick={() => onDelete(kind, value)}
-                      disabled={disabled}
-                      aria-label={`Remove ${value} from blacklist`}
-                      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
+                    <span className="flex items-center gap-1">
+                      <CopyUrlButton value={value} label="Entry" />
+                      <button
+                        type="button"
+                        onClick={() => onDelete(kind, value)}
+                        disabled={disabled}
+                        aria-label={`Remove ${value} from blacklist`}
+                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    </span>
                   )}
                 </li>
               )
