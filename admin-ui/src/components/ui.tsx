@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Copy,
   Info,
   AlertTriangle,
   CheckCircle2,
@@ -81,6 +82,44 @@ export function Button({
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * Small ghost "copy" button for table cells showing a (possibly truncated)
+ * URL. Copies the exact value and shows a "Copied" toast.
+ */
+export function CopyUrlButton({
+  value,
+  label,
+  className,
+  size = "sm",
+}: {
+  value: string
+  /** Accessible label prefix, e.g. the column name. Defaults to "Copy". */
+  label?: string
+  className?: string
+  size?: "sm" | "icon"
+}) {
+  const { toast } = useToast()
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast({ title: "Copied", description: value, variant: "success" })
+    } catch {
+      toast({ title: "Copy failed", variant: "error" })
+    }
+  }
+  return (
+    <Button
+      variant="ghost"
+      size={size}
+      onClick={handleCopy}
+      className={cn("h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground", className)}
+      aria-label={label ? `Copy ${label}` : "Copy"}
+    >
+      <Copy className="h-3.5 w-3.5" />
+    </Button>
   )
 }
 
