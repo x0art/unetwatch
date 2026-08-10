@@ -348,3 +348,55 @@ async def test_fetch_logs_records_query_and_webhook(client, monkeypatch):
     findings = client.get("/api/findings/?limit=50").json()
     assert findings["total"] == 1
     assert findings["items"][0]["url"] == "http://bad.example/x"
+
+
+async def test_query_run_returns_allow_and_deny(client, monkeypatch):
+    """The Query page sees both ALLOW and DENY rows, not just ALLOW."""
+    from app.services import monitor as svc
+
+    assert (
+        client.post(
+            "/api/patterns/",
+            json={"pattern": "*flagged.example*", "pattern_type": "block"},
+        ).status_code
+        in (200, 201)
+    )
+
+    docs = [
+        {
+            "@timestamp": "2026-08-07T10:00:00Z",
+            "client_ip": "10.0.0.1",
+            "server_ip": "10.9.9.9",
+            "url": "http://flagged.example/allow",
+            "action": "ALLOW",
+        },
+        {
+            "@timestamp": "2026-08-07T10:00:01Z",
+            "client_ip": "10.0.0.2",
+            "server_ip": "10.9.9.9",
+            "url": "http://flagged.example/deny",
+            "action": "DENY",
+        },
+    ]
+
+    class FakeES:
+        async def search(self, **kwargs):
+            return {"hits": {"hits": [{"_source": d} for d in docs]}}
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(svc, "build_es_client", lambda *a, **k: FakeES())
+
+    resp = client.get("/api/query/run?minutes=60")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_requests"] == 2
+    assert {i["action"] for i in body["items"]} == {"ALLOW", "DENY"}
+    assert body["items"][0]["blocked_by"] == ["*flagged.example*"]
+
+
+def test_query_run_minutes_ceiling(client):
+    """minutes beyond 20160 (14 days) is rejected; 20160 is accepted."""
+    assert client.get("/api/query/run?minutes=20160").status_code == 200
+    assert client.get("/api/query/run?minutes=20161").status_code == 422

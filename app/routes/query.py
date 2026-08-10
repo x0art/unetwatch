@@ -5,7 +5,7 @@ router = APIRouter(prefix="/api/query", tags=["query"])
 
 @router.get("/run")
 async def run_query(
-    minutes: int = Query(60, ge=1, le=1440),
+    minutes: int = Query(60, ge=1, le=20160),
     q: str | None = Query(
         None, max_length=200, description="ES substring filter (URL / client IP / server IP)"
     ),
