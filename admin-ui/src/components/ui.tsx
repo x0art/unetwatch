@@ -2,6 +2,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react"
@@ -513,10 +515,23 @@ const toastVariantStyles: Record<ToastVariant, { icon: LucideIcon; className: st
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastRecord[]>([])
+  const timersRef = useRef<Map<string, number>>(new Map())
 
-  const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id))
+  const clearTimer = useCallback((id: string) => {
+    const t = timersRef.current.get(id)
+    if (t !== undefined) {
+      window.clearTimeout(t)
+      timersRef.current.delete(id)
+    }
   }, [])
+
+  const dismiss = useCallback(
+    (id: string) => {
+      clearTimer(id)
+      setToasts((prev) => prev.filter((t) => t.id !== id))
+    },
+    [clearTimer],
+  )
 
   const toast = useCallback((input: ToastInput | string) => {
     const rec: ToastRecord =
@@ -534,7 +549,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             variant: input.variant ?? "default",
             duration: input.duration ?? 4000,
           }
+    clearTimer(rec.id) // remove any stale timer for a reused id (idempotent)
+    timersRef.current.set(
+      rec.id,
+      window.setTimeout(() => dismiss(rec.id), rec.duration),
+    )
     setToasts((prev) => [...prev, rec])
+  }, [clearTimer, dismiss])
+
+  // Clean up any pending timers on unmount.
+  useEffect(() => {
+    const timers = timersRef.current
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t))
+      timers.clear()
+    }
   }, [])
 
   return (
