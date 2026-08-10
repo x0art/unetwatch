@@ -578,6 +578,7 @@ async def run_query(
             pd.DataFrame([h["_source"] for h in hits]),
             whitelist_regex,
             exclude_whitelist=exclude_whitelist,
+            actions=None,
         )
         log["filtered"] = len(df)
         if df.empty:
