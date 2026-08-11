@@ -13,6 +13,8 @@ export interface SankeyNode {
   name: string
   /** Optional layer index (0,1,2…). Grouped left→right. */
   layer?: number
+  /** Optional full detail shown in the tooltip (e.g. the full URL behind a host-only label). */
+  detail?: string
 }
 
 export interface SankeyLink {
@@ -89,6 +91,7 @@ function sameNodes(a: SankeyNode[], b: SankeyNode[]): boolean {
     const x = a[i]
     const y = b[i]
     if (x.id !== y.id || x.name !== y.name || x.layer !== y.layer) return false
+    if (x.detail !== y.detail) return false
   }
   return true
 }
@@ -189,7 +192,9 @@ function buildOption(
           if (p.name) return `${p.name} ${src} → ${tgt}`
           return src ? `${src} → ${tgt}` : p.name
         }
-        return p.name
+        // Node: prefer the full detail (e.g. the URL behind a host-only label).
+        const nodeDetail = (p.data as SankeyNode | undefined)?.detail
+        return nodeDetail ?? p.name
       },
     },
     series: [
