@@ -42,6 +42,12 @@ const LIMIT_OPTIONS = [
   { value: "100", label: "Top 100" },
 ]
 
+/** Strip a URL down to its host (FQDN), e.g. "https://sub.example.com/path?x=1" → "sub.example.com". */
+function hostOf(url: string): string {
+  const afterScheme = url.split("://").pop() ?? url
+  return afterScheme.split(/[/?#]/)[0] || url
+}
+
 function toSankey(graph: FindingsGraph): {
   nodes: SankeyNode[]
   links: SankeyLink[]
@@ -51,11 +57,17 @@ function toSankey(graph: FindingsGraph): {
     if (id.startsWith("server:")) return 1
     return 2
   }
-  const nodes: SankeyNode[] = graph.nodes.map((n) => ({
-    id: n.id,
-    name: n.label,
-    layer: layerOf(n.id),
-  }))
+  const nodes: SankeyNode[] = graph.nodes.map((n) => {
+    // URLs are shown as host (FQDN) only so the flow stays readable; the
+    // full URL is available in the tooltip and in the Access flows table.
+    const isUrl = n.kind === "url"
+    return {
+      id: n.id,
+      name: isUrl ? hostOf(n.label) : n.label,
+      ...(isUrl ? { detail: n.label } : {}),
+      layer: layerOf(n.id),
+    }
+  })
   const links: SankeyLink[] = graph.links.map((l) => ({
     source: l.source,
     target: l.target,
