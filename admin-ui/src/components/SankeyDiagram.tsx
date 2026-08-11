@@ -166,11 +166,19 @@ function buildOption(
   const maxLayerNodes = Math.max(1, ...Object.values(layerCounts))
   // Give packed layers more breathing room so adjacent nodes don't collide.
   const nodeGap = maxLayerNodes > 14 ? 20 : maxLayerNodes > 8 ? 18 : 16
+  // ECharts' sankey `nodeAlign: 'justify'` pushes every node without outgoing
+  // edges (sinks) into the last column regardless of its layer, so the last
+  // column holds both `maxLayer` nodes AND all sinks. Flip those labels to the
+  // left too — otherwise short chains end up with right-side text sitting next
+  // to left-side text in the same (rightmost) column.
+  const hasOutgoing = new Set(links.map((l) => l.source))
+  const isLastColumn = (n: SankeyNode) =>
+    (n.layer ?? 0) === maxLayer || !hasOutgoing.has(n.id)
   const data = nodes.map((n) => {
     const item: (SankeyNode & { itemStyle?: { color: string }; label?: { position: "left" } }) = {
       ...n,
       ...(nodeItemStyle ? { itemStyle: nodeItemStyle(n) } : {}),
-      ...((n.layer ?? 0) === maxLayer ? { label: { position: "left" } } : {}),
+      ...(isLastColumn(n) ? { label: { position: "left" } } : {}),
     }
     return item
   })
