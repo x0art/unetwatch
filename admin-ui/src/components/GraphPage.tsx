@@ -48,8 +48,11 @@ function hostOf(url: string): string {
   return afterScheme.split(/[/?#]/)[0] || url
 }
 
+/** Sankey node with the search terms used by the highlight filter (host + full URLs). */
+type FlowNode = SankeyNode & { searchable?: string[] }
+
 function toSankey(graph: FindingsGraph): {
-  nodes: SankeyNode[]
+  nodes: FlowNode[]
   links: SankeyLink[]
 } {
   const layerOf = (id: string): number => {
@@ -57,23 +60,58 @@ function toSankey(graph: FindingsGraph): {
     if (id.startsWith("server:")) return 1
     return 2
   }
-  const nodes: SankeyNode[] = graph.nodes.map((n) => {
-    // URLs are shown as host (FQDN) only so the flow stays readable; the
-    // full URL is available in the tooltip and in the Access flows table.
-    const isUrl = n.kind === "url"
-    return {
-      id: n.id,
-      name: isUrl ? hostOf(n.label) : n.label,
-      ...(isUrl ? { detail: n.label } : {}),
-      layer: layerOf(n.id),
-    }
-  })
-  const links: SankeyLink[] = graph.links.map((l) => ({
-    source: l.source,
-    target: l.target,
-    value: Math.max(1, l.count),
-  }))
-  return { nodes, links }
+
+  // URLs are shown as host (FQDN) only, and every URL sharing a host merges
+  // into a single node so the flow stays readable — the host appears once no
+  // matter how many of its URLs are flagged. Full URLs are listed in the
+  // tooltip and stay available in the Access flows table.
+  const hosts = new Map<string, { id: string; host: string; urls: string[] }>()
+  const urlNodeToHostId = new Map<string, string>()
+  for (const n of graph.nodes) {
+    if (n.kind !== "url") continue
+    const host = hostOf(n.label)
+    const hostId = `host:${host}`
+    urlNodeToHostId.set(n.id, hostId)
+    const h = hosts.get(host)
+    if (h) h.urls.push(n.label)
+    else hosts.set(host, { id: hostId, host, urls: [n.label] })
+  }
+
+  const nodes: FlowNode[] = [
+    ...graph.nodes
+      .filter((n) => n.kind !== "url")
+      .map((n) => ({
+        id: n.id,
+        name: n.label,
+        layer: layerOf(n.id),
+        searchable: [n.label],
+      })),
+    ...[...hosts.values()].map((h) => ({
+      id: h.id,
+      name: h.host,
+      layer: 2,
+      searchable: [h.host, ...h.urls],
+      // ECharts HTML tooltips need <br/> (a literal \n collapses to a space).
+      detail:
+        h.urls.length <= 4
+          ? h.urls.join("<br/>")
+          : [...h.urls.slice(0, 4), `… +${h.urls.length - 4} more`].join("<br/>"),
+    })),
+  ]
+
+  // Rewrite url-node endpoints to their host node and merge parallel links.
+  const linkByKey = new Map<string, SankeyLink>()
+  for (const l of graph.links) {
+    const source = urlNodeToHostId.get(l.source) ?? l.source
+    const target = urlNodeToHostId.get(l.target) ?? l.target
+    if (source === target) continue
+    const key = `${source}|${target}`
+    const prev = linkByKey.get(key)
+    if (prev) prev.value += Math.max(1, l.count)
+    else linkByKey.set(key, { source, target, value: Math.max(1, l.count) })
+  }
+
+  return { nodes, links: [...linkByKey.values()] }
 }
 
 export function GraphPage() {
@@ -116,22 +154,30 @@ export function GraphPage() {
   const debouncedSearch = useDebounce(search, 200)
   const q = debouncedSearch.trim().toLowerCase()
 
-  const matchCount = useMemo(
-    () =>
-      q ? (graph?.nodes ?? []).filter((n) => n.label.toLowerCase().includes(q)).length : 0,
-    [q, graph],
-  )
-
   const sankey = useMemo(() => (graph ? toSankey(graph) : null), [graph])
 
+  // Count of diagram nodes the search will highlight (host nodes match when
+  // the host or any of their URLs contain the query).
+  const matchCount = useMemo(
+    () =>
+      q && sankey
+        ? sankey.nodes.filter((n) =>
+            (n.searchable ?? [n.name]).some((s) => s.toLowerCase().includes(q)),
+          ).length
+        : 0,
+    [q, sankey],
+  )
+
   // Search-scoped data: filter the diagram to matching nodes + their edges.
+  // Aggregated host nodes match when the host or any of their URLs match.
   const visibleSankey = useMemo(() => {
     if (!sankey || !q) return sankey
     const keep = new Set<string>()
-    for (const n of graph?.nodes ?? []) {
-      if (n.label.toLowerCase().includes(q)) {
+    for (const n of sankey.nodes) {
+      const searchable = n.searchable ?? [n.name]
+      if (searchable.some((s) => s.toLowerCase().includes(q))) {
         keep.add(n.id)
-        for (const l of graph?.links ?? []) {
+        for (const l of sankey.links) {
           if (l.source === n.id) keep.add(l.target)
           if (l.target === n.id) keep.add(l.source)
         }
@@ -141,7 +187,7 @@ export function GraphPage() {
       nodes: sankey.nodes.filter((n) => keep.has(n.id)),
       links: sankey.links.filter((l) => keep.has(l.source) && keep.has(l.target)),
     }
-  }, [sankey, q, graph])
+  }, [sankey, q])
 
   const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
 
@@ -203,8 +249,9 @@ export function GraphPage() {
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Traffic relations</h3>
             <p className="text-xs text-muted-foreground">
-              Alluvial flow of client IPs reaching flagged URLs through server IPs. Hover a node
-              to highlight its connections · scroll to zoom.
+              Alluvial flow of client IPs reaching flagged URLs through server IPs. Flagged URLs
+              are grouped by host so each appears once. Hover a node to highlight its connections ·
+              scroll to zoom.
             </p>
           </div>
           {graph && !graphEmpty && (
