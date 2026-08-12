@@ -265,6 +265,9 @@ export function DashboardPage({
         {/* Recent findings */}
         <Panel
           className="lg:col-span-2"
+          title="Recent Findings"
+          icon={SearchX}
+          description="Latest flagged traffic"
           action={
             <Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>
               View all <ArrowRight className="h-3.5 w-3.5" />
@@ -272,16 +275,6 @@ export function DashboardPage({
           }
         >
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/15 text-danger">
-                <SearchX className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Recent Findings</p>
-                <p className="text-xs text-muted-foreground">Latest flagged traffic</p>
-              </div>
-            </div>
-
             {recentLoading ? (
               <Skeleton className="h-32 w-full rounded-md" />
             ) : recentFindings.length > 0 ? (
