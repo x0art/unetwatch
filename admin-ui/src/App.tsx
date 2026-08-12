@@ -7,6 +7,7 @@ import {
   triggerManualRun,
   getToken,
   setToken,
+  onSessionExpired,
 } from "./api"
 import { LoginPage } from "./components/LoginPage"
 import { AppShell } from "./components/AppShell"
@@ -51,7 +52,13 @@ function PageFallback() {
 
 function AppRoutes() {
   const { toast } = useToast()
-  const [view, setView] = useState<View>("dashboard")
+  const VIEW_KEY = "unetwatch_view"
+  const storedView = localStorage.getItem(VIEW_KEY) as View | null
+  const [view, setView] = useState<View>(
+    storedView && ["dashboard", "query", "patterns", "findings", "graph", "blacklist", "redirects", "logs"].includes(storedView)
+      ? storedView
+      : "dashboard",
+  )
   const [findingsSearch, setFindingsSearch] = useState("")
   const [loggedIn, setLoggedIn] = useState(!!getToken())
   const [status, setStatus] = useState<MonitorStatus | null>(null)
@@ -118,6 +125,16 @@ function AppRoutes() {
     setToken(null)
     setLoggedIn(false)
   }
+
+  // Persist current view to localStorage so page refreshes land on the same tab.
+  useEffect(() => {
+    localStorage.setItem(VIEW_KEY, view)
+  }, [view])
+
+  // When the API receives a 401, flip to the login page instead of a hard reload.
+  useEffect(() => {
+    onSessionExpired(() => setLoggedIn(false))
+  }, [])
 
   // Navigation that can optionally pre-filter the Findings page
   // (used by the Graph view when a node is clicked). Any other navigation

@@ -318,6 +318,13 @@ let _token: string | null = null
 const TOKEN_KEY = "unetwatch_token"
 const LEGACY_TOKEN_KEY = "elk_token"
 
+/** Registered callback invoked on 401 so the UI can show the login page. */
+let _onSessionExpired: (() => void) | null = null
+
+export function onSessionExpired(cb: () => void) {
+  _onSessionExpired = cb
+}
+
 export function setToken(t: string | null) {
   _token = t
   if (t) localStorage.setItem(TOKEN_KEY, t)
@@ -362,7 +369,7 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${url}`, { headers, ...opts })
   if (res.status === 401 && !url.includes("/auth/")) {
     setToken(null)
-    window.location.href = "/"
+    _onSessionExpired?.()
     throw new Error("Session expired")
   }
   if (!res.ok) {
@@ -470,7 +477,7 @@ export async function getBlacklistUrls(): Promise<string> {
   const res = await fetch(`${API}/blacklist/urls.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
   })
-  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.text()
 }
@@ -479,7 +486,7 @@ export async function getBlacklistIps(): Promise<string> {
   const res = await fetch(`${API}/blacklist/ips.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
   })
-  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.text()
 }
@@ -489,7 +496,7 @@ export async function addBaseUrlToBlacklist(value: string): Promise<{ added: str
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
   const res = await fetch(`${API}/blacklist/`, { method: "POST", headers, body: JSON.stringify({ value }) })
-  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
 }
@@ -503,7 +510,7 @@ export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[]
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
   const res = await fetch(`${API}/blacklist/entries`, { headers })
-  if (res.status === 401) { setToken(null); window.location.href = "/"; throw new Error("Session expired") }
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
 }
