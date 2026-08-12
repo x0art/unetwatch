@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Loader2, Plus } from "lucide-react"
 import { createPattern } from "../api"
 import { Button, Dialog, Input, Label, Select, useToast } from "./ui"
@@ -16,16 +16,30 @@ export function AddPatternDialog({
   open,
   onClose,
   onCreated,
+  initialPattern = "",
+  initialPatternType,
 }: {
   open: boolean
   onClose: () => void
   /** Called after a pattern is successfully created. */
   onCreated?: () => void
+  /** Pre-fill the pattern value (e.g. a host from a URL table row). */
+  initialPattern?: string
+  /** Pre-select the pattern type. Defaults to "block" when omitted. */
+  initialPatternType?: "block" | "whitelist"
 }) {
   const { toast } = useToast()
   const [value, setValue] = useState("")
-  const [type, setType] = useState("block")
+  const [type, setType] = useState(initialPatternType ?? "block")
   const [saving, setSaving] = useState(false)
+
+  // Reset fields each time the dialog opens so initial values are applied.
+  useEffect(() => {
+    if (open) {
+      setValue(initialPattern)
+      setType(initialPatternType ?? "block")
+    }
+  }, [open, initialPattern, initialPatternType])
 
   const handleCreate = async () => {
     if (!value.trim()) return
@@ -61,7 +75,7 @@ export function AddPatternDialog({
         </div>
         <div>
           <Label>Type</Label>
-          <Select value={type} onChange={setType} options={TYPE_OPTIONS} />
+          <Select value={type} onChange={(v) => setType(v as "block" | "whitelist")} options={TYPE_OPTIONS} />
         </div>
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" onClick={onClose} disabled={saving}>
