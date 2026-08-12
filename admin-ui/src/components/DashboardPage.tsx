@@ -1,36 +1,41 @@
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   ArrowRight,
   Ban,
   CheckCircle2,
   Clock3,
   FileSearch,
+  Globe,
+  History,
+  Link2,
   Play,
   RefreshCcw,
   SearchX,
+  ShieldAlert,
+  Zap,
 } from "lucide-react"
-import { Button, Panel, Select, StatCard } from "./ui"
+import {
+  type Finding,
+  type MonitorStatus,
+  type PatternCounts,
+  getBlacklistSet,
+  getFindings,
+  listTrackedUrls,
+} from "../api"
+import { Button, Panel, Select, Skeleton, StatCard } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { type View } from "./Sidebar"
 
 interface DashboardPageProps {
   remaining: number
   intervalSec: number
-  status: {
-    status: string
-    poll_interval_minutes: number
-    es_online: boolean
-    findings_count: number
-  } | null
-  counts: {
-    block: number
-    whitelist: number
-  } | null
+  status: MonitorStatus | null
+  counts: PatternCounts | null
   loadingRun: boolean
   lastUpdated: number
   onRefresh: () => void
   onManualRun: (minutes: number) => void
-  onNavigate: (view: View) => void
+  onNavigate: (view: View, search?: string) => void
 }
 
 const RUN_RANGE_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
@@ -49,6 +54,12 @@ function formatLastUpdated(timestamp: number) {
   return `${hours}h ago`
 }
 
+function formatDetected(ts: string) {
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ts
+  return d.toLocaleString()
+}
+
 export function DashboardPage({
   remaining,
   intervalSec,
@@ -63,11 +74,54 @@ export function DashboardPage({
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
 
-  // ── Manual run window ──────────────────────────────────────────
   const [runMinutes, setRunMinutes] = useState("1")
+
+  // ── Extra stats ────────────────────────────────────────────────
+  const [blacklistCount, setBlacklistCount] = useState<number | null>(null)
+  const [trackedCount, setTrackedCount] = useState<number | null>(null)
+  const [recentFindings, setRecentFindings] = useState<Finding[]>([])
+  const [recentLoading, setRecentLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    getBlacklistSet()
+      .then((data) => {
+        if (!cancelled) setBlacklistCount(data.urls.length + data.ips.length)
+      })
+      .catch(() => {
+        if (!cancelled) setBlacklistCount(null)
+      })
+    listTrackedUrls({ limit: 1 })
+      .then((data) => {
+        if (!cancelled) setTrackedCount(data.total)
+      })
+      .catch(() => {
+        if (!cancelled) setTrackedCount(null)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const fetchRecent = useCallback(() => {
+    let cancelled = false
+    setRecentLoading(true)
+    getFindings({ limit: 5 })
+      .then((data) => {
+        if (!cancelled) setRecentFindings(data.items)
+      })
+      .catch(() => {
+        if (!cancelled) setRecentFindings([])
+      })
+      .finally(() => {
+        if (!cancelled) setRecentLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => fetchRecent(), [fetchRecent])
 
   return (
     <div className="space-y-6">
+      {/* ── Header ── */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
@@ -99,15 +153,55 @@ export function DashboardPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ── Primary stats row ── */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={Clock3}
           label="Next Poll"
           value={<CountdownRing remaining={remaining} total={intervalSec} />}
           tone="default"
-          hint="Approx. until next ES query"
+          hint="Until next ES query"
         />
+        <StatCard
+          icon={SearchX}
+          label="Findings"
+          value={status ? status.findings_count.toLocaleString() : "—"}
+          tone="info"
+          hint="Persisted by ES poll"
+          action={
+            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("findings")}>
+              View all <ArrowRight className="h-3 w-3" />
+            </Button>
+          }
+        />
+        <StatCard
+          icon={ShieldAlert}
+          label="Blacklist"
+          value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
+          tone="danger"
+          hint="Hosts & IPs blocked"
+          action={
+            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("blacklist")}>
+              Manage <ArrowRight className="h-3 w-3" />
+            </Button>
+          }
+        />
+        <StatCard
+          icon={Globe}
+          label="Tracked URLs"
+          value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
+          tone="warning"
+          hint="Monitored for redirects"
+          action={
+            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("redirects")}>
+              View all <ArrowRight className="h-3 w-3" />
+            </Button>
+          }
+        />
+      </div>
 
+      {/* ── Secondary stats row ── */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={Ban}
           label="Block Patterns"
@@ -115,7 +209,6 @@ export function DashboardPage({
           tone="danger"
           hint="URL patterns to flag"
         />
-
         <StatCard
           icon={CheckCircle2}
           label="Whitelist Patterns"
@@ -123,80 +216,159 @@ export function DashboardPage({
           tone="success"
           hint="URL patterns to allow"
         />
-
         <StatCard
-          icon={Play}
-          label="Manual Run"
-          value={loadingRun ? "Running" : "Trigger Now"}
-          tone="info"
-          hint="Log range for this one-shot poll"
-          action={
-            <div className="space-y-2">
-              <Select
-                value={runMinutes}
-                onChange={setRunMinutes}
-                options={RUN_RANGE_OPTIONS}
-                aria-label="Log range for manual run"
-              />
-              <Button
-                onClick={() => onManualRun(Number(runMinutes))}
-                disabled={loadingRun}
-                className="w-full"
-              >
-                {loadingRun ? "Running…" : "Run now"}
-              </Button>
-            </div>
-          }
+          icon={Zap}
+          label="ES Status"
+          value={isOnline ? "Online" : "Offline"}
+          tone={isOnline ? "success" : "danger"}
+          hint="Elasticsearch connectivity"
+        />
+        <StatCard
+          icon={History}
+          label="Poll Interval"
+          value={status ? `${status.poll_interval_minutes}m` : "—"}
+          tone="default"
+          hint="Automatic check frequency"
         />
       </div>
 
-      {/* ── Findings summary ── */}
-      <Panel
-        action={
-          <Button variant="outline" onClick={() => onNavigate("findings")}>
-            View findings
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        }
-      >
-        <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
-            <SearchX className="h-5 w-5" aria-hidden="true" />
+      {/* ── Manual run + Recent findings side by side ── */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Manual run */}
+        <Panel>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info">
+                <Play className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Manual Run</p>
+                <p className="text-xs text-muted-foreground">Trigger a one-shot ES poll</p>
+              </div>
+            </div>
+            <Select
+              value={runMinutes}
+              onChange={setRunMinutes}
+              options={RUN_RANGE_OPTIONS}
+              aria-label="Log range for manual run"
+            />
+            <Button
+              onClick={() => onManualRun(Number(runMinutes))}
+              disabled={loadingRun}
+              className="w-full"
+            >
+              {loadingRun ? "Running…" : "Run now"}
+            </Button>
           </div>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">Detected matches</p>
-            <p className="text-2xl font-bold tabular-nums tracking-tight">
-              {status ? status.findings_count.toLocaleString() : "—"}
-            </p>
-            <p className="text-xs text-muted-foreground/60">
-              Findings persisted by the ES poll
-            </p>
-          </div>
-        </div>
-      </Panel>
+        </Panel>
 
-      {/* ── Query console link ── */}
-      <Panel
-        action={
-          <Button variant="outline" onClick={() => onNavigate("query")}>
-            Open Query
-            <ArrowRight className="h-4 w-4" />
-          </Button>
-        }
-      >
-        <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/15 text-info">
-            <FileSearch className="h-5 w-5" aria-hidden="true" />
+        {/* Recent findings */}
+        <Panel
+          className="lg:col-span-2"
+          action={
+            <Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>
+              View all <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          }
+        >
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-danger/15 text-danger">
+                <SearchX className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">Recent Findings</p>
+                <p className="text-xs text-muted-foreground">Latest flagged traffic</p>
+              </div>
+            </div>
+
+            {recentLoading ? (
+              <Skeleton className="h-32 w-full rounded-md" />
+            ) : recentFindings.length > 0 ? (
+              <div className="overflow-hidden rounded-md border border-border">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Client IP</th>
+                      <th className="px-3 py-2 font-medium">Base URL</th>
+                      <th className="px-3 py-2 font-medium">Detected</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {recentFindings.map((f) => (
+                      <tr
+                        key={f.id}
+                        className="cursor-pointer hover:bg-muted/40"
+                        onClick={() => onNavigate("findings", f.base_url)}
+                      >
+                        <td className="px-3 py-2 font-mono">{f.client_ip}</td>
+                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground">
+                          {f.base_url}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                          {formatDetected(f.log_timestamp)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="py-6 text-center text-xs text-muted-foreground">
+                No findings yet — they appear after the ES poll detects matches.
+              </p>
+            )}
           </div>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">Query console</p>
-            <p className="text-2xl font-bold tabular-nums tracking-tight">Live ES queries</p>
-            <p className="text-xs text-muted-foreground/60">
-              Run, chart and inspect flagged traffic directly from Elasticsearch
-            </p>
+        </Panel>
+      </div>
+
+      {/* ── Quick links ── */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <button
+          type="button"
+          onClick={() => onNavigate("query")}
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-info/40 hover:bg-info/5"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info transition-colors group-hover:bg-info/25">
+            <FileSearch className="h-5 w-5" />
           </div>
-        </div>
-      </Panel>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">Query Console</p>
+            <p className="text-xs text-muted-foreground">Live ES queries & sankey</p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-info" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate("graph")}
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-warning/40 hover:bg-warning/5"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning transition-colors group-hover:bg-warning/25">
+            <Link2 className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">Traffic Flow</p>
+            <p className="text-xs text-muted-foreground">Client → server → URL graph</p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-warning" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate("patterns")}
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-success/40 hover:bg-success/5"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/15 text-success transition-colors group-hover:bg-success/25">
+            <Ban className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">Patterns</p>
+            <p className="text-xs text-muted-foreground">Manage block & whitelist rules</p>
+          </div>
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-success" />
+        </button>
+      </div>
     </div>
   )
 }
