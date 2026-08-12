@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
+  AlertTriangle,
   Ban,
+  CheckCircle2,
   Copy,
   Database,
   Globe,
@@ -11,8 +13,9 @@ import {
   Server,
   Users,
   Zap,
+  type LucideIcon,
 } from "lucide-react"
-import { useDebounce } from "../lib/utils"
+import { cn, useDebounce } from "../lib/utils"
 import {
   type QueryDoc,
   type QueryFlow,
@@ -66,6 +69,44 @@ const ACTION_FILTER_OPTIONS = [
   { value: "ALLOW", label: "ALLOW" },
   { value: "DENY", label: "DENY" },
 ]
+
+/** True when the URL/string's host is a bare IPv4 address. */
+function isIpHost(url: string): boolean {
+  const host = url.split("://").pop()?.split(/[/?#]/)[0] ?? url
+  const octets = host.split(".")
+  return (
+    octets.length === 4 && octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)
+  )
+}
+
+/* ── Lists pill badge — matches the Traffic page badge style ─────────── */
+
+function ListBadge({
+  tone,
+  title,
+  icon: Icon,
+  children,
+}: {
+  tone: "warning" | "success" | "danger"
+  title?: string
+  icon: LucideIcon
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        tone === "warning" && "border-warning/30 bg-warning/10 text-warning",
+        tone === "success" && "border-success/30 bg-success/10 text-success",
+        tone === "danger" && "border-danger/30 bg-danger/10 text-danger",
+      )}
+    >
+      <Icon className="h-3 w-3" aria-hidden="true" />
+      {children}
+    </span>
+  )
+}
 
 function formatTime(iso: string) {
   const d = new Date(iso)
@@ -408,31 +449,35 @@ export function QueryPage() {
       cell: (d) => (
         <div className="flex flex-wrap items-center gap-1">
           {d.blocked_by.length > 0 && (
-            <span
+            <ListBadge
+              tone="warning"
+              icon={AlertTriangle}
               title={`Matched block pattern${d.blocked_by.length > 1 ? "s" : ""}: ${d.blocked_by.join(", ")}`}
             >
-              <Badge variant="warning">
-                block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
-              </Badge>
-            </span>
+              block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
+            </ListBadge>
           )}
           {d.whitelisted && (
-            <span title="URL matches a whitelist pattern — excluded from findings">
-              <Badge variant="success">whitelist</Badge>
-            </span>
+            <ListBadge
+              tone="success"
+              icon={CheckCircle2}
+              title="URL matches a whitelist pattern — excluded from findings"
+            >
+              whitelist
+            </ListBadge>
           )}
           {d.blacklisted && (
-            <span
+            <ListBadge
+              tone="danger"
+              icon={CheckCircle2}
               title={
                 d.blacklist_source === "ip"
-                  ? "Client IP is on the blacklist"
+                  ? "IP address is on the blacklist"
                   : "Host is on the blacklist"
               }
             >
-              <Badge variant="destructive">
-                blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
-              </Badge>
-            </span>
+              blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
+            </ListBadge>
           )}
           {d.blocked_by.length === 0 && !d.whitelisted && !d.blacklisted && (
             <span className="text-xs text-muted-foreground/50">—</span>
@@ -451,11 +496,12 @@ export function QueryPage() {
           onBlacklisted={() =>
             setResult((prev) => {
               if (!prev) return prev
+              const source = isIpHost(d.base_url) ? ("ip" as const) : ("url" as const)
               return {
                 ...prev,
                 items: prev.items.map((item) =>
                   item.base_url === d.base_url
-                    ? { ...item, blacklisted: true, blacklist_source: "url" as const }
+                    ? { ...item, blacklisted: true, blacklist_source: source }
                     : item,
                 ),
               }
@@ -702,16 +748,22 @@ export function QueryPage() {
             {/* Badge legend */}
             <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
               <span className="inline-flex items-center gap-1.5">
-                <Badge variant="warning">block</Badge>
+                <ListBadge tone="warning" icon={AlertTriangle}>
+                  block
+                </ListBadge>
                 matched a block pattern (why it is flagged)
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Badge variant="success">whitelist</Badge>
+                <ListBadge tone="success" icon={CheckCircle2}>
+                  whitelist
+                </ListBadge>
                 matches a whitelist pattern — excluded from findings
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Badge variant="destructive">blacklist</Badge>
-                host or client IP already blacklisted
+                <ListBadge tone="danger" icon={CheckCircle2}>
+                  blacklist
+                </ListBadge>
+                host, base IP or client IP already blacklisted
               </span>
             </div>
             <DataTable
