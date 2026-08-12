@@ -11,11 +11,9 @@ import {
 } from "lucide-react"
 import {
   type Finding,
-  addBaseUrlToBlacklist,
   addTrackedUrl,
   bulkDeleteFindings,
   clearFindings,
-  createPattern,
   deleteFinding,
   getFindings,
   getBlacklistSet,
@@ -24,6 +22,7 @@ import {
   type Pattern,
 } from "../api"
 import { Button, ConfirmDialog, CopyUrlButton, PageHeader, SearchInput, useToast } from "./ui"
+import { ListActionDropdown } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 
@@ -216,55 +215,6 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     }
   }
 
-  const handleAddBaseUrl = async (baseUrl: string) => {
-    setBusy(true)
-    try {
-      await createPattern({ pattern: baseUrl, pattern_type: "whitelist" })
-      toast({
-        title: "Whitelist pattern added",
-        description: baseUrl,
-        variant: "success",
-      })
-      refetch()
-      const next: Record<string, true> = { ...whitelistIndex, [baseUrl]: true }
-      setWhitelistIndex(next)
-    } catch (e) {
-      const message = (e as Error).message
-      if (message.includes("already exists")) {
-        toast({
-          title: "Pattern already exists",
-          description: baseUrl,
-          variant: "info",
-        })
-      } else {
-        toast({ title: "Add pattern failed", description: message, variant: "error" })
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleAddToBlacklist = async (baseUrl: string) => {
-    setBusy(true)
-    try {
-      const res = await addBaseUrlToBlacklist(baseUrl)
-      if (res.added.length) {
-        const next: Record<string, true> = { ...blacklistIndex, [baseUrl]: true }
-        setBlacklistIndex(next)
-      }
-      toast({
-        title: res.added.length ? "Added to blacklist" : "Already in blacklist",
-        description: baseUrl,
-        variant: res.added.length ? "success" : "info",
-      })
-      refetchBlacklist()
-    } catch (e) {
-      toast({ title: "Add to blacklist failed", description: (e as Error).message, variant: "error" })
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const handleTrackRedirect = async (url: string) => {
     setBusy(true)
     try {
@@ -408,26 +358,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       width: "w-40",
       cell: (f) => (
         <div className="flex justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => handleAddBaseUrl(f.base_url)}
-            disabled={busy || whitelistIndex[f.base_url]}
-            aria-label={`Add base URL ${f.base_url} to whitelist`}
-          >
-            <span className="text-[10px] font-semibold">W</span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-muted-foreground hover:text-destructive"
-            onClick={() => handleAddToBlacklist(f.base_url)}
-            disabled={busy || blacklistIndex[f.base_url]}
-            aria-label={`Add base URL ${f.base_url} to blacklist`}
-          >
-            <span className="text-[10px] font-semibold">Blacklist</span>
-          </Button>
+          <ListActionDropdown baseUrl={f.base_url} />
           <Button
             variant="ghost"
             size="icon"

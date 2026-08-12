@@ -543,13 +543,13 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null)
 
 const toastVariantStyles: Record<ToastVariant, { icon: LucideIcon; className: string }> = {
-  default: { icon: Info, className: "border-border bg-card text-card-foreground" },
+  default: { icon: Info, className: "border-border bg-card text-card-foreground shadow-lg" },
   success: {
     icon: CheckCircle2,
-    className: "border-success/40 bg-success/10 text-foreground",
+    className: "border-success bg-success/15 text-foreground shadow-lg",
   },
-  error: { icon: AlertTriangle, className: "border-danger/40 bg-danger/10 text-foreground" },
-  info: { icon: Info, className: "border-info/40 bg-info/10 text-foreground" },
+  error: { icon: AlertTriangle, className: "border-danger bg-danger/15 text-foreground shadow-lg" },
+  info: { icon: Info, className: "border-info bg-info/15 text-foreground shadow-lg" },
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
