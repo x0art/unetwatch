@@ -17,6 +17,14 @@ async def monitor_status(db=Depends(get_db_conn)):
     count_cursor = await db.execute("SELECT COUNT(*) as total FROM findings")
     findings_total = (await count_cursor.fetchone())["total"]
 
+    # Most recent poll timestamp (ISO 8601) so the frontend countdown
+    # can show the real time remaining until the next poll.
+    last_poll_cursor = await db.execute(
+        "SELECT started_at FROM monitor_logs ORDER BY started_at DESC LIMIT 1"
+    )
+    last_poll_row = await last_poll_cursor.fetchone()
+    last_poll_at = last_poll_row["started_at"] if last_poll_row else None
+
     from app.services.monitor import is_es_online
 
     online = await is_es_online()
@@ -28,6 +36,7 @@ async def monitor_status(db=Depends(get_db_conn)):
         "poll_interval_minutes": get_settings().poll_interval_minutes,
         "es_online": online,
         "findings_count": findings_total,
+        "last_poll_at": last_poll_at,
     }
 
 

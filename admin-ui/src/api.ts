@@ -13,6 +13,7 @@ export interface MonitorStatus {
   poll_interval_minutes: number
   es_online: boolean
   findings_count: number
+  last_poll_at: string | null
 }
 
 export interface PatternCounts {
