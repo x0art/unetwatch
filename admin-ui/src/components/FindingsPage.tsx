@@ -22,7 +22,7 @@ import {
   type Pattern,
 } from "../api"
 import { Button, ConfirmDialog, CopyUrlButton, PageHeader, SearchInput, useToast } from "./ui"
-import { ListActionDropdown } from "./ListActionDropdown"
+import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useDebounce } from "../lib/utils"
 
@@ -357,32 +357,28 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       align: "right",
       width: "w-40",
       cell: (f) => (
-        <div className="flex justify-end gap-1">
-          <ListActionDropdown baseUrl={f.base_url} />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => handleTrackRedirect(f.url)}
-            disabled={busy || trackedIndex[f.url]}
-            aria-label={`Track redirects for ${f.url}`}
-          >
-            {trackedIndex[f.url] ? (
-              <History className="h-4 w-4" />
-            ) : (
-              <CornerUpRight className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-            onClick={() => setDeleteTarget(f)}
-            disabled={busy}
-            aria-label={`Delete finding ${f.id}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+        <div className="flex justify-end">
+          <ListActionCell
+            baseUrl={f.base_url}
+            extra={[
+              {
+                key: "track",
+                label: trackedIndex[f.url] ? "Tracked" : "Track redirects",
+                icon: trackedIndex[f.url] ? History : CornerUpRight,
+                onClick: () => handleTrackRedirect(f.url),
+                disabled: busy || trackedIndex[f.url],
+              },
+              {
+                key: "delete",
+                label: "Delete finding",
+                icon: Trash2,
+                variant: "destructive",
+                separator: true,
+                onClick: () => setDeleteTarget(f),
+                disabled: busy,
+              },
+            ]}
+          />
         </div>
       ),
     },

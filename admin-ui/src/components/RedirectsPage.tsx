@@ -37,7 +37,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { ListActionDropdown } from "./ListActionDropdown"
+import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
@@ -520,42 +520,35 @@ export function RedirectsPage() {
       align: "right",
       width: "w-32",
       cell: (i) => (
-        <div className="flex justify-end gap-1">
-          <ListActionDropdown baseUrl={i.url} />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-muted-foreground hover:text-foreground"
-            onClick={() => handleCheckOne(i)}
-            disabled={busy || busyUrl === i.url}
-            aria-label={`Check ${i.url} now`}
-          >
-            {busyUrl === i.url ? (
-              <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Zap className="h-3.5 w-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            onClick={() => openHistory(i)}
-            disabled={busy}
-            aria-label={`View history for ${i.url}`}
-          >
-            <History className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-destructive"
-            onClick={() => setDeleteTarget(i)}
-            disabled={busy}
-            aria-label={`Delete ${i.url}`}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+        <div className="flex justify-end">
+          <ListActionCell
+            baseUrl={i.url}
+            extra={[
+              {
+                key: "check",
+                label: busyUrl === i.url ? "Checking…" : "Check now",
+                icon: busyUrl === i.url ? RefreshCcw : Zap,
+                onClick: () => handleCheckOne(i),
+                disabled: busy || busyUrl === i.url,
+              },
+              {
+                key: "history",
+                label: "View history",
+                icon: History,
+                onClick: () => openHistory(i),
+                disabled: busy,
+              },
+              {
+                key: "delete",
+                label: "Delete",
+                icon: Trash2,
+                variant: "destructive",
+                separator: true,
+                onClick: () => setDeleteTarget(i),
+                disabled: busy,
+              },
+            ]}
+          />
         </div>
       ),
     },

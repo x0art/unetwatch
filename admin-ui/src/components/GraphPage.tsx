@@ -28,7 +28,7 @@ import {
   StatCard,
 } from "./ui"
 import { DataTable } from "./DataTable"
-import { ListActionDropdown } from "./ListActionDropdown"
+import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import { useDebounce } from "../lib/utils"
 
@@ -482,7 +482,7 @@ export function GraphPage() {
                 id: "actions",
                 header: "",
                 enableSorting: false,
-                cell: (f) => <ListActionDropdown baseUrl={f.base_url} />,
+                cell: (f) => <ListActionCell baseUrl={f.base_url} />,
                 width: "w-12",
               },
             ]}
