@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useState, type ComponentType } from "react"
 import { Ban, ChevronDown, ShieldCheck } from "lucide-react"
 import { addBaseUrlToBlacklist } from "../api"
 import { Button, useToast } from "./ui"
@@ -13,23 +13,139 @@ function hostOf(url: string): string {
   return afterScheme.split(/[/?#]/)[0] || url
 }
 
-/**
- * Compact row-level action dropdown for URL table rows.
- *
- * Offers two actions:
- *   - Add host to Blacklist (fires immediately)
- *   - Whitelist this host… (opens AddPatternDialog prefilled with the host)
- */
-export function ListActionDropdown({ baseUrl }: { baseUrl: string }) {
-  const { toast } = useToast()
-  const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [dialogOpen, setDialogOpen] = useState(false)
+/* ── Generic row-actions dropdown ─────────────────────────────────────── */
 
+export interface RowAction {
+  key: string
+  label: string
+  icon: ComponentType<{ className?: string }>
+  /** Colour hint: "destructive" tints the icon red, "success" green. */
+  variant?: "default" | "destructive" | "success"
+  onClick: () => void
+  disabled?: boolean
+  /** Draw a divider line above this item (e.g. before Delete). */
+  separator?: boolean
+}
+
+/**
+ * Generic row-level actions dropdown.
+ *
+ * Each page passes its own set of `RowAction` items — the component handles
+ * open/close, backdrop, and keyboard dismissal.
+ *
+ * @example
+ * <RowActionsDropdown actions={[
+ *   ...listActions,          // from useListActions(baseUrl)
+ *   { key: "check", label: "Check now", icon: Zap, onClick: handleCheck },
+ *   { key: "delete", label: "Delete", icon: Trash2, variant: "destructive",
+ *     separator: true, onClick: handleDelete },
+ * ]} />
+ */
+export function RowActionsDropdown({ actions }: { actions: RowAction[] }) {
+  const [open, setOpen] = useState(false)
+  const anyPending = actions.some((a) => a.disabled)
+
+  return (
+    <div className="relative inline-block">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
+        disabled={anyPending}
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Row actions"
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </Button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-1 w-52 rounded-md border border-border bg-popover p-1 shadow-lg">
+            {actions.map((action) => {
+              const Icon = action.icon
+              const colorClass =
+                action.variant === "destructive"
+                  ? "text-destructive"
+                  : action.variant === "success"
+                    ? "text-success"
+                    : "text-muted-foreground"
+              return (
+                <div key={action.key}>
+                  {action.separator && <div className="my-1 border-t border-border" />}
+                  <button
+                    type="button"
+                    className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted ${
+                      action.variant === "destructive" ? "hover:text-destructive" : ""
+                    }`}
+                    onClick={() => {
+                      setOpen(false)
+                      action.onClick()
+                    }}
+                    disabled={action.disabled}
+                  >
+                    <Icon className={`h-3.5 w-3.5 ${colorClass}`} />
+                    {action.label}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+/* ── Blacklist / Whitelist action factory ──────────────────────────────── */
+
+/**
+ * Drop-in cell component: renders a `RowActionsDropdown` with blacklist/
+ * whitelist actions plus any page-specific extras.
+ *
+ * @example
+ * // In a column definition:
+ * cell: (f) => <ListActionCell baseUrl={f.base_url} extra={[
+ *   { key: "delete", label: "Delete", icon: Trash2, variant: "destructive",
+ *     separator: true, onClick: () => handleDelete(f) },
+ * ]} />
+ */
+export function ListActionCell({
+  baseUrl,
+  extra = [],
+}: {
+  baseUrl: string
+  extra?: RowAction[]
+}) {
+  const { actions, dialog } = useListActions(baseUrl)
+  return (
+    <>
+      {dialog}
+      <RowActionsDropdown actions={[...actions, ...extra]} />
+    </>
+  )
+}
+
+/**
+ * Returns pre-built `RowAction` items for blacklist and whitelist,
+ * plus an optional dialog node to render (for the whitelist pattern editor).
+ *
+ * @example
+ * const { actions: listActions, dialog } = useListActions(f.base_url)
+ * // In JSX:
+ * <>{dialog}</>
+ * <RowActionsDropdown actions={[...listActions, ...otherActions]} />
+ */
+export function useListActions(baseUrl: string): {
+  actions: RowAction[]
+  dialog: React.ReactNode
+} {
+  const { toast } = useToast()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [pending, setPending] = useState(false)
   const host = hostOf(baseUrl)
 
   const handleBlacklist = useCallback(async () => {
-    setOpen(false)
     setPending(true)
     try {
       const res = await addBaseUrlToBlacklist(baseUrl)
@@ -45,59 +161,32 @@ export function ListActionDropdown({ baseUrl }: { baseUrl: string }) {
     }
   }, [baseUrl, host, toast])
 
-  const handleWhitelist = useCallback(() => {
-    setOpen(false)
-    setDialogOpen(true)
-  }, [])
+  const actions: RowAction[] = [
+    {
+      key: "blacklist",
+      label: "Add host to Blacklist",
+      icon: Ban,
+      variant: "destructive",
+      onClick: handleBlacklist,
+      disabled: pending,
+    },
+    {
+      key: "whitelist",
+      label: "Whitelist this host…",
+      icon: ShieldCheck,
+      variant: "success",
+      onClick: () => setDialogOpen(true),
+    },
+  ]
 
-  return (
-    <>
-      <div className="relative inline-block">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
-          disabled={pending}
-          onClick={() => setOpen((v) => !v)}
-          aria-label="List actions"
-        >
-          <Ban className="h-3.5 w-3.5" />
-          <ChevronDown className="h-3 w-3" />
-        </Button>
-
-        {open && (
-          <>
-            {/* Backdrop to close on outside click */}
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-            <div className="absolute right-0 z-50 mt-1 w-52 rounded-md border border-border bg-popover p-1 shadow-lg">
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted"
-                onClick={handleBlacklist}
-                disabled={pending}
-              >
-                <Ban className="h-3.5 w-3.5 text-destructive" />
-                Add host to Blacklist
-              </button>
-              <button
-                type="button"
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted"
-                onClick={handleWhitelist}
-              >
-                <ShieldCheck className="h-3.5 w-3.5 text-success" />
-                Whitelist this host…
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <AddPatternDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        initialPattern={host}
-        initialPatternType="whitelist"
-      />
-    </>
+  const dialog = (
+    <AddPatternDialog
+      open={dialogOpen}
+      onClose={() => setDialogOpen(false)}
+      initialPattern={host}
+      initialPatternType="whitelist"
+    />
   )
+
+  return { actions, dialog }
 }
