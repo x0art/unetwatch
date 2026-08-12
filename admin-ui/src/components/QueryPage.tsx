@@ -35,6 +35,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
+import { ListActionDropdown } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 
 const PAGE_SIZE = 25
@@ -423,6 +424,13 @@ export function QueryPage() {
         </div>
       ),
       width: "w-44",
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: (d) => <ListActionDropdown baseUrl={d.base_url} />,
+      width: "w-12",
     },
   ]
 
