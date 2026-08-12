@@ -71,25 +71,27 @@
   --color-popover: oklch(1 0 0);
   --color-popover-foreground: oklch(0.15 0.02 260);
 
-  --color-primary: oklch(0.52 0.14 235);
+  /* Brand tones are darkened vs. dark mode so white text on solid
+     buttons and small colored text on white keep AA contrast. */
+  --color-primary: oklch(0.47 0.13 235);
   --color-primary-foreground: oklch(1 0 0);
 
   --color-secondary: oklch(0.93 0.008 260);
   --color-secondary-foreground: oklch(0.12 0.02 260);
 
-  --color-accent: oklch(0.52 0.14 235);
+  --color-accent: oklch(0.47 0.13 235);
   --color-accent-foreground: oklch(1 0 0);
 
   --color-muted: oklch(0.93 0.008 260);
-  --color-muted-foreground: oklch(0.48 0.02 260);
+  --color-muted-foreground: oklch(0.42 0.025 260);
 
-  --color-success: oklch(0.52 0.18 145);
+  --color-success: oklch(0.46 0.15 145);
   --color-success-foreground: oklch(1 0 0);
-  --color-warning: oklch(0.65 0.16 75);
-  --color-warning-foreground: oklch(1 0 0);
+  --color-warning: oklch(0.5 0.12 75);
+  --color-warning-foreground: oklch(0.15 0.02 260);
   --color-danger: oklch(0.48 0.24 25);
   --color-danger-foreground: oklch(1 0 0);
-  --color-info: oklch(0.52 0.14 235);
+  --color-info: oklch(0.47 0.13 235);
   --color-info-foreground: oklch(1 0 0);
 
   /* destructive alias */
@@ -98,7 +100,7 @@
 
   --color-border: oklch(0.87 0.01 260);
   --color-input: oklch(0.87 0.01 260);
-  --color-ring: oklch(0.52 0.14 235);
+  --color-ring: oklch(0.47 0.13 235);
 
   /* Sidebar stays dark */
   --color-sidebar: oklch(0.12 0.015 260);

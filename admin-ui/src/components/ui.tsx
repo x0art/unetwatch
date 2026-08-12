@@ -41,7 +41,7 @@ const buttonVariants: Record<ButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
   destructive: "bg-danger text-danger-foreground hover:bg-danger/90 shadow-sm",
   outline:
-    "border border-input bg-background hover:bg-accent/10 hover:text-accent-foreground",
+    "border border-input bg-background hover:bg-accent/10 hover:text-foreground",
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   ghost: "hover:bg-secondary hover:text-secondary-foreground",
 }
@@ -485,7 +485,7 @@ export function Select({
                 value={o.value}
                 className={cn(
                   "relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none",
-                  "focus:bg-accent/15 focus:text-accent-foreground",
+                  "focus:bg-accent/15 focus:text-foreground",
                   "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
                 )}
               >

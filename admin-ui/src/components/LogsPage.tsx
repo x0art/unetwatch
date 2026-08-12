@@ -361,7 +361,7 @@ export function LogsPage() {
           <p className="text-sm font-medium text-muted-foreground">
             {kind ? `No ${kind} logs yet` : "No logs yet"}
           </p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground/60">
+          <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground/80">
             Every monitor poll and Query page run is recorded here with its ES query DSL,
             match counts and webhook result.
           </p>
