@@ -3,7 +3,6 @@ import {
   Ban,
   Copy,
   Database,
-  FileSearch,
   Globe,
   Network,
   Play,
@@ -609,31 +608,42 @@ export function QueryPage() {
           </div>
 
           {/* Flow visualization */}
-          <Panel
-            title="Access flow"
-            icon={FileSearch}
-            description="Client IPs clustered by destination host"
-          >
+          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Access flow</h3>
+                <p className="text-xs text-muted-foreground">
+                  Client IPs clustered by destination host
+                </p>
+              </div>
+              {flowSankey && flowSankey.links.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {flowSankey.links.length.toLocaleString()} flow{flowSankey.links.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
             {esOffline ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 Flow unavailable — Elasticsearch unreachable.
               </p>
             ) : flowSankey && flowSankey.links.length > 0 ? (
-              <SankeyDiagram
-                nodes={flowSankey.nodes}
-                links={flowSankey.links}
-                layerColors={{
-                  0: "var(--color-info)",
-                  1: "var(--color-danger)",
-                }}
-                ariaLabel="Client IP to destination host flow"
-              />
+              <div className="p-4 sm:p-6">
+                <SankeyDiagram
+                  nodes={flowSankey.nodes}
+                  links={flowSankey.links}
+                  layerColors={{
+                    0: "var(--color-info)",
+                    1: "var(--color-danger)",
+                  }}
+                  ariaLabel="Client IP to destination host flow"
+                />
+              </div>
             ) : (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 No traffic in this window to visualize
               </p>
             )}
-          </Panel>
+          </div>
 
           {/* Documents table */}
           <div>
