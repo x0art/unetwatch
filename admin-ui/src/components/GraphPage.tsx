@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  CheckCircle2,
   Link2,
   MousePointerClick,
   Network,
@@ -11,7 +12,10 @@ import {
 import {
   type FindingsGraph,
   type GraphNode,
+  getBlacklistSet,
   getFindingsGraph,
+  listPatterns,
+  type Pattern,
 } from "../api"
 import {
   Button,
@@ -121,6 +125,8 @@ export function GraphPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
+  const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
+  const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
 
   const fetchGraph = useCallback(() => {
     let cancelled = false
@@ -145,6 +151,38 @@ export function GraphPage() {
   }, [limit])
 
   useEffect(() => fetchGraph(), [fetchGraph])
+
+  // Load whitelist patterns and blacklist set for badge indicators.
+  useEffect(() => {
+    let cancelled = false
+    listPatterns({ pattern_type: "whitelist", limit: 5000 })
+      .then((items: Pattern[]) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const p of items) next[p.pattern] = true
+        setWhitelistIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setWhitelistIndex({})
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    getBlacklistSet()
+      .then((data) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const url of data.urls) next[url] = true
+        for (const ip of data.ips) next[ip] = true
+        setBlacklistIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setBlacklistIndex({})
+      })
+    return () => { cancelled = true }
+  }, [])
 
   const nodeKindCounts = useMemo(() => {
     const c: Record<Kind, number> = { ip: 0, server: 0, url: 0 }
@@ -383,12 +421,33 @@ export function GraphPage() {
                 accessor: (f) => f.url,
                 defaultSortDir: "asc",
                 cell: (f) => (
-                  <span className="flex items-center gap-1.5">
-                    <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
-                      {f.url}
+                  <div className="flex items-center gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
+                        {f.url}
+                      </span>
+                      <CopyUrlButton value={f.url} label="URL" />
                     </span>
-                    <CopyUrlButton value={f.url} label="URL" />
-                  </span>
+                    {whitelistIndex[f.base_url] ? (
+                      <span
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+                        title="Already in whitelist"
+                        aria-label="Already in whitelist"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        whitelist
+                      </span>
+                    ) : blacklistIndex[f.base_url] ? (
+                      <span
+                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+                        title="In blacklist"
+                        aria-label="In blacklist"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        blacklist
+                      </span>
+                    ) : null}
+                  </div>
                 ),
               },
               {
