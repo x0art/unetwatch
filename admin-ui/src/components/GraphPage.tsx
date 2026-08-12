@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   CheckCircle2,
   Link2,
-  MousePointerClick,
   Network,
   RefreshCcw,
   SearchX,
@@ -22,7 +21,6 @@ import {
   CopyUrlButton,
   EmptyState,
   PageHeader,
-  SearchInput,
   Select,
   Skeleton,
   StatCard,
@@ -30,7 +28,6 @@ import {
 import { DataTable } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
-import { useDebounce } from "../lib/utils"
 
 function formatDetected(ts: string) {
   const date = new Date(ts)
@@ -53,11 +50,8 @@ function hostOf(url: string): string {
   return afterScheme.split(/[/?#]/)[0] || url
 }
 
-/** Sankey node with the search terms used by the highlight filter (host + full URLs). */
-type FlowNode = SankeyNode & { searchable?: string[] }
-
 function toSankey(graph: FindingsGraph): {
-  nodes: FlowNode[]
+  nodes: SankeyNode[]
   links: SankeyLink[]
 } {
   const layerOf = (id: string): number => {
@@ -82,20 +76,18 @@ function toSankey(graph: FindingsGraph): {
     else hosts.set(host, { id: hostId, host, urls: [n.label] })
   }
 
-  const nodes: FlowNode[] = [
+  const nodes: SankeyNode[] = [
     ...graph.nodes
       .filter((n) => n.kind !== "url")
       .map((n) => ({
         id: n.id,
         name: n.label,
         layer: layerOf(n.id),
-        searchable: [n.label],
       })),
     ...[...hosts.values()].map((h) => ({
       id: h.id,
       name: h.host,
       layer: 2,
-      searchable: [h.host, ...h.urls],
       // ECharts HTML tooltips need <br/> (a literal \n collapses to a space).
       detail:
         h.urls.length <= 4
@@ -124,7 +116,6 @@ export function GraphPage() {
   const [graph, setGraph] = useState<FindingsGraph | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
 
@@ -190,43 +181,7 @@ export function GraphPage() {
     return c
   }, [graph])
 
-  const debouncedSearch = useDebounce(search, 200)
-  const q = debouncedSearch.trim().toLowerCase()
-
   const sankey = useMemo(() => (graph ? toSankey(graph) : null), [graph])
-
-  // Count of diagram nodes the search will highlight (host nodes match when
-  // the host or any of their URLs contain the query).
-  const matchCount = useMemo(
-    () =>
-      q && sankey
-        ? sankey.nodes.filter((n) =>
-            (n.searchable ?? [n.name]).some((s) => s.toLowerCase().includes(q)),
-          ).length
-        : 0,
-    [q, sankey],
-  )
-
-  // Search-scoped data: filter the diagram to matching nodes + their edges.
-  // Aggregated host nodes match when the host or any of their URLs match.
-  const visibleSankey = useMemo(() => {
-    if (!sankey || !q) return sankey
-    const keep = new Set<string>()
-    for (const n of sankey.nodes) {
-      const searchable = n.searchable ?? [n.name]
-      if (searchable.some((s) => s.toLowerCase().includes(q))) {
-        keep.add(n.id)
-        for (const l of sankey.links) {
-          if (l.source === n.id) keep.add(l.target)
-          if (l.target === n.id) keep.add(l.source)
-        }
-      }
-    }
-    return {
-      nodes: sankey.nodes.filter((n) => keep.has(n.id)),
-      links: sankey.links.filter((l) => keep.has(l.source) && keep.has(l.target)),
-    }
-  }, [sankey, q])
 
   const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
 
@@ -286,58 +241,17 @@ export function GraphPage() {
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
-            <h3 className="text-sm font-semibold tracking-tight">Traffic relations</h3>
+            <h3 className="text-sm font-semibold tracking-tight">Traffic flow</h3>
             <p className="text-xs text-muted-foreground">
-              Alluvial flow of client IPs reaching flagged URLs through server IPs. Flagged URLs
-              are grouped by host so each appears once. Hover a node to highlight its connections ·
-              scroll to zoom.
+              Client IPs → server IPs → flagged URLs. Hover a node to highlight its connections.
             </p>
           </div>
           {graph && !graphEmpty && (
-            <div className="flex flex-wrap items-center gap-2">
-              <SearchInput
-                placeholder="Highlight by IP or URL..."
-                value={search}
-                onChange={setSearch}
-                className="w-52 [&_input]:h-9"
-                aria-label="Highlight graph nodes"
-              />
-              {q.length > 0 && (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-info/30 bg-info/10 px-2.5 py-0.5 text-[11px] font-semibold text-info">
-                  {matchCount} match{matchCount === 1 ? "" : "es"}
-                </span>
-              )}
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground/70">
-                <MousePointerClick className="h-3.5 w-3.5" aria-hidden="true" />
-                Hover to trace a flow
-              </span>
-            </div>
+            <span className="text-xs text-muted-foreground">
+              {graph.links.length.toLocaleString()} access flow{graph.links.length === 1 ? "" : "s"}
+            </span>
           )}
         </div>
-
-        {/* Legend strip */}
-        {graph && !graphEmpty && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-info" aria-hidden="true" />
-              {nodeKindCounts.ip.toLocaleString()} client IP{nodeKindCounts.ip === 1 ? "" : "s"}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-warning" aria-hidden="true" />
-              {nodeKindCounts.server.toLocaleString()} server IP
-              {nodeKindCounts.server === 1 ? "" : "s"}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full bg-danger" aria-hidden="true" />
-              {nodeKindCounts.url.toLocaleString()} URL{nodeKindCounts.url === 1 ? "" : "s"}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Network className="h-3.5 w-3.5" aria-hidden="true" />
-              {graph.links.length.toLocaleString()} access flow
-              {graph.links.length === 1 ? "" : "s"}
-            </span>
-          </div>
-        )}
 
         {loading ? (
           <div className="space-y-3 p-4" aria-busy="true">
@@ -363,11 +277,11 @@ export function GraphPage() {
             }
             className="border-0"
           />
-        ) : visibleSankey ? (
-          <div className="p-3">
+        ) : sankey ? (
+          <div className="p-4 sm:p-6">
             <SankeyDiagram
-              nodes={visibleSankey.nodes}
-              links={visibleSankey.links}
+              nodes={sankey.nodes}
+              links={sankey.links}
               layerColors={{
                 0: "var(--color-info)",
                 1: "var(--color-warning)",
