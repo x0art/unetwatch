@@ -71,7 +71,7 @@ export function AppShell({
         </header>
 
         <main className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}>
-          <div className="mx-auto w-full max-w-7xl fade-in">{children}</div>
+          <div className="w-full fade-in">{children}</div>
         </main>
       </div>
     </div>
