@@ -218,6 +218,10 @@ function buildOption(
         nodeGap,
         layoutIterations: 32,
         emphasis: { focus: "adjacency" },
+        // Default stateAnimation duration is 300ms, which animates the
+        // emphasis/blur state of EVERY node+link on each hover — laggy on big
+        // graphs. Snap state transitions to 0ms; data-change animation stays.
+        stateAnimation: { duration: 0 },
         lineStyle: {
           color: "gradient",
           curveness: 0.5,
