@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
   Copy,
@@ -21,10 +21,18 @@ import {
   listTrackedUrls,
   type Pattern,
 } from "../api"
-import { Button, ConfirmDialog, CopyUrlButton, PageHeader, SearchInput, useToast } from "./ui"
+import {
+  Button,
+  ConfirmDialog,
+  CopyUrlButton,
+  PageHeader,
+  RefreshIntervalSelect,
+  SearchInput,
+  useToast,
+} from "./ui"
 import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
-import { useDebounce } from "../lib/utils"
+import { useAutoRefresh, useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
 
@@ -51,6 +59,11 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
   const debouncedSearch = useDebounce(search, 300)
 
+  // Keep rows visible while an auto-refresh is in flight (no skeleton flicker).
+  // Keyed on "an initial load finished" rather than data presence, so an
+  // empty table doesn't re-skeleton on every interval tick.
+  const loadedRef = useRef(false)
+
   // Allow the Graph view to deep-link into findings filtered by an IP/URL.
   // `search` is intentionally excluded from deps: including it would reset
   // the user's typing back to the initial filter on every keystroke.
@@ -64,7 +77,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
 
   const refetch = useCallback(() => {
     let cancelled = false
-    setLoading(true)
+    if (!loadedRef.current) setLoading(true)
     getFindings({
       search: debouncedSearch || undefined,
       limit: PAGE_SIZE,
@@ -82,7 +95,10 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          loadedRef.current = true
+          setLoading(false)
+        }
       })
     return () => {
       cancelled = true
@@ -93,6 +109,9 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     const cancel = refetch()
     return cancel
   }, [refetch])
+
+  // Live updates: refetch findings on an interval.
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refetch, "findings", 0)
 
   useEffect(() => {
     let cancelled = false
@@ -410,6 +429,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
           <Eraser className="h-4 w-4" />
           Clear all
         </Button>
+        <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
         <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
           <RefreshCcw className="h-4 w-4" />
           Refresh

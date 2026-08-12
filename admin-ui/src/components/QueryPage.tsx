@@ -13,6 +13,7 @@ import {
   Server,
   Users,
   Zap,
+  type LucideIcon,
 } from "lucide-react"
 import { useDebounce } from "../lib/utils"
 import {
@@ -29,7 +30,6 @@ import {
   EmptyState,
   ListBadge,
   PageHeader,
-  Panel,
   RankedTable,
   SearchInput,
   Select,
@@ -77,6 +77,33 @@ function isIpHost(url: string): boolean {
   const octets = host.split(".")
   return (
     octets.length === 4 && octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)
+  )
+}
+
+/* ── De-boxed section: hairline + title + content (Query page) ──────── */
+
+function QuerySection({
+  title,
+  icon: Icon,
+  description,
+  children,
+}: {
+  title: string
+  icon?: LucideIcon
+  description?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section className="border-t border-border pt-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        {description && (
+          <span className="ml-auto text-xs text-muted-foreground">{description}</span>
+        )}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -593,7 +620,7 @@ export function QueryPage() {
       ) : !result ? null : (
         <>
           {/* Timeline chart */}
-          <Panel title="Requests over time" icon={Network} description="Hover for details">
+          <QuerySection title="Requests over time" icon={Network} description="Hover for details">
             {result.timeline.length > 0 ? (
               <TimelineChart points={result.timeline} />
             ) : (
@@ -601,16 +628,16 @@ export function QueryPage() {
                 No timestamped matches in this window
               </p>
             )}
-          </Panel>
+          </QuerySection>
 
           {/* Top rankings */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <Panel title="Top URLs" icon={Globe}>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <QuerySection title="Top URLs" icon={Globe}>
               <RankedTable rows={result.top_urls.map((u) => ({ label: u.url, count: u.count }))} />
-            </Panel>
-            <Panel title="Top client IPs" icon={Users}>
+            </QuerySection>
+            <QuerySection title="Top client IPs" icon={Users}>
               <RankedTable rows={result.top_ips.map((u) => ({ label: u.client_ip, count: u.count }))} />
-            </Panel>
+            </QuerySection>
           </div>
 
           {/* Flow visualization */}

@@ -35,7 +35,7 @@ type ButtonVariant = "default" | "destructive" | "outline" | "secondary" | "ghos
 type ButtonSize = "default" | "sm" | "lg" | "icon"
 
 const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap"
+  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-[0.98]"
 
 const buttonVariants: Record<ButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
@@ -545,6 +545,42 @@ export function Select({
         </SelectPrimitive.Content>
       </SelectPrimitive.Portal>
     </SelectPrimitive.Root>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * RefreshIntervalSelect
+ *
+ * Auto-refresh interval picker for live pages. Pairs with the
+ * `useAutoRefresh` hook in lib/utils.
+ *
+ *   <RefreshIntervalSelect value={seconds} onChange={setSeconds} />
+ * ════════════════════════════════════════════════════════════════ */
+
+const REFRESH_INTERVAL_OPTIONS: SelectOption[] = [
+  { value: "0", label: "Auto-refresh: off" },
+  { value: "30", label: "Auto-refresh: 30s" },
+  { value: "60", label: "Auto-refresh: 1m" },
+  { value: "300", label: "Auto-refresh: 5m" },
+]
+
+export function RefreshIntervalSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: number
+  onChange: (seconds: number) => void
+  className?: string
+}) {
+  return (
+    <Select
+      value={String(value)}
+      onChange={(v) => onChange(Number(v))}
+      options={REFRESH_INTERVAL_OPTIONS}
+      className={cn("w-40", className)}
+      aria-label="Auto-refresh interval"
+    />
   )
 }
 

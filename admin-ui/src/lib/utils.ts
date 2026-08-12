@@ -27,6 +27,44 @@ export function useDebounce<T>(value: T, delayMs: number): T {
 }
 
 /**
+ * Periodically re-run `refresh` every `seconds` (0 = off). The interval is
+ * persisted per `key` in localStorage and ticks are skipped while the tab is
+ * hidden, so background tabs never hammer the API.
+ */
+export function useAutoRefresh(
+  refresh: () => void,
+  key: string,
+  defaultSeconds = 0,
+): { refreshSeconds: number; setRefreshSeconds: (s: number) => void } {
+  const [refreshSeconds, setRefreshSeconds] = useState<number>(() => {
+    try {
+      const stored = Number(window.localStorage.getItem(`unetwatch_autorefresh_${key}`))
+      return Number.isFinite(stored) && stored >= 0 ? stored : defaultSeconds
+    } catch {
+      return defaultSeconds
+    }
+  })
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`unetwatch_autorefresh_${key}`, String(refreshSeconds))
+    } catch {
+      /* storage may be unavailable */
+    }
+  }, [refreshSeconds, key])
+
+  useEffect(() => {
+    if (!refreshSeconds) return
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") refresh()
+    }, refreshSeconds * 1000)
+    return () => window.clearInterval(id)
+  }, [refreshSeconds, refresh])
+
+  return { refreshSeconds, setRefreshSeconds }
+}
+
+/**
  * Copy text to the clipboard, falling back to a hidden textarea +
  * execCommand for older browsers / non-secure contexts. Resolves
  * `false` when neither path works.

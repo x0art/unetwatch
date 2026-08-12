@@ -22,8 +22,9 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, Panel, Select, Skeleton, StatCard } from "./ui"
+import { Button, Panel, RefreshIntervalSelect, Select, Skeleton, StatCard } from "./ui"
 import { CountdownRing } from "./CountdownRing"
+import { useAutoRefresh } from "../lib/utils"
 import { type View } from "./Sidebar"
 
 interface DashboardPageProps {
@@ -74,6 +75,28 @@ export function DashboardPage({
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
 
+  // Setup guidance banner: shown until block patterns exist or ES is back.
+  const banner =
+    counts !== null && counts.block === 0
+      ? {
+          kind: "setup" as const,
+          title: "No block patterns yet",
+          description:
+            "Add block patterns to start flagging matching traffic, then trigger a manual run to seed findings.",
+          actionLabel: "Add block patterns",
+          action: () => onNavigate("patterns"),
+        }
+      : status !== null && !status.es_online
+        ? {
+            kind: "offline" as const,
+            title: "Elasticsearch unreachable",
+            description:
+              "uNetWatch can't reach Elasticsearch, so monitoring is paused. Check the cluster, then retry.",
+            actionLabel: "Retry",
+            action: onRefresh,
+          }
+        : null
+
   const [runMinutes, setRunMinutes] = useState("1")
 
   // ── Extra stats ────────────────────────────────────────────────
@@ -119,6 +142,13 @@ export function DashboardPage({
 
   useEffect(() => fetchRecent(), [fetchRecent])
 
+  // Live updates: refresh the stats AND recent findings on an interval.
+  const refreshAll = useCallback(() => {
+    onRefresh()
+    fetchRecent()
+  }, [onRefresh, fetchRecent])
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
+
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
@@ -146,12 +176,33 @@ export function DashboardPage({
             {statusLabel}
           </span>
           <span>Updated {formatLastUpdated(lastUpdated)}</span>
+          <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
           <Button variant="outline" size="sm" onClick={onRefresh}>
             <RefreshCcw className="h-4 w-4" />
             Refresh
           </Button>
         </div>
       </div>
+
+      {/* ── Setup / status banner ── */}
+      {banner && (
+        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-info/30 bg-info/10 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info">
+            {banner.kind === "setup" ? (
+              <ShieldAlert className="h-5 w-5" aria-hidden="true" />
+            ) : (
+              <RefreshCcw className="h-5 w-5" aria-hidden="true" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">{banner.title}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{banner.description}</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={banner.action}>
+            {banner.actionLabel}
+          </Button>
+        </div>
+      )}
 
       {/* ── Primary stats row ── */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -200,8 +200,16 @@
 @keyframes dash-flow {
   to { stroke-dashoffset: -22; }
 }
+
+/* Global reduced-motion: collapse every animation/transition for users who
+   ask for it (ping dots, bars, fades, the countdown ring, …). */
 @media (prefers-reduced-motion: reduce) {
-  .edge-flow {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
