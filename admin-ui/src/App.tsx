@@ -176,7 +176,7 @@ function AppRoutes() {
             lastUpdated={lastUpdated}
             onRefresh={fetchStats}
             onManualRun={handleManualRun}
-            onNavigate={setView}
+            onNavigate={handleNavigate}
           />
         )}
         {view === "query" && <QueryPage />}
