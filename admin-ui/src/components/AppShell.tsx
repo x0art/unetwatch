@@ -33,6 +33,14 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
+      {/* Skip link for keyboard users — first focusable element */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:rounded-md focus:bg-popover focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-popover-foreground focus:shadow-lg"
+      >
+        Skip to content
+      </a>
+
       {/* Desktop sidebar */}
       <Sidebar
         current={currentView}
@@ -70,7 +78,7 @@ export function AppShell({
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>
 
-        <main className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}>
+        <main id="main-content" className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}>
           <div className="w-full fade-in">{children}</div>
         </main>
       </div>

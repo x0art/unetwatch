@@ -188,10 +188,10 @@ function SidebarContent({
                   onClick={() => onNavigate(item.view)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                    "relative flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     active
-                      ? "bg-sidebar-active/15 text-sidebar-active"
+                      ? "bg-sidebar-active/15 text-sidebar-active before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-sidebar-active before:content-['']"
                       : "text-sidebar-foreground/80 hover:bg-sidebar-hover hover:text-sidebar-foreground",
                   )}
                 >

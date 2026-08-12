@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CheckCircle2,
   Link2,
@@ -24,10 +24,12 @@ import {
   PageHeader,
   Panel,
   RankedTable,
+  RefreshIntervalSelect,
   Select,
   Skeleton,
   StatCard,
 } from "./ui"
+import { useAutoRefresh } from "../lib/utils"
 import { DataTable } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
@@ -122,9 +124,14 @@ export function GraphPage() {
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
 
+  // Keep the previous graph visible while an auto-refresh is in flight so
+  // the page doesn't flicker back to skeletons every interval.
+  const graphRef = useRef<FindingsGraph | null>(null)
+  graphRef.current = graph
+
   const fetchGraph = useCallback(() => {
     let cancelled = false
-    setLoading(true)
+    if (!graphRef.current) setLoading(true)
     setError(null)
     getFindingsGraph(Number(limit))
       .then((g) => {
@@ -145,6 +152,9 @@ export function GraphPage() {
   }, [limit])
 
   useEffect(() => fetchGraph(), [fetchGraph])
+
+  // Live updates: refetch the graph on an interval.
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(fetchGraph, "graph", 0)
 
   // Load whitelist patterns and blacklist set for badge indicators.
   useEffect(() => {
@@ -217,6 +227,7 @@ export function GraphPage() {
           className="w-32"
           aria-label="Nodes per layer"
         />
+        <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
         <Button variant="outline" size="sm" onClick={fetchGraph} disabled={loading}>
           <RefreshCcw className="h-4 w-4" />
           Refresh
