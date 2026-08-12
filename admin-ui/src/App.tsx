@@ -86,21 +86,25 @@ function AppRoutes() {
   useEffect(() => {
     if (!status) return
 
-    const updateRemaining = () => {
+    const calcRemaining = () => {
       if (status.last_poll_at) {
         const lastPoll = new Date(status.last_poll_at).getTime()
         const elapsed = Math.floor((Date.now() - lastPoll) / 1000)
-        setRemaining(Math.max(0, intervalSec - elapsed))
-      } else {
-        // No poll recorded yet — show the full interval
-        setRemaining(intervalSec)
+        const left = intervalSec - elapsed
+        // If the poll is overdue, show the full interval — the scheduler
+        // will fire any moment and a fresh cycle begins.
+        return left > 0 ? left : intervalSec
       }
+      // No poll recorded yet — show the full interval
+      return intervalSec
     }
 
-    updateRemaining()
+    setRemaining(calcRemaining())
     const tick = setInterval(() => {
       setRemaining((r) => {
         if (r <= 1) {
+          // Countdown reached zero — refresh stats from backend to get the
+          // real new last_poll_at, then reset to the full interval.
           fetchStats()
           return intervalSec
         }
