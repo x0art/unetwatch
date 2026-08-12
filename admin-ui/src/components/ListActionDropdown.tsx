@@ -113,11 +113,14 @@ export function RowActionsDropdown({ actions }: { actions: RowAction[] }) {
 export function ListActionCell({
   baseUrl,
   extra = [],
+  onBlacklisted,
 }: {
   baseUrl: string
   extra?: RowAction[]
+  /** Called after a host is successfully added to the blacklist. */
+  onBlacklisted?: (host: string) => void
 }) {
-  const { actions, dialog } = useListActions(baseUrl)
+  const { actions, dialog } = useListActions(baseUrl, onBlacklisted)
   return (
     <>
       {dialog}
@@ -136,7 +139,7 @@ export function ListActionCell({
  * <>{dialog}</>
  * <RowActionsDropdown actions={[...listActions, ...otherActions]} />
  */
-export function useListActions(baseUrl: string): {
+export function useListActions(baseUrl: string, onBlacklisted?: (host: string) => void): {
   actions: RowAction[]
   dialog: React.ReactNode
 } {
@@ -151,6 +154,7 @@ export function useListActions(baseUrl: string): {
       const res = await addBaseUrlToBlacklist(baseUrl)
       if (res.added.length > 0) {
         toast({ title: "Added to blacklist", description: host, variant: "success" })
+        onBlacklisted?.(host)
       } else {
         toast({ title: "Already on blacklist", description: host, variant: "info" })
       }
@@ -159,7 +163,7 @@ export function useListActions(baseUrl: string): {
     } finally {
       setPending(false)
     }
-  }, [baseUrl, host, toast])
+  }, [baseUrl, host, toast, onBlacklisted])
 
   const actions: RowAction[] = [
     {

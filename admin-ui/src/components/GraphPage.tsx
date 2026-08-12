@@ -396,7 +396,14 @@ export function GraphPage() {
                 id: "actions",
                 header: "",
                 enableSorting: false,
-                cell: (f) => <ListActionCell baseUrl={f.base_url} />,
+                cell: (f) => (
+                  <ListActionCell
+                    baseUrl={f.base_url}
+                    onBlacklisted={(host) =>
+                      setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
+                    }
+                  />
+                ),
                 width: "w-12",
               },
             ]}
