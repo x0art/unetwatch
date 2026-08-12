@@ -20,7 +20,10 @@ import {
   Button,
   CopyUrlButton,
   EmptyState,
+  ListBadge,
   PageHeader,
+  Panel,
+  RankedTable,
   Select,
   Skeleton,
   StatCard,
@@ -181,6 +184,21 @@ export function GraphPage() {
     return c
   }, [graph])
 
+  // Ranked lists for the Top URLs / Top client IPs tables, derived from
+  // the same nodes the sankey renders.
+  const topRanked = useMemo(() => {
+    const urls: { label: string; count: number }[] = []
+    const ips: { label: string; count: number }[] = []
+    for (const n of graph?.nodes ?? []) {
+      if (n.kind === "url") urls.push({ label: n.label, count: n.count })
+      else if (n.kind === "ip") ips.push({ label: n.label, count: n.count })
+    }
+    const byCount = (a: { count: number }, b: { count: number }) => b.count - a.count
+    urls.sort(byCount)
+    ips.sort(byCount)
+    return { urls, ips }
+  }, [graph])
+
   const sankey = useMemo(() => (graph ? toSankey(graph) : null), [graph])
 
   const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
@@ -293,6 +311,18 @@ export function GraphPage() {
         ) : null}
       </div>
 
+      {/* Top rankings — top 10, matching the Query page ranking panels */}
+      {graph && graph.nodes.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Panel title="Top URLs" icon={Link2}>
+            <RankedTable rows={topRanked.urls.slice(0, 10)} />
+          </Panel>
+          <Panel title="Top client IPs" icon={Users}>
+            <RankedTable rows={topRanked.ips.slice(0, 10)} />
+          </Panel>
+        </div>
+      )}
+
       {/* Per-triple access flows table */}
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -351,23 +381,13 @@ export function GraphPage() {
                       <CopyUrlButton value={f.url} label="URL" />
                     </span>
                     {whitelistIndex[f.base_url] ? (
-                      <span
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
-                        title="Already in whitelist"
-                        aria-label="Already in whitelist"
-                      >
-                        <CheckCircle2 className="h-3 w-3" />
+                      <ListBadge tone="success" icon={CheckCircle2} title="Already in whitelist">
                         whitelist
-                      </span>
+                      </ListBadge>
                     ) : blacklistIndex[f.base_url] ? (
-                      <span
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
-                        title="In blacklist"
-                        aria-label="In blacklist"
-                      >
-                        <CheckCircle2 className="h-3 w-3" />
+                      <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
                         blacklist
-                      </span>
+                      </ListBadge>
                     ) : null}
                   </div>
                 ),
