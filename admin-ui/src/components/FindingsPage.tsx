@@ -360,6 +360,9 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         <div className="flex justify-end">
           <ListActionCell
             baseUrl={f.base_url}
+            onBlacklisted={(host) =>
+              setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
+            }
             extra={[
               {
                 key: "track",

@@ -445,7 +445,24 @@ export function QueryPage() {
       id: "actions",
       header: "",
       enableSorting: false,
-      cell: (d) => <ListActionCell baseUrl={d.base_url} />,
+      cell: (d) => (
+        <ListActionCell
+          baseUrl={d.base_url}
+          onBlacklisted={() =>
+            setResult((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                items: prev.items.map((item) =>
+                  item.base_url === d.base_url
+                    ? { ...item, blacklisted: true, blacklist_source: "url" as const }
+                    : item,
+                ),
+              }
+            })
+          }
+        />
+      ),
       width: "w-12",
     },
   ]
