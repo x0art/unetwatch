@@ -13,9 +13,8 @@ import {
   Server,
   Users,
   Zap,
-  type LucideIcon,
 } from "lucide-react"
-import { cn, useDebounce } from "../lib/utils"
+import { useDebounce } from "../lib/utils"
 import {
   type QueryDoc,
   type QueryFlow,
@@ -28,8 +27,10 @@ import {
   Button,
   CopyUrlButton,
   EmptyState,
+  ListBadge,
   PageHeader,
   Panel,
+  RankedTable,
   SearchInput,
   Select,
   Skeleton,
@@ -76,35 +77,6 @@ function isIpHost(url: string): boolean {
   const octets = host.split(".")
   return (
     octets.length === 4 && octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)
-  )
-}
-
-/* ── Lists pill badge — matches the Traffic page badge style ─────────── */
-
-function ListBadge({
-  tone,
-  title,
-  icon: Icon,
-  children,
-}: {
-  tone: "warning" | "success" | "danger"
-  title?: string
-  icon: LucideIcon
-  children: React.ReactNode
-}) {
-  return (
-    <span
-      title={title}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-        tone === "warning" && "border-warning/30 bg-warning/10 text-warning",
-        tone === "success" && "border-success/30 bg-success/10 text-success",
-        tone === "danger" && "border-danger/30 bg-danger/10 text-danger",
-      )}
-    >
-      <Icon className="h-3 w-3" aria-hidden="true" />
-      {children}
-    </span>
   )
 }
 
@@ -229,35 +201,6 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
           <p className="text-muted-foreground">{formatFull(hoverPoint.bucket)}</p>
         </div>
       )}
-    </div>
-  )
-}
-
-/* ── Horizontal ranking bars (top URLs / top IPs) ───────────────────── */
-
-function RankBars({ rows }: { rows: { label: string; count: number }[] }) {
-  const max = Math.max(1, ...rows.map((r) => r.count))
-  if (rows.length === 0) {
-    return <p className="py-8 text-center text-sm text-muted-foreground">No data in window</p>
-  }
-  return (
-    <div className="space-y-2.5">
-      {rows.map((r) => (
-        <div key={r.label} title={`${r.label} — ${r.count.toLocaleString()} requests`}>
-          <div className="mb-0.5 flex items-center justify-between gap-3 text-xs">
-            <span className="truncate font-mono text-muted-foreground">{r.label}</span>
-            <span className="shrink-0 font-medium tabular-nums text-foreground">
-              {r.count.toLocaleString()}
-            </span>
-          </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary/70 transition-[width] duration-500"
-              style={{ width: `${(r.count / max) * 100}%` }}
-            />
-          </div>
-        </div>
-      ))}
     </div>
   )
 }
@@ -663,10 +606,10 @@ export function QueryPage() {
           {/* Top rankings */}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Panel title="Top URLs" icon={Globe}>
-              <RankBars rows={result.top_urls.map((u) => ({ label: u.url, count: u.count }))} />
+              <RankedTable rows={result.top_urls.map((u) => ({ label: u.url, count: u.count }))} />
             </Panel>
             <Panel title="Top client IPs" icon={Users}>
-              <RankBars rows={result.top_ips.map((u) => ({ label: u.client_ip, count: u.count }))} />
+              <RankedTable rows={result.top_ips.map((u) => ({ label: u.client_ip, count: u.count }))} />
             </Panel>
           </div>
 

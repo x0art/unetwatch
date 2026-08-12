@@ -252,6 +252,47 @@ export function Badge({
 }
 
 /* ════════════════════════════════════════════════════════════════
+ * ListBadge — compact icon pill (Query + Traffic pages)
+ *
+ * Small uppercase pill with a leading icon used for list-coverage
+ * badges (block / whitelist / blacklist) across the Query and
+ * Traffic pages.
+ *
+ *   <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
+ *     blacklist
+ *   </ListBadge>
+ * ════════════════════════════════════════════════════════════════ */
+
+export type ListBadgeTone = "warning" | "success" | "danger"
+
+export function ListBadge({
+  tone,
+  title,
+  icon: Icon,
+  children,
+}: {
+  tone: ListBadgeTone
+  title?: string
+  icon: LucideIcon
+  children: ReactNode
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        tone === "warning" && "border-warning/30 bg-warning/10 text-warning",
+        tone === "success" && "border-success/30 bg-success/10 text-success",
+        tone === "danger" && "border-danger/30 bg-danger/10 text-danger",
+      )}
+    >
+      <Icon className="h-3 w-3" aria-hidden="true" />
+      {children}
+    </span>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
  * Card
  * ════════════════════════════════════════════════════════════════ */
 
@@ -897,6 +938,78 @@ export function Panel({
         </div>
       )}
       {children}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * RankedTable — ranked list with inline bars
+ *
+ * Compact table (rank, label + proportional bar, count) used by the
+ * Query and Traffic pages for "Top URLs" / "Top client IPs".
+ *
+ *   <RankedTable rows={[{ label: "example.com", count: 42 }]} />
+ * ════════════════════════════════════════════════════════════════ */
+
+export function RankedTable({
+  rows,
+  className,
+}: {
+  rows: { label: string; count: number }[]
+  className?: string
+}) {
+  const max = Math.max(1, ...rows.map((r) => r.count))
+  if (rows.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">No data in window</p>
+    )
+  }
+  return (
+    <div className={cn("overflow-hidden rounded-md border border-border", className)}>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
+            <th className="w-9 px-3 py-2 font-medium">#</th>
+            <th className="px-3 py-2 font-medium">Label</th>
+            <th className="w-20 px-3 py-2 text-right font-medium">Count</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((r, i) => (
+            <tr
+              key={r.label}
+              className="transition-colors hover:bg-muted/30"
+              title={`${r.label} — ${r.count.toLocaleString()}`}
+            >
+              <td
+                className={cn(
+                  "px-3 py-2 tabular-nums",
+                  i < 3 ? "font-semibold text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {i + 1}
+              </td>
+              <td className="px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="block max-w-[240px] truncate font-mono">{r.label}</span>
+                  <div
+                    className="h-1.5 min-w-[32px] flex-1 overflow-hidden rounded-full bg-muted"
+                    aria-hidden="true"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary/70 transition-[width] duration-500"
+                      style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </td>
+              <td className="px-3 py-2 text-right font-medium tabular-nums">
+                {r.count.toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
