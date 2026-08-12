@@ -37,6 +37,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
+import { ListActionDropdown } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
@@ -520,6 +521,7 @@ export function RedirectsPage() {
       width: "w-32",
       cell: (i) => (
         <div className="flex justify-end gap-1">
+          <ListActionDropdown baseUrl={i.url} />
           <Button
             variant="ghost"
             size="sm"
