@@ -248,6 +248,13 @@ async def test_query_run_annotates_lists(client, monkeypatch):
             "url": "http://flagged.example/d",
             "action": "ALLOW",
         },
+        {
+            "@timestamp": "2026-08-07T10:00:04Z",
+            "client_ip": "10.0.0.4",
+            "server_ip": "10.9.9.9",
+            "url": "http://9.9.9.9/e",
+            "action": "ALLOW",
+        },
     ]
 
     class FakeES:
@@ -265,7 +272,7 @@ async def test_query_run_annotates_lists(client, monkeypatch):
     resp = client.get("/api/query/run?minutes=60")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total_requests"] == 4  # raw matches, whitelisted docs included
+    assert body["total_requests"] == 5  # raw matches, whitelisted docs included
 
     by_url = {i["url"]: i for i in body["items"]}
 
@@ -284,6 +291,10 @@ async def test_query_run_annotates_lists(client, monkeypatch):
     # Client IP on the IP blacklist.
     assert by_url["http://flagged.example/d"]["blacklisted"] is True
     assert by_url["http://flagged.example/d"]["blacklist_source"] == "ip"
+
+    # Base URL is itself a blacklisted IP address.
+    assert by_url["http://9.9.9.9/e"]["blacklisted"] is True
+    assert by_url["http://9.9.9.9/e"]["blacklist_source"] == "ip"
 
     # The run log records what it flagged: top URLs + matched patterns.
     logs = client.get("/api/logs/?kind=query").json()

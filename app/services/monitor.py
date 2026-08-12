@@ -452,8 +452,8 @@ def _build_items(
 
     Each row is annotated for the UI badges: which block pattern(s) matched
     (``blocked_by``), whether the URL matches a whitelist pattern
-    (``whitelisted``), and whether its host or client IP is already on the
-    blacklist (``blacklisted`` / ``blacklist_source``).
+    (``whitelisted``), and whether its host, base IP or client IP is already
+    on the blacklist (``blacklisted`` / ``blacklist_source``).
     """
     now = datetime.now(UTC).isoformat()
     block_matchers = [
@@ -474,8 +474,15 @@ def _build_items(
         blocked_by = [pattern for pattern, rx in block_matchers if rx.search(url)]
         whitelisted = bool(whitelist_matcher and whitelist_matcher.search(url))
 
-        blacklisted = base_url in blacklist_urls
-        blacklist_source = "url" if blacklisted else None
+        # A base_url can itself be an IP address, so it must be matched
+        # against the IP list too — otherwise IP-based entries never get
+        # the blacklist badge even when the address is on the blacklist.
+        blacklisted = base_url in blacklist_urls or base_url in blacklist_ips
+        blacklist_source = (
+            "url" if base_url in blacklist_urls
+            else "ip" if base_url in blacklist_ips
+            else None
+        )
         if not blacklisted and client_ip in blacklist_ips:
             blacklisted = True
             blacklist_source = "ip"
@@ -582,8 +589,11 @@ async def run_query(
             actions=None,
         )
         if exclude_blacklist and (blacklist_urls or blacklist_ips):
+            # A base_url can itself be an IP, so exclude entries found in
+            # either list as well as client IPs on the IP blacklist.
+            blacklist_set = blacklist_urls | blacklist_ips
             df = df[
-                ~df["base_url"].astype(str).isin(blacklist_urls)
+                ~df["base_url"].astype(str).isin(blacklist_set)
                 & ~df["client_ip"].astype(str).isin(blacklist_ips)
             ]
         log["filtered"] = len(df)
