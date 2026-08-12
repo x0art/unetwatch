@@ -168,7 +168,7 @@ export function useListActions(baseUrl: string, onBlacklisted?: (host: string) =
   const actions: RowAction[] = [
     {
       key: "blacklist",
-      label: "Add host to Blacklist",
+      label: "Add to Blacklist",
       icon: Ban,
       variant: "destructive",
       onClick: handleBlacklist,
@@ -176,7 +176,7 @@ export function useListActions(baseUrl: string, onBlacklisted?: (host: string) =
     },
     {
       key: "whitelist",
-      label: "Whitelist this host…",
+      label: "Add to Whitelist",
       icon: ShieldCheck,
       variant: "success",
       onClick: () => setDialogOpen(true),
