@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react"
+import { useState, useEffect, useCallback, lazy, Suspense } from "react"
 import {
   type MonitorStatus,
   type PatternCounts,
@@ -67,10 +67,9 @@ function AppRoutes() {
   const [lastUpdated, setLastUpdated] = useState(Date.now())
   const [patternDialogOpen, setPatternDialogOpen] = useState(false)
 
-  // Countdown timer
+  // Countdown timer — computed from the backend's last_poll_at timestamp
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
   const [remaining, setRemaining] = useState(intervalSec)
-  const lastRunRef = useRef(Date.now())
 
   const fetchStats = useCallback(async () => {
     try {
@@ -83,16 +82,25 @@ function AppRoutes() {
     }
   }, [])
 
-  // Countdown ticker
+  // Countdown ticker — derived from the real last_poll_at timestamp
   useEffect(() => {
     if (!status) return
-    const elapsed = Math.floor((Date.now() - lastRunRef.current) / 1000)
-    setRemaining(Math.max(0, intervalSec - elapsed))
 
+    const updateRemaining = () => {
+      if (status.last_poll_at) {
+        const lastPoll = new Date(status.last_poll_at).getTime()
+        const elapsed = Math.floor((Date.now() - lastPoll) / 1000)
+        setRemaining(Math.max(0, intervalSec - elapsed))
+      } else {
+        // No poll recorded yet — show the full interval
+        setRemaining(intervalSec)
+      }
+    }
+
+    updateRemaining()
     const tick = setInterval(() => {
       setRemaining((r) => {
         if (r <= 1) {
-          lastRunRef.current = Date.now()
           fetchStats()
           return intervalSec
         }
@@ -111,8 +119,7 @@ function AppRoutes() {
     try {
       await triggerManualRun(minutes)
       toast({ title: "Manual run completed successfully", variant: "success" })
-      lastRunRef.current = Date.now()
-      setRemaining(intervalSec)
+      // Refresh stats to pick up the new last_poll_at from the backend
       fetchStats()
     } catch (e) {
       toast({ title: "Run failed", description: (e as Error).message, variant: "error" })
