@@ -57,6 +57,11 @@ const WHITELIST_OPTIONS = [
   { value: "exclude", label: "Exclude whitelisted" },
 ]
 
+const BLACKLIST_OPTIONS = [
+  { value: "include", label: "Include blacklisted" },
+  { value: "exclude", label: "Exclude blacklisted" },
+]
+
 const ACTION_FILTER_OPTIONS = [
   { value: "all", label: "All actions" },
   { value: "ALLOW", label: "ALLOW" },
@@ -239,6 +244,7 @@ export function QueryPage() {
   const { toast } = useToast()
   const [windowMinutes, setWindowMinutes] = useState("60")
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
+  const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
   const [actionFilter, setActionFilter] = useState<"all" | "ALLOW" | "DENY">("all")
   const [esSearch, setEsSearch] = useState("")
   const debouncedEsSearch = useDebounce(esSearch, 400)
@@ -254,6 +260,7 @@ export function QueryPage() {
     runQuery(Number(windowMinutes), {
       q,
       excludeWhitelist: whitelistMode === "exclude",
+      excludeBlacklist: blacklistMode === "exclude",
     })
       .then((res) => {
         if (!cancelled) setResult(res)
@@ -270,7 +277,7 @@ export function QueryPage() {
     return () => {
       cancelled = true
     }
-  }, [windowMinutes, whitelistMode, debouncedEsSearch])
+  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => fetchQuery(), [fetchQuery])
@@ -442,7 +449,7 @@ export function QueryPage() {
   // Reset to the first page whenever a new query result, search, or action filter arrives.
   useEffect(() => {
     setPage(0)
-  }, [result, debouncedDocSearch, actionFilter])
+  }, [result, debouncedDocSearch, actionFilter, blacklistMode])
 
   // Client-side substring filter across IPs and URLs.
   const visibleItems = useMemo(() => {
@@ -483,6 +490,13 @@ export function QueryPage() {
           options={WHITELIST_OPTIONS}
           className="w-44"
           aria-label="Whitelisted matches"
+        />
+        <Select
+          value={blacklistMode}
+          onChange={(v) => setBlacklistMode(v as "include" | "exclude")}
+          options={BLACKLIST_OPTIONS}
+          className="w-44"
+          aria-label="Blacklisted matches"
         />
         <Select
           value={actionFilter}

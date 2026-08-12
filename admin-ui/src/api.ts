@@ -216,12 +216,13 @@ export interface QueryResult {
 
 export async function runQuery(
   minutes: number,
-  opts?: { q?: string; excludeWhitelist?: boolean },
+  opts?: { q?: string; excludeWhitelist?: boolean; excludeBlacklist?: boolean },
 ): Promise<QueryResult> {
   const params = new URLSearchParams({ minutes: String(minutes) })
   const q = opts?.q?.trim()
   if (q) params.set("q", q)
   if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
+  if (opts?.excludeBlacklist) params.set("exclude_blacklist", "true")
   return request(`/query/run?${params}`)
 }
 

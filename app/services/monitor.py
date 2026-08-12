@@ -503,6 +503,7 @@ async def run_query(
     limit: int = 500,
     search: str | None = None,
     exclude_whitelist: bool = False,
+    exclude_blacklist: bool = False,
 ) -> dict:
     """Run the block-pattern ES query and return a rich payload for the Query page.
 
@@ -580,6 +581,11 @@ async def run_query(
             exclude_whitelist=exclude_whitelist,
             actions=None,
         )
+        if exclude_blacklist and (blacklist_urls or blacklist_ips):
+            df = df[
+                ~df["base_url"].astype(str).isin(blacklist_urls)
+                & ~df["client_ip"].astype(str).isin(blacklist_ips)
+            ]
         log["filtered"] = len(df)
         if df.empty:
             return result
