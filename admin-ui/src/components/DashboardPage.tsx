@@ -267,7 +267,6 @@ export function DashboardPage({
           className="lg:col-span-2"
           title="Recent Findings"
           icon={SearchX}
-          description="Latest flagged traffic"
           action={
             <Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>
               View all <ArrowRight className="h-3.5 w-3.5" />
