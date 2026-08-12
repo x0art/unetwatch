@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 import {
   Activity,
   Ban,
@@ -57,25 +65,39 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => readInitialTheme())
+  // The theme class is applied synchronously — not in an effect — so every
+  // render (including components that resolve CSS variables at render time,
+  // like the Sankey diagram) sees the active theme's tokens. Applying it a
+  // frame later left the Sankey text/colors one theme behind, e.g. light
+  // text on a white card when the app loaded in light mode.
+  const [theme, setThemeState] = useState<Theme>(() => {
+    const initial = readInitialTheme()
+    applyTheme(initial)
+    return initial
+  })
+
+  const applyAndSet = useCallback((next: Theme) => {
+    applyTheme(next)
+    setThemeState(next)
+  }, [])
+
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      theme,
+      setTheme: applyAndSet,
+      toggle: () => applyAndSet(theme === "dark" ? "light" : "dark"),
+    }),
+    [theme, applyAndSet],
+  )
 
   useEffect(() => {
-    applyTheme(theme)
+    // The class is already applied synchronously; persist the preference.
     try {
       window.localStorage.setItem(THEME_KEY, theme)
     } catch {
       /* storage may be unavailable */
     }
   }, [theme])
-
-  const value = useMemo<ThemeContextValue>(
-    () => ({
-      theme,
-      setTheme,
-      toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
-    }),
-    [theme],
-  )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
 }

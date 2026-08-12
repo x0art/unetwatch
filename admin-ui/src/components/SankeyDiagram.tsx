@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useRef } from "react"
 import * as echarts from "echarts/core"
 import { SankeyChart } from "echarts/charts"
 import { TooltipComponent } from "echarts/components"
@@ -263,18 +263,6 @@ export function SankeyDiagram({
   const { theme } = useTheme()
   const h = height ?? contentHeight(nodes)
 
-  const palette = useMemo(
-    () => ({
-      label: resolveColor("var(--color-foreground)"),
-      muted: resolveColor("var(--color-muted-foreground)"),
-      card: resolveColor("var(--color-card)"),
-      border: resolveColor("var(--color-border)"),
-    }),
-    // Re-resolve on theme flip.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [theme],
-  )
-
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -298,18 +286,38 @@ export function SankeyDiagram({
   const prevNodes = useRef<SankeyNode[] | null>(null)
   const prevLinks = useRef<SankeyLink[] | null>(null)
   const prevLayerColors = useRef<Record<string, string> | undefined>(undefined)
-  const prevPalette = useRef(palette)
+  const prevPalette = useRef<{
+    label: string
+    muted: string
+    card: string
+    border: string
+  } | null>(null)
 
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
+
+    // Resolve theme tokens here, at effect time (after the theme class is
+    // applied and painted), so the chart always matches the active theme —
+    // independent of when the theme class lands relative to a render.
+    const resolvedPalette = {
+      label: resolveColor("var(--color-foreground)"),
+      muted: resolveColor("var(--color-muted-foreground)"),
+      card: resolveColor("var(--color-card)"),
+      border: resolveColor("var(--color-border)"),
+    }
+    const paletteChanged =
+      prevPalette.current === null ||
+      resolvedPalette.label !== prevPalette.current.label ||
+      resolvedPalette.muted !== prevPalette.current.muted ||
+      resolvedPalette.card !== prevPalette.current.card ||
+      resolvedPalette.border !== prevPalette.current.border
 
     const contentChanged =
       prevNodes.current === null ||
       !sameNodes(prevNodes.current, nodes) ||
       !sameLinks(prevLinks.current ?? [], links) ||
       !sameLayerColors(prevLayerColors.current, layerColors)
-    const paletteChanged = prevPalette.current !== palette
 
     if (!contentChanged && !paletteChanged) {
       // Parent re-render with identical data/palette — nothing to do.
@@ -319,11 +327,11 @@ export function SankeyDiagram({
     prevNodes.current = nodes
     prevLinks.current = links
     prevLayerColors.current = layerColors
-    prevPalette.current = palette
+    prevPalette.current = resolvedPalette
 
-    chart.setOption(buildOption(nodes, links, layerColors, palette), contentChanged)
+    chart.setOption(buildOption(nodes, links, layerColors, resolvedPalette), contentChanged)
     chart.resize()
-  }, [nodes, links, layerColors, palette, h])
+  }, [nodes, links, layerColors, theme, h])
 
   return (
     <div
