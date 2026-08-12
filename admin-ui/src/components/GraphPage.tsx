@@ -401,7 +401,12 @@ export function GraphPage() {
                 header: "Client IP",
                 accessor: (f) => f.client_ip,
                 defaultSortDir: "asc",
-                cell: (f) => <span className="font-mono text-xs">{f.client_ip}</span>,
+                cell: (f) => (
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs">{f.client_ip}</span>
+                    <CopyUrlButton value={f.client_ip} label="Client IP" />
+                  </span>
+                ),
               },
               {
                 id: "server_ip",
@@ -410,7 +415,10 @@ export function GraphPage() {
                 defaultSortDir: "asc",
                 cell: (f) =>
                   f.server_ip ? (
-                    <span className="font-mono text-xs text-muted-foreground">{f.server_ip}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs text-muted-foreground">{f.server_ip}</span>
+                      <CopyUrlButton value={f.server_ip} label="Server IP" />
+                    </span>
                   ) : (
                     <span className="text-xs text-muted-foreground/50">—</span>
                   ),

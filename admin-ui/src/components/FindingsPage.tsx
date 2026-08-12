@@ -318,14 +318,24 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       header: "Client IP",
       accessor: (f) => f.client_ip,
       defaultSortDir: "asc",
-      cell: (f) => <span className="font-mono text-sm">{f.client_ip}</span>,
+      cell: (f) => (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-sm">{f.client_ip}</span>
+          <CopyUrlButton value={f.client_ip} label="Client IP" />
+        </span>
+      ),
     },
     {
       id: "server_ip",
       header: "Server IP",
       accessor: (f) => f.server_ip,
       defaultSortDir: "asc",
-      cell: (f) => <span className="font-mono text-sm">{f.server_ip}</span>,
+      cell: (f) => (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-sm">{f.server_ip}</span>
+          <CopyUrlButton value={f.server_ip} label="Server IP" />
+        </span>
+      ),
     },
     {
       id: "url",

@@ -333,14 +333,24 @@ export function QueryPage() {
       header: "Client IP",
       accessor: (d) => d.client_ip,
       defaultSortDir: "asc",
-      cell: (d) => <span className="font-mono text-xs">{d.client_ip}</span>,
+      cell: (d) => (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-xs">{d.client_ip}</span>
+          <CopyUrlButton value={d.client_ip} label="Client IP" />
+        </span>
+      ),
     },
     {
       id: "server_ip",
       header: "Server IP",
       accessor: (d) => d.server_ip,
       defaultSortDir: "asc",
-      cell: (d) => <span className="font-mono text-xs text-muted-foreground">{d.server_ip}</span>,
+      cell: (d) => (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-xs text-muted-foreground">{d.server_ip}</span>
+          <CopyUrlButton value={d.server_ip} label="Server IP" />
+        </span>
+      ),
     },
     {
       id: "url",
