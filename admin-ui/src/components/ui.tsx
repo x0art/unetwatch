@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn, copyText } from "../lib/utils"
-import { AnimatedNumber } from "./motion"
+import { AnimatedNumber, Stagger, StaggerItem } from "./motion"
 
 /* ════════════════════════════════════════════════════════════════
  * Button
@@ -1015,9 +1015,10 @@ export function RankedTable({
             <th className="w-20 px-3 py-2 text-right font-medium">Count</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <Stagger as="tbody" className="divide-y divide-border">
           {rows.map((r, i) => (
-            <tr
+            <StaggerItem
+              as="tr"
               key={r.label}
               className="transition-colors hover:bg-muted/30"
               title={`${r.label} — ${r.count.toLocaleString()}`}
@@ -1047,9 +1048,9 @@ export function RankedTable({
               <td className="px-3 py-2 text-right font-medium tabular-nums">
                 {r.count.toLocaleString()}
               </td>
-            </tr>
+            </StaggerItem>
           ))}
-        </tbody>
+        </Stagger>
       </table>
     </div>
   )

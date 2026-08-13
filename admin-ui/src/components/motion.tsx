@@ -52,7 +52,7 @@ export const staggerItemVariants: Variants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: EASE } },
 }
 
-type StaggerTag = "div" | "tbody" | "ul"
+type StaggerTag = "div" | "tbody" | "tr" | "ul"
 
 /** Parent that staggers its <StaggerItem> children into view.
  *
@@ -80,14 +80,18 @@ export function StaggerItem({
   children,
   as = "div",
   className,
+  onClick,
+  title,
 }: {
   children: ReactNode
   as?: StaggerTag
   className?: string
+  onClick?: () => void
+  title?: string
 }) {
   const Tag = motion[as]
   return (
-    <Tag className={className} variants={staggerItemVariants}>
+    <Tag className={className} onClick={onClick} title={title} variants={staggerItemVariants}>
       {children}
     </Tag>
   )
