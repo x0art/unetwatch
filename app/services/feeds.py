@@ -39,7 +39,10 @@ async def _values(db, kind: str) -> list[str]:
 def _atomic_write(path: Path, body: str) -> None:
     """Write ``body`` to ``path`` atomically (tmp file + rename)."""
     tmp = path.with_name(f".{path.name}.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
+    # newline="" disables universal-newline translation so the CRLF in the
+    # body is written byte-for-byte on every platform (Windows would otherwise
+    # turn each \r\n into \r\r\n).
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
         f.write(body)
         f.flush()
         os.fsync(f.fileno())
@@ -47,6 +50,12 @@ def _atomic_write(path: Path, body: str) -> None:
 
 
 async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip")) -> None:
-    """Rewrite the feed files for ``kinds`` from the database."""
+    """Rewrite the feed files for ``kinds`` from the database.
+
+    Lines are terminated with CRLF (not LF): downstream integrations parse
+    the feeds as classic Windows-style plain text, and ``file`` reports them
+    as "ASCII text, with CRLF line terminators". A trailing CRLF keeps the
+    last entry terminated like every other line.
+    """
     for kind in kinds:
-        _atomic_write(_feed_path(kind), "\n".join(await _values(db, kind)) + "\n")
+        _atomic_write(_feed_path(kind), "\r\n".join(await _values(db, kind)) + "\r\n")

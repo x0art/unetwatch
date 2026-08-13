@@ -85,9 +85,14 @@ async def test_blacklist_urls_endpoint_returns_urls_only(client):
     resp = client.get("/api/blacklist/urls.txt")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
-    lines = resp.text.split("\n")
+    lines = resp.text.split("\r\n")
     assert "only.example" in lines
     assert "9.9.9.9" not in lines
+    # Feeds use CRLF line terminators (downstream integrations expect
+    # Windows-style plain text: `file` reports "ASCII text, with CRLF
+    # line terminators").
+    assert "\r\n" in resp.text
+    assert "\n" not in resp.text.replace("\r\n", "")
 
 
 async def test_blacklist_ips_endpoint_returns_ips_only(client):
@@ -113,9 +118,12 @@ async def test_blacklist_ips_endpoint_returns_ips_only(client):
     resp = client.get("/api/blacklist/ips.txt")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
-    lines = resp.text.split("\n")
+    lines = resp.text.split("\r\n")
     assert "9.9.9.9" in lines
     assert "only.example" not in lines
+    # Feeds use CRLF line terminators (see test_blacklist_urls_endpoint_returns_urls_only).
+    assert "\r\n" in resp.text
+    assert "\n" not in resp.text.replace("\r\n", "")
 
 
 async def test_blacklist_entries_returns_split(client):
