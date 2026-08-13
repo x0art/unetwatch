@@ -164,6 +164,85 @@ async def findings_graph(
     return {"nodes": nodes, "links": links, "flows": flows}
 
 
+def _whitelist_fully_sql(patterns: list[str], sql_clauses: list[str]) -> bool:
+    """True when every non-empty whitelist pattern produced a SQL clause.
+
+    ``_whitelist_sql_clauses`` only emits clauses for patterns composed of
+    literals + ``*``/``?``. If any pattern fell through (regex meta chars,
+    whitespace, no wildcards at all) the caller must use the row-level Python
+    fallback, since a grouped-by-client_ip query loses the url/base_url the
+    regex needs.
+    """
+    return len([p for p in map(str.strip, patterns) if p]) == len(sql_clauses)
+
+
+@router.get("/top-clients")
+async def top_clients(
+    db=Depends(get_db_conn),
+    search: str | None = Query(None, max_length=200),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Top client IPs by total access count (drill-down picker + top list).
+
+    Whitelisted destinations are excluded exactly like ``findings_graph``:
+    SQL-expressible patterns become ``NOT LIKE`` clauses in the WHERE;
+    anything else (or a mix) falls back to fetching rows and filtering in
+    Python before aggregating, because the grouped query no longer carries
+    the per-row url/base_url the regex needs.
+    """
+    wl_cursor = await db.execute(
+        "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
+    )
+    wl_rows = await wl_cursor.fetchall()
+    whitelist_patterns = [r[0] for r in wl_rows]
+    whitelist_regex = _build_pattern_regex(whitelist_patterns)
+    sql_clauses = _whitelist_sql_clauses(whitelist_patterns)
+
+    where = ["client_ip != ''", *sql_clauses]
+    params: list = []
+    if search:
+        where.append("client_ip LIKE ?")
+        params.append(f"%{search}%")
+    clause = f"WHERE {' AND '.join(where)}"
+
+    if whitelist_regex and not _whitelist_fully_sql(whitelist_patterns, sql_clauses):
+        # Row-level fallback: filter rows in Python, then aggregate. Bounded
+        # fetch (same tradeoff the findings graph makes with LIMIT 5000).
+        cursor = await db.execute(
+            f"SELECT client_ip, url, base_url FROM findings {clause} LIMIT 100000",
+            params,
+        )
+        counts: dict[str, int] = {}
+        for r in await cursor.fetchall():
+            if re.search(whitelist_regex, str(r["url"]), re.IGNORECASE) or re.search(
+                whitelist_regex, str(r["base_url"]), re.IGNORECASE
+            ):
+                continue
+            counts[r["client_ip"]] = counts.get(r["client_ip"], 0) + 1
+        items = [
+            {"client_ip": ip_, "count": c}
+            for ip_, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+        ]
+        return {"items": items}
+
+    cursor = await db.execute(
+        f"""
+        SELECT client_ip, COUNT(*) AS count
+        FROM findings
+        {clause}
+        GROUP BY client_ip
+        ORDER BY count DESC, client_ip
+        LIMIT ?
+        """,
+        (*params, limit),
+    )
+    items = [
+        {"client_ip": r["client_ip"], "count": r["count"]}
+        for r in await cursor.fetchall()
+    ]
+    return {"items": items}
+
+
 @router.delete("/", status_code=204)
 async def clear_findings(db=Depends(get_db_conn)):
     """Delete every persisted finding (admin reset of the findings table)."""

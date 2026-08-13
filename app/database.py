@@ -64,6 +64,14 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_findings_base_url ON findings(base_url)"
     )
 
+    # Indexes for the per-client drill-down (client_ip filter + window scans).
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_client_ip ON findings(client_ip)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_log_timestamp ON findings(log_timestamp)"
+    )
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS blacklist_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
