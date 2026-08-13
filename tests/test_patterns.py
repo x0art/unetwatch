@@ -450,21 +450,29 @@ async def test_findings_graph_shape(client):
     kinds = {n["kind"] for n in data["nodes"]}
     assert kinds == {"ip", "server", "url"}
 
-    # Per-triple flows mirror the same top-N cut as the graph.
-    assert {
-        "client_ip": "1.2.3.4",
-        "server_ip": "10.0.0.1",
-        "url": "http://evil.example/a",
-        "base_url": "evil.example",
-        "count": 1,
-    } in data["flows"]
-    assert {
-        "client_ip": "9.9.9.9",
-        "server_ip": "",
-        "url": "http://nohost.example/d",
-        "base_url": "nohost.example",
-        "count": 1,
-    } in data["flows"]
+    # Per-triple flows mirror the same top-N cut as the graph. Each flow also
+    # carries `last_seen`, so match on the subset of keys the UI relies on.
+    def flow_subset(fields):
+        return any(all(k in f and f[k] == v for k, v in fields.items()) for f in data["flows"])
+
+    assert flow_subset(
+        {
+            "client_ip": "1.2.3.4",
+            "server_ip": "10.0.0.1",
+            "url": "http://evil.example/a",
+            "base_url": "evil.example",
+            "count": 1,
+        }
+    )
+    assert flow_subset(
+        {
+            "client_ip": "9.9.9.9",
+            "server_ip": "",
+            "url": "http://nohost.example/d",
+            "base_url": "nohost.example",
+            "count": 1,
+        }
+    )
 
     # Client IP node carries its total access count (2 accesses).
     ip_node = next(n for n in data["nodes"] if n["kind"] == "ip" and n["label"] == "1.2.3.4")

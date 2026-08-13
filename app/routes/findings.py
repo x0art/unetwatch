@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from app.database import get_db_conn
-from app.services.monitor import _build_pattern_regex
+from app.services.monitor import _build_pattern_regex, _whitelist_sql_clauses
 
 router = APIRouter(prefix="/api/findings", tags=["findings"])
 
@@ -23,24 +23,37 @@ async def findings_graph(
     Findings whose URL or base_url matches an active whitelist pattern are
     excluded so the graph never shows whitelisted destinations (defends
     against legacy findings captured before the user whitelisted a URL).
+    Simple glob patterns (`*`/`?` only) are pushed into the SQL ``NOT LIKE``
+    clauses so the scan is filtered before rows are materialized; anything
+    not SQL-expressible still goes through the pure-Python ``re.search``
+    fallback below. The grouped query is bounded with a LIMIT so a large
+    findings table can't build an unbounded result set.
     """
-    cursor = await db.execute(
-        """
-        SELECT client_ip, server_ip, url, base_url, COUNT(*) AS count,
-               MAX(log_timestamp) AS last_seen
-        FROM findings
-        WHERE client_ip != '' AND url != ''
-        GROUP BY client_ip, server_ip, url, base_url
-        """
-    )
     wl_cursor = await db.execute(
         "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
     )
     wl_rows = await wl_cursor.fetchall()
+    whitelist_patterns = [r[0] for r in wl_rows]
     # Same glob semantics as the monitor: `*`/`?` act as wildcards, everything
     # else is matched literally (case-insensitive).
-    whitelist_regex = _build_pattern_regex([r[0] for r in wl_rows])
+    whitelist_regex = _build_pattern_regex(whitelist_patterns)
+    sql_clauses = _whitelist_sql_clauses(whitelist_patterns)
+
+    where = ["client_ip != '' AND url != ''", *sql_clauses]
+    cursor = await db.execute(
+        f"""
+        SELECT client_ip, server_ip, url, base_url, COUNT(*) AS count,
+               MAX(log_timestamp) AS last_seen
+        FROM findings
+        WHERE {' AND '.join(where)}
+        GROUP BY client_ip, server_ip, url, base_url
+        LIMIT 5000
+        """
+    )
     if whitelist_regex:
+        # Pure-Python fallback catches patterns that couldn't be expressed in
+        # SQL (regex meta chars, whitespace, `%`) plus any row that slipped
+        # through the LIKE clauses.
         rows = [
             r
             for r in await cursor.fetchall()
