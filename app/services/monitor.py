@@ -175,13 +175,6 @@ def build_logs_query(
     }
 
 
-def _extract_base_url(url: str) -> str:
-    parts = str(url).split("/")
-    if len(parts) < 3:
-        return str(url)
-    return parts[2]
-
-
 def _normalize_timestamp(ts, fallback: str) -> str:
     """Return a usable ISO-8601 timestamp for a finding.
 
@@ -253,7 +246,12 @@ def apply_filters(
     for col in ("url", "client_ip", "action", "@timestamp"):
         if col not in df.columns:
             df[col] = ""
-    df["base_url"] = df["url"].astype(str).apply(_extract_base_url)
+    # Vectorized base_url extraction — equivalent to the old per-row
+    # ``parts = url.split("/"); parts[2] if len(parts) >= 3 else url``
+    # (a split with no limit keeps the host in position 2; URLs without a
+    # third segment — no scheme, bare host, empty — fall back to the url).
+    urls = df["url"].astype(str)
+    df["base_url"] = urls.str.split("/").str[2].fillna(urls)
     if whitelist_regex and exclude_whitelist:
         df = df[~df["url"].astype(str).str.contains(whitelist_regex, case=False)]
     if actions is not None:
@@ -270,15 +268,20 @@ async def store_findings(db, df: pd.DataFrame) -> int:
     """
     rows = []
     now = datetime.now(UTC).isoformat()
-    for _, row in df.iterrows():
-        ts = _normalize_timestamp(row.get("@timestamp"), now)
+    # Guard the one column apply_filters doesn't guarantee (server_ip may be
+    # absent from a doc's _source), then iterate as tuples — much cheaper
+    # than df.iterrows() for large batches.
+    if "server_ip" not in df.columns:
+        df["server_ip"] = ""
+    cols = ["client_ip", "server_ip", "url", "base_url", "@timestamp"]
+    for r in df[cols].itertuples(index=False, name=None):
         rows.append(
             (
-                str(row.get("client_ip") or ""),
-                str(row.get("server_ip") or ""),
-                str(row.get("url") or ""),
-                str(row.get("base_url") or ""),
-                ts,
+                str(r[0] or ""),
+                str(r[1] or ""),
+                str(r[2] or ""),
+                str(r[3] or ""),
+                _normalize_timestamp(r[4], now),
             )
         )
     if not rows:
@@ -482,22 +485,33 @@ def _build_items(
     on the blacklist (``blacklisted`` / ``blacklist_source``).
     """
     now = datetime.now(UTC).isoformat()
-    block_matchers = [
-        (pattern, re.compile(_glob_to_regex(pattern), re.IGNORECASE))
-        for pattern in block_patterns
-        if pattern.strip()
-    ]
     whitelist_matcher = (
         re.compile(whitelist_regex, re.IGNORECASE) if whitelist_regex else None
     )
 
+    df = df.head(limit)
+    records = df.to_dict("records")
+    # Vectorized block-pattern annotation: one regex pass per pattern across
+    # the whole batch instead of a per-row re.search per pattern. Indices are
+    # positional (reset_index) so they line up with the records list.
+    url_series = df["url"].astype(str).reset_index(drop=True)
+    block_hits: list[list[str]] = [[] for _ in range(len(records))]
+    for pattern in block_patterns:
+        if not pattern.strip():
+            continue
+        matched = url_series.str.contains(
+            _glob_to_regex(pattern), regex=True, case=False, na=False
+        )
+        for i in matched[matched].index:
+            block_hits[i].append(pattern)
+
     items: list[dict] = []
-    for _, row in df.head(limit).iterrows():
+    for i, row in enumerate(records):
         url = str(row.get("url") or "")
         base_url = str(row.get("base_url") or "")
         client_ip = str(row.get("client_ip") or "")
 
-        blocked_by = [pattern for pattern, rx in block_matchers if rx.search(url)]
+        blocked_by = block_hits[i]
         whitelisted = bool(whitelist_matcher and whitelist_matcher.search(url))
 
         # A base_url can itself be an IP address, so it must be matched
