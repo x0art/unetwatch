@@ -119,6 +119,180 @@ function formatFull(iso: string) {
   return d.toLocaleString()
 }
 
+/* Module-level handle to the page's state setter, synced each render. Keeps
+ * QUERY_COLUMNS referentially stable at module scope while the actions cell's
+ * onBlacklisted callback can still update component state. */
+const queryUI: {
+  setResult: (fn: (prev: QueryResult | null) => QueryResult | null) => void
+} = {
+  setResult: () => {},
+}
+
+/** Stable row identity for the query-results table + bulk actions. */
+function queryRowId(d: QueryDoc): string {
+  return `${d.timestamp}|${d.client_ip}|${d.url}`
+}
+
+/* Module-scope column definitions — referentially stable, so DataTable never
+ * re-sorts/re-renders when QueryPage re-renders. The actions cell updates
+ * result state through the module-level queryUI handle. */
+const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
+  {
+    id: "timestamp",
+    header: "Timestamp",
+    accessor: (d) => d.timestamp,
+    cell: (d) => (
+      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatFull(d.timestamp)}</span>
+    ),
+    className: "whitespace-nowrap",
+    width: "w-44",
+    defaultSortDir: "desc",
+  },
+  {
+    id: "client_ip",
+    header: "Client IP",
+    accessor: (d) => d.client_ip,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-xs">{d.client_ip}</span>
+        <CopyUrlButton value={d.client_ip} label="Client IP" />
+      </span>
+    ),
+  },
+  {
+    id: "server_ip",
+    header: "Server IP",
+    accessor: (d) => d.server_ip,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-xs text-muted-foreground">{d.server_ip}</span>
+        <CopyUrlButton value={d.server_ip} label="Server IP" />
+      </span>
+    ),
+  },
+  {
+    id: "url",
+    header: "URL",
+    accessor: (d) => d.url,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
+          {d.url}
+        </span>
+        <CopyUrlButton value={d.url} label="URL" />
+      </span>
+    ),
+  },
+  {
+    id: "base_url",
+    header: "Base URL",
+    accessor: (d) => d.base_url,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
+          {d.base_url}
+        </span>
+        <CopyUrlButton value={d.base_url} label="Base URL" />
+      </span>
+    ),
+  },
+  {
+    id: "duration",
+    header: "Duration",
+    accessor: (d) => d.duration_seconds,
+    cell: (d) =>
+      d.duration_seconds === null || d.duration_seconds === undefined ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        <span className="tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
+      ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "action",
+    header: "Action",
+    accessor: (d) => d.action,
+    cell: (d) => (
+      <Badge variant={d.action === "ALLOW" ? "success" : "warning"}>{d.action}</Badge>
+    ),
+    width: "w-24",
+  },
+  {
+    id: "coverage",
+    header: "Lists",
+    enableSorting: false,
+    cell: (d) => (
+      <div className="flex flex-wrap items-center gap-1">
+        {d.blocked_by.length > 0 && (
+          <ListBadge
+            tone="warning"
+            icon={AlertTriangle}
+            title={`Matched block pattern${d.blocked_by.length > 1 ? "s" : ""}: ${d.blocked_by.join(", ")}`}
+          >
+            block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
+          </ListBadge>
+        )}
+        {d.whitelisted && (
+          <ListBadge
+            tone="success"
+            icon={CheckCircle2}
+            title="URL matches a whitelist pattern — excluded from findings"
+          >
+            whitelist
+          </ListBadge>
+        )}
+        {d.blacklisted && (
+          <ListBadge
+            tone="danger"
+            icon={CheckCircle2}
+            title={
+              d.blacklist_source === "ip"
+                ? "IP address is on the blacklist"
+                : "Host is on the blacklist"
+            }
+          >
+            blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
+          </ListBadge>
+        )}
+        {d.blocked_by.length === 0 && !d.whitelisted && !d.blacklisted && (
+          <span className="text-xs text-muted-foreground/50">—</span>
+        )}
+      </div>
+    ),
+    width: "w-44",
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: (d) => (
+      <ListActionCell
+        baseUrl={d.base_url}
+        onBlacklisted={() =>
+          queryUI.setResult((prev) => {
+            if (!prev) return prev
+            const source = isIpHost(d.base_url) ? ("ip" as const) : ("url" as const)
+            return {
+              ...prev,
+              items: prev.items.map((item) =>
+                item.base_url === d.base_url
+                  ? { ...item, blacklisted: true, blacklist_source: source }
+                  : item,
+              ),
+            }
+          })
+        }
+      />
+    ),
+    width: "w-12",
+  },
+]
+
 /* ── Timeline area chart (pure SVG) ─────────────────────────────────── */
 
 function TimelineChart({ points }: { points: { bucket: string; count: number }[] }) {
@@ -262,6 +436,10 @@ export function QueryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
+  queryUI.setResult = setResult
+  const columns: DataTableColumn<QueryDoc>[] = QUERY_COLUMNS
+
   const fetchQuery = useCallback(() => {
     let cancelled = false
     setLoading(true)
@@ -296,10 +474,8 @@ export function QueryPage() {
 
   const flowSankey = useMemo(() => (result?.flow ? toSankey(result.flow) : null), [result])
 
-  const rowId = useCallback((d: QueryDoc) => `${d.timestamp}|${d.client_ip}|${d.url}`, [])
-
   const handleBulkBlacklist = async (ids: Set<string | number>) => {
-    const rows = (result?.items ?? []).filter((d) => ids.has(rowId(d)))
+    const rows = (result?.items ?? []).filter((d) => ids.has(queryRowId(d)))
     const bases = [...new Set(rows.map((r) => r.base_url).filter(Boolean))]
     if (!bases.length) return
     try {
@@ -315,7 +491,7 @@ export function QueryPage() {
   }
 
   const handleBulkCopy = async (ids: Set<string | number>) => {
-    const rows = (result?.items ?? []).filter((d) => ids.has(rowId(d)))
+    const rows = (result?.items ?? []).filter((d) => ids.has(queryRowId(d)))
     const urls = [...new Set(rows.map((r) => r.url).filter(Boolean))]
     if (!urls.length) return
     try {
@@ -325,163 +501,6 @@ export function QueryPage() {
       toast({ title: "Copy failed", description: (e as Error).message, variant: "error" })
     }
   }
-
-  const columns: DataTableColumn<QueryDoc>[] = [
-    {
-      id: "timestamp",
-      header: "Timestamp",
-      accessor: (d) => d.timestamp,
-      cell: (d) => (
-        <span className="whitespace-nowrap text-xs text-muted-foreground">{formatFull(d.timestamp)}</span>
-      ),
-      className: "whitespace-nowrap",
-      width: "w-44",
-      defaultSortDir: "desc",
-    },
-    {
-      id: "client_ip",
-      header: "Client IP",
-      accessor: (d) => d.client_ip,
-      defaultSortDir: "asc",
-      cell: (d) => (
-        <span className="flex items-center gap-1.5">
-          <span className="font-mono text-xs">{d.client_ip}</span>
-          <CopyUrlButton value={d.client_ip} label="Client IP" />
-        </span>
-      ),
-    },
-    {
-      id: "server_ip",
-      header: "Server IP",
-      accessor: (d) => d.server_ip,
-      defaultSortDir: "asc",
-      cell: (d) => (
-        <span className="flex items-center gap-1.5">
-          <span className="font-mono text-xs text-muted-foreground">{d.server_ip}</span>
-          <CopyUrlButton value={d.server_ip} label="Server IP" />
-        </span>
-      ),
-    },
-    {
-      id: "url",
-      header: "URL",
-      accessor: (d) => d.url,
-      defaultSortDir: "asc",
-      cell: (d) => (
-        <span className="flex items-center gap-1.5">
-          <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
-            {d.url}
-          </span>
-          <CopyUrlButton value={d.url} label="URL" />
-        </span>
-      ),
-    },
-    {
-      id: "base_url",
-      header: "Base URL",
-      accessor: (d) => d.base_url,
-      defaultSortDir: "asc",
-      cell: (d) => (
-        <span className="flex items-center gap-1.5">
-          <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
-            {d.base_url}
-          </span>
-          <CopyUrlButton value={d.base_url} label="Base URL" />
-        </span>
-      ),
-    },
-    {
-      id: "duration",
-      header: "Duration",
-      accessor: (d) => d.duration_seconds,
-      cell: (d) =>
-        d.duration_seconds === null || d.duration_seconds === undefined ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          <span className="tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
-        ),
-      align: "right",
-      width: "w-20",
-    },
-    {
-      id: "action",
-      header: "Action",
-      accessor: (d) => d.action,
-      cell: (d) => (
-        <Badge variant={d.action === "ALLOW" ? "success" : "warning"}>{d.action}</Badge>
-      ),
-      width: "w-24",
-    },
-    {
-      id: "coverage",
-      header: "Lists",
-      enableSorting: false,
-      cell: (d) => (
-        <div className="flex flex-wrap items-center gap-1">
-          {d.blocked_by.length > 0 && (
-            <ListBadge
-              tone="warning"
-              icon={AlertTriangle}
-              title={`Matched block pattern${d.blocked_by.length > 1 ? "s" : ""}: ${d.blocked_by.join(", ")}`}
-            >
-              block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
-            </ListBadge>
-          )}
-          {d.whitelisted && (
-            <ListBadge
-              tone="success"
-              icon={CheckCircle2}
-              title="URL matches a whitelist pattern — excluded from findings"
-            >
-              whitelist
-            </ListBadge>
-          )}
-          {d.blacklisted && (
-            <ListBadge
-              tone="danger"
-              icon={CheckCircle2}
-              title={
-                d.blacklist_source === "ip"
-                  ? "IP address is on the blacklist"
-                  : "Host is on the blacklist"
-              }
-            >
-              blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
-            </ListBadge>
-          )}
-          {d.blocked_by.length === 0 && !d.whitelisted && !d.blacklisted && (
-            <span className="text-xs text-muted-foreground/50">—</span>
-          )}
-        </div>
-      ),
-      width: "w-44",
-    },
-    {
-      id: "actions",
-      header: "",
-      enableSorting: false,
-      cell: (d) => (
-        <ListActionCell
-          baseUrl={d.base_url}
-          onBlacklisted={() =>
-            setResult((prev) => {
-              if (!prev) return prev
-              const source = isIpHost(d.base_url) ? ("ip" as const) : ("url" as const)
-              return {
-                ...prev,
-                items: prev.items.map((item) =>
-                  item.base_url === d.base_url
-                    ? { ...item, blacklisted: true, blacklist_source: source }
-                    : item,
-                ),
-              }
-            })
-          }
-        />
-      ),
-      width: "w-12",
-    },
-  ]
 
   const [page, setPage] = useState(0)
   const [docSearch, setDocSearch] = useState("")
@@ -511,6 +530,20 @@ export function QueryPage() {
   }, [visibleItems, actionFilter])
 
   const esOffline = result !== null && !result.es_online
+
+  // Single pass over the filtered rows for the footer counts (was three
+  // separate .filter() sweeps on every render).
+  const coverageCounts = useMemo(() => {
+    let blocked = 0
+    let whitelisted = 0
+    let blacklisted = 0
+    for (const d of actionFilteredItems) {
+      if (d.blocked_by.length > 0) blocked++
+      if (d.whitelisted) whitelisted++
+      if (d.blacklisted) blacklisted++
+    }
+    return { blocked, whitelisted, blacklisted }
+  }, [actionFilteredItems])
 
   return (
     <div className="space-y-6">
@@ -687,17 +720,11 @@ export function QueryPage() {
                   {actionFilteredItems.length.toLocaleString()}
                   {q ? ` of ${result.items.length.toLocaleString()}` : ""} matching doc
                   {actionFilteredItems.length === 1 ? "" : "s"} ·{" "}
-                  <span className="text-warning">
-                    {actionFilteredItems.filter((d) => d.blocked_by.length > 0).length} blocked
-                  </span>{" "}
+                  <span className="text-warning">{coverageCounts.blocked} blocked</span>{" "}
                   ·{" "}
-                  <span className="text-success">
-                    {actionFilteredItems.filter((d) => d.whitelisted).length} whitelisted
-                  </span>{" "}
+                  <span className="text-success">{coverageCounts.whitelisted} whitelisted</span>{" "}
                   ·{" "}
-                  <span className="text-destructive">
-                    {actionFilteredItems.filter((d) => d.blacklisted).length} blacklisted
-                  </span>
+                  <span className="text-destructive">{coverageCounts.blacklisted} blacklisted</span>
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -739,7 +766,7 @@ export function QueryPage() {
             <DataTable
               columns={columns}
               data={actionFilteredItems}
-              rowId={rowId}
+              rowId={queryRowId}
               selectable
               busy={loading}
               internalPagination
