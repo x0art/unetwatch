@@ -127,14 +127,19 @@ def _escape_query_string(term: str) -> str:
 
 
 def build_logs_query(
-    block_patterns: list[str], minutes: int, size: int, search: str | None = None
+    block_patterns: list[str],
+    minutes: int,
+    size: int,
+    search: str | None = None,
+    client_ip: str | None = None,
 ) -> dict:
     """ES query that flags URLs matching any block pattern within the window.
 
     ``search`` (optional) narrows the result set *at the ES level*: every
     whitespace-separated token must appear as a substring of the URL, client
     IP or server IP. Tokens are escaped so the operator can never break out
-    of the query_string grammar.
+    of the query_string grammar. ``client_ip`` (optional) narrows to a single
+    client via a ``term`` filter — used by the drill-down radial.
     """
     query_string = " OR ".join(
         f"url : {_escape_query_string(p)}" for p in block_patterns
@@ -163,16 +168,14 @@ def build_logs_query(
                 }
             }
         )
+    filters: list[dict] = [
+        {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
+    ]
+    if client_ip:
+        filters.append({"term": {"client_ip": client_ip}})
     return {
         "size": size,
-        "query": {
-            "bool": {
-                "filter": [
-                    {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
-                ],
-                "must": must,
-            }
-        },
+        "query": {"bool": {"filter": filters, "must": must}},
     }
 
 
@@ -578,6 +581,127 @@ def _query_cache_key(
 def _invalidate_query_cache() -> None:
     """Clear the query cache (used by tests and after pattern edits)."""
     _query_cache.clear()
+
+
+def _client_query_cache_key(
+    ip: str,
+    minutes: int,
+    search: str | None,
+    limit: int,
+    block_patterns: list[str],
+    whitelist_patterns: list[str],
+) -> str:
+    """Stable cache key for a run_client_query invocation."""
+    return "|".join(
+        [
+            "client",
+            ip,
+            str(minutes),
+            search or "",
+            str(limit),
+            "|".join(block_patterns),
+            "|".join(whitelist_patterns),
+        ]
+    )
+
+
+async def run_client_query(
+    ip: str,
+    minutes: int = 60,
+    search: str | None = None,
+    limit: int = 12,
+) -> dict:
+    """Per-client URL breakdown aggregated from live ES (drill-down radial).
+
+    Same response shape as the persisted-findings breakdown endpoint with
+    ``source="es"``: the hub count plus per-URL counts. Whitelist exclusion
+    mirrors ``run_query`` (``exclude_whitelist=True``, all actions kept).
+    Elasticsearch failures degrade gracefully (``es_online: False``) — the
+    endpoint never 500s. Identical duplicate ticks within the TTL reuse the
+    cached payload instead of re-hitting ES.
+    """
+    settings = get_settings()
+
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        block_patterns = await get_block_patterns(db)
+        whitelist_patterns = await get_whitelist_patterns(db)
+    finally:
+        await db.close()
+
+    result = {
+        "client_ip": ip,
+        "source": "es",
+        "total_accesses": 0,
+        "es_online": True,
+        "urls": [],
+    }
+
+    cache_key = _client_query_cache_key(
+        ip, minutes, search, limit, block_patterns, whitelist_patterns
+    )
+    hit = _query_cache.get(cache_key)
+    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
+        return dict(hit[1])
+
+    try:
+        if not block_patterns:
+            return result
+
+        whitelist_regex = _build_pattern_regex(whitelist_patterns)
+        query = build_logs_query(
+            block_patterns,
+            minutes,
+            settings.es_query_size,
+            search=search,
+            client_ip=ip,
+        )
+
+        es = build_es_client(settings, timeout=30)
+        try:
+            res = await es.search(index=settings.elastic_index, body=query)
+        except Exception:
+            result["es_online"] = False
+            return result
+        finally:
+            await es.close()
+
+        hits = res["hits"]["hits"]
+        if not hits:
+            return result
+
+        df = apply_filters(
+            pd.DataFrame([h["_source"] for h in hits]),
+            whitelist_regex,
+            exclude_whitelist=True,
+            actions=None,
+        )
+        if df.empty:
+            return result
+
+        result["total_accesses"] = int(len(df))
+        urls = df["url"].astype(str)
+        base_by_url = df.assign(base_url=df["base_url"].astype(str)).groupby("url")[
+            "base_url"
+        ].first()
+        last_by_url = (
+            df.assign(ts=df["@timestamp"].astype(str)).groupby("url")["ts"].max()
+        )
+        counts = urls.value_counts().head(limit)
+        result["urls"] = [
+            {
+                "url": u,
+                "base_url": str(base_by_url.get(u, "") or ""),
+                "count": int(c),
+                "last_seen": str(last_by_url.get(u, "") or ""),
+            }
+            for u, c in counts.items()
+        ]
+    finally:
+        _query_cache[cache_key] = (time.monotonic(), result)
+    return result
 
 
 async def run_query(

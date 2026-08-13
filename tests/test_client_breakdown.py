@@ -168,3 +168,20 @@ async def test_client_breakdown_invalid_params(client, db_path):
     await _seed_findings(db_path)
     assert client.get("/api/findings/client/1.1.1.1?limit=0").status_code == 422
     assert client.get("/api/findings/client/1.1.1.1?limit=999").status_code == 422
+
+
+def test_query_client_es_offline(client):
+    """Live-ES breakdown degrades gracefully when Elasticsearch is down."""
+    res = client.get("/api/query/client?ip=1.1.1.1&minutes=60")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["client_ip"] == "1.1.1.1"
+    assert data["source"] == "es"
+    assert data["urls"] == []
+    assert data["es_online"] is False
+
+
+def test_query_client_validation(client):
+    assert client.get("/api/query/client").status_code == 422  # ip required
+    assert client.get("/api/query/client?ip=1.1.1.1&limit=0").status_code == 422
+    assert client.get("/api/query/client?ip=1.1.1.1&limit=999").status_code == 422
