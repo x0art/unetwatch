@@ -295,36 +295,44 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
 
 /* ── Timeline area chart (pure SVG) ─────────────────────────────────── */
 
+/* Timeline chart geometry — module constants so the memoized paths below have
+ * no per-render closure deps. */
+const CHART_W = 720
+const CHART_H = 210
+const CHART_PAD = { l: 42, r: 14, t: 14, b: 26 }
+
 function TimelineChart({ points }: { points: { bucket: string; count: number }[] }) {
-  const W = 720
-  const H = 210
-  const PAD = { l: 42, r: 14, t: 14, b: 26 }
   const [hover, setHover] = useState<number | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  const max = Math.max(1, ...points.map((p) => p.count))
-  const innerW = W - PAD.l - PAD.r
-  const innerH = H - PAD.t - PAD.b
-  const x = (i: number) =>
-    PAD.l + (points.length <= 1 ? innerW / 2 : (i / (points.length - 1)) * innerW)
-  const y = (c: number) => PAD.t + innerH - (c / max) * innerH
+  // Paths + scales are pure functions of `points` — recomputed only when the
+  // timeline data changes, not on every hover/leave re-render.
+  const chart = useMemo(() => {
+    const max = Math.max(1, ...points.map((p) => p.count))
+    const innerW = CHART_W - CHART_PAD.l - CHART_PAD.r
+    const innerH = CHART_H - CHART_PAD.t - CHART_PAD.b
+    const x = (i: number) =>
+      CHART_PAD.l + (points.length <= 1 ? innerW / 2 : (i / (points.length - 1)) * innerW)
+    const y = (c: number) => CHART_PAD.t + innerH - (c / max) * innerH
 
-  const linePath = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.count).toFixed(1)}`)
-    .join(" ")
-  const areaPath = `${linePath} L ${x(points.length - 1).toFixed(1)} ${PAD.t + innerH} L ${x(0).toFixed(1)} ${PAD.t + innerH} Z`
+    const linePath = points
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.count).toFixed(1)}`)
+      .join(" ")
+    const areaPath = `${linePath} L ${x(points.length - 1).toFixed(1)} ${CHART_PAD.t + innerH} L ${x(0).toFixed(1)} ${CHART_PAD.t + innerH} Z`
 
-  const gridLines = [0, 0.5, 1].map((f) => ({
-    y: y(max * f),
-    label: Math.round(max * f).toLocaleString(),
-  }))
-  const xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+    const gridLines = [0, 0.5, 1].map((f) => ({
+      y: y(max * f),
+      label: Math.round(max * f).toLocaleString(),
+    }))
+    const xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+    return { max, x, y, linePath, areaPath, gridLines, xLabels, innerW, innerH }
+  }, [points])
 
   const handleMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect()
     if (rect.width === 0) return
-    const px = ((e.clientX - rect.left) / rect.width) * W
-    const ratio = (px - PAD.l) / innerW
+    const px = ((e.clientX - rect.left) / rect.width) * CHART_W
+    const ratio = (px - CHART_PAD.l) / chart.innerW
     const i = Math.round(ratio * (points.length - 1))
     setHover(Math.min(points.length - 1, Math.max(0, i)))
   }
@@ -334,7 +342,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
   return (
     <div ref={wrapRef} className="relative w-full" onMouseMove={handleMove} onMouseLeave={() => setHover(null)}>
       <svg
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
         className="h-auto w-full"
         role="img"
         aria-label="Requests over time"
@@ -346,30 +354,30 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
           </linearGradient>
         </defs>
 
-        {gridLines.map((g, i) => (
+        {chart.gridLines.map((g, i) => (
           <g key={i}>
             <line
-              x1={PAD.l}
-              x2={W - PAD.r}
+              x1={CHART_PAD.l}
+              x2={CHART_W - CHART_PAD.r}
               y1={g.y}
               y2={g.y}
               className="stroke-border/60"
               strokeDasharray={i === 0 ? undefined : "3 3"}
             />
-            <text x={PAD.l - 6} y={g.y + 3} textAnchor="end" fontSize={9} className="fill-muted-foreground">
+            <text x={CHART_PAD.l - 6} y={g.y + 3} textAnchor="end" fontSize={9} className="fill-muted-foreground">
               {g.label}
             </text>
           </g>
         ))}
 
-        <path d={areaPath} fill="url(#timeline-fill)" />
-        <path d={linePath} fill="none" stroke="var(--color-primary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        <path d={chart.areaPath} fill="url(#timeline-fill)" />
+        <path d={chart.linePath} fill="none" stroke="var(--color-primary)" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
 
-        {xLabels.map((i) => (
+        {chart.xLabels.map((i) => (
           <text
             key={i}
-            x={x(i)}
-            y={H - 6}
+            x={chart.x(i)}
+            y={CHART_H - 6}
             textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}
             fontSize={9}
             className="fill-muted-foreground"
@@ -381,14 +389,14 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
         {hoverPoint && (
           <g>
             <line
-              x1={x(hover ?? 0)}
-              x2={x(hover ?? 0)}
-              y1={PAD.t}
-              y2={PAD.t + innerH}
+              x1={chart.x(hover ?? 0)}
+              x2={chart.x(hover ?? 0)}
+              y1={CHART_PAD.t}
+              y2={CHART_PAD.t + chart.innerH}
               className="stroke-muted-foreground/50"
               strokeDasharray="3 3"
             />
-            <circle cx={x(hover ?? 0)} cy={y(hoverPoint.count)} r={3.5} className="fill-primary stroke-background" strokeWidth={2} />
+            <circle cx={chart.x(hover ?? 0)} cy={chart.y(hoverPoint.count)} r={3.5} className="fill-primary stroke-background" strokeWidth={2} />
           </g>
         )}
       </svg>
@@ -396,7 +404,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
       {hoverPoint && hover !== null && (
         <div
           className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs shadow-lg"
-          style={{ left: `${(x(hover) / W) * 100}%`, top: 0 }}
+          style={{ left: `${(chart.x(hover) / CHART_W) * 100}%`, top: 0 }}
         >
           <p className="font-semibold tabular-nums">{hoverPoint.count.toLocaleString()} req</p>
           <p className="text-muted-foreground">{formatFull(hoverPoint.bucket)}</p>
