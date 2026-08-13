@@ -625,8 +625,9 @@ export function RedirectsPage() {
         <StatCard icon={SearchX} label="Errors" value={stats.error.toLocaleString()} tone="danger" hint="Unreachable or failed check" />
       </div>
 
-      {/* Visualization: redirect flow clustered by final URL */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      {/* Visualization: redirect flow — cv-auto skips the panel's paint
+          until it's scrolled into view. */}
+      <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Redirect flow</h3>
