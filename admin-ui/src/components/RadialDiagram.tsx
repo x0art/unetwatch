@@ -161,7 +161,11 @@ function buildOption(params: {
   const series: (GraphSeriesOption | LinesSeriesOption)[] = [
     {
       type: "graph",
-      coordinateSystem: "cartesian2d",
+      // Deliberately NO `coordinateSystem: "cartesian2d"`: a graph series on
+      // cartesian2d defers its first paint to the rAF frame loop, so a stalled
+      // rAF (embedded webviews, backgrounded tabs, power-save) leaves the chart
+      // blank forever. Without it the graph maps x/y (0-100) onto its own view
+      // coordinate system and renders synchronously.
       layout: "none",
       // graphData carries an extra `url` field (used for click-to-filter) and
       // label `position` values ECharts' LabelOption union types reject, so
@@ -180,7 +184,7 @@ function buildOption(params: {
     },
     {
       type: "lines",
-      coordinateSystem: "cartesian2d",
+      // Same dead-rAF rationale as the graph series above — no cartesian2d.
       z: 3,
       silent: true,
       data: trailData,
@@ -199,10 +203,15 @@ function buildOption(params: {
   ]
 
   return {
-    animation: !reduced,
-    animationDuration: reduced ? 0 : 600,
+    // No enter/update animation: the first paint must not depend on
+    // requestAnimationFrame ticks. When rAF is stalled (embedded webviews,
+    // backgrounded tabs, power-save) the intro animation never progresses
+    // and the chart stays blank. The trails effect still animates where rAF
+    // works.
+    animation: false,
+    animationDuration: 0,
     animationEasing: "cubicOut",
-    animationDurationUpdate: reduced ? 0 : 400,
+    animationDurationUpdate: 0,
     animationEasingUpdate: "cubicOut",
     tooltip: {
       trigger: "item",
@@ -219,8 +228,6 @@ function buildOption(params: {
         return data?.name ?? ""
       },
     },
-    xAxis: { min: 0, max: 100, show: false },
-    yAxis: { min: 0, max: 100, show: false },
     series,
   }
 }
@@ -311,6 +318,12 @@ export function RadialDiagram({
       buildOption({ clientIp, totalAccesses, nodes, center, resolved, reduced }),
       contentChanged,
     )
+    // Force a synchronous zrender flush. Without it the first paint is
+    // scheduled on the next rAF frame, so a stalled rAF (embedded webviews,
+    // backgrounded tabs, power-save) leaves the chart blank forever — the
+    // animation-off flag above is not enough because zrender still defers the
+    // initial render to its frame loop.
+    chart.getZr().flush()
     chart.resize()
   }, [clientIp, totalAccesses, nodes, center, resolved, reduced])
 

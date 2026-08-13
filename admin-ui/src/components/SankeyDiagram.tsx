@@ -222,7 +222,11 @@ function buildOption(
   })
 
   return {
-    animationDuration: 500,
+    // No enter animation: the first paint must not depend on
+    // requestAnimationFrame ticks (stalled rAF in embedded webviews / hidden
+    // tabs leaves the chart blank forever).
+    animation: false,
+    animationDuration: 0,
     animationEasing: "cubicOut",
     tooltip: {
       trigger: "item",
