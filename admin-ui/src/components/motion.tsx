@@ -81,17 +81,31 @@ export function StaggerItem({
   as = "div",
   className,
   onClick,
+  onKeyDown,
+  tabIndex,
+  role,
   title,
 }: {
   children: ReactNode
   as?: StaggerTag
   className?: string
   onClick?: () => void
+  onKeyDown?: (e: React.KeyboardEvent) => void
+  tabIndex?: number
+  role?: string
   title?: string
 }) {
   const Tag = motion[as]
   return (
-    <Tag className={className} onClick={onClick} title={title} variants={staggerItemVariants}>
+    <Tag
+      className={className}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      tabIndex={tabIndex}
+      role={role}
+      title={title}
+      variants={staggerItemVariants}
+    >
       {children}
     </Tag>
   )
