@@ -57,6 +57,13 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN server_ip TEXT NOT NULL DEFAULT ''"
         )
 
+    # Indexes for the findings graph + list queries (url/base_url lookups,
+    # whitelist SQL filtering).
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_findings_url ON findings(url)")
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_base_url ON findings(base_url)"
+    )
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS blacklist_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

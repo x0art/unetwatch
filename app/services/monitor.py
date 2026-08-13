@@ -88,6 +88,32 @@ def _build_pattern_regex(patterns: list[str]) -> str:
     return "|".join(p for p in map(_glob_to_regex, patterns) if p)
 
 
+def _whitelist_sql_clauses(patterns: list[str]) -> list[str]:
+    """SQL ``NOT LIKE`` exclusion clauses for whitelist glob patterns.
+
+    Patterns composed only of literals plus the ``*``/``?`` wildcards
+    translate 1:1 to SQL LIKE: ``*`` → ``%``, ``?`` → ``_``, and literal
+    underscores are escaped (LIKE's ``_`` is a single-char wildcard; in a
+    glob it is literal). Patterns containing anything else (regex meta
+    characters, whitespace, ``%``) are not SQL-expressible and are left to
+    the pure-Python ``re.search`` fallback — returning ``[]`` (or fewer
+    clauses) makes the caller keep the Python pass for those rows.
+    """
+    clauses = []
+    for pattern in map(str.strip, patterns):
+        if not pattern:
+            continue
+        # Only literals + * / ? are expressible. `-` inside a class is
+        # escaped for clarity; the charset deliberately excludes `+`, `(`,
+        # `[`, whitespace, etc. so those patterns take the Python path.
+        if not re.fullmatch(r"[A-Za-z0-9./:_\-]*[\*?][A-Za-z0-9./:_\-]*", pattern):
+            continue
+        like = pattern.replace("_", r"\_").replace("?", "_").replace("*", "%")
+        clause = f"(url NOT LIKE '{like}' ESCAPE '\\' AND base_url NOT LIKE '{like}' ESCAPE '\\')"
+        clauses.append(clause)
+    return clauses
+
+
 def _escape_query_string(term: str) -> str:
     """Escape Lucene query_string special chars in a pattern term.
 
