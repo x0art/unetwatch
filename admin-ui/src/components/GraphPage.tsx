@@ -380,8 +380,9 @@ export function GraphPage() {
         />
       </div>
 
-      {/* Visualization: alluvial flow */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      {/* Visualization: alluvial flow — cv-auto skips the (potentially
+          large) sankey panel's paint until it's scrolled into view. */}
+      <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Traffic flow</h3>

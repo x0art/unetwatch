@@ -79,7 +79,10 @@ export function AppShell({
         </header>
 
         <main id="main-content" className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}>
-          <div className="w-full fade-in">{children}</div>
+          {/* cv-auto: skip layout/paint for the below-the-fold part of every
+              page until scrolled into view (intrinsic size reserved, so no
+              scroll jump). */}
+          <div className="w-full fade-in cv-auto">{children}</div>
         </main>
       </div>
     </div>
