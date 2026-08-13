@@ -140,7 +140,7 @@ function formatLabel(name: string): string {
   return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
 }
 
-interface ResolvedColors {
+export interface ResolvedColors {
   palette: { label: string; muted: string; card: string; border: string }
   paletteColors: string[]
   /** Layer index → resolved color (from the layerColors CSS vars). */
@@ -154,7 +154,7 @@ interface ResolvedColors {
 // the authoritative ones for the active theme.
 const _resolvedColorsCache = new Map<string, ResolvedColors>()
 
-function resolveAllColors(
+export function resolveAllColors(
   theme: string,
   layerColors: Record<string, string> | undefined,
 ): ResolvedColors {
