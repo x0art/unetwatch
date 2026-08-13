@@ -148,6 +148,52 @@ def test_apply_filters_handles_nasty_whitelist_patterns():
     assert list(out["url"]) == ["http://evil.example/a"]
 
 
+def test_apply_filters_vectorized_base_url_matches_old_semantics():
+    # The vectorized `.str.split("/").str[2]` path must match the old
+    # per-row `_extract_base_url` semantics exactly, including the len < 3
+    # guard (no-slash URLs keep the url as base_url).
+    df = pd.DataFrame(
+        [
+            {"url": "http://host.example/path/x", "action": "ALLOW",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "http://host.example", "action": "ALLOW",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "bare.example/path", "action": "ALLOW",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "no-slash-at-all", "action": "ALLOW",
+             "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "", "action": "ALLOW", "@timestamp": "2026-01-01T00:00:00Z"},
+        ]
+    )
+    out = apply_filters(df, "", actions=None)
+    assert list(out["base_url"]) == [
+        "host.example",  # scheme://host → parts[2]
+        "host.example",  # scheme://host without path
+        "bare.example/path",  # no scheme → fewer than 3 parts → the url
+        "no-slash-at-all",  # len < 3 guard → the url
+        "",
+    ]
+
+
+def test_apply_filters_vectorized_still_excludes_whitelisted():
+    # Exercises the vectorized base_url path while pinning whitelist
+    # exclusion + ALLOW filtering end to end.
+    df = pd.DataFrame(
+        [
+            {"url": "http://evil.example/a", "client_ip": "1.1.1.1",
+             "action": "ALLOW", "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "http://safe-porn-ads.example/b", "client_ip": "1.1.1.1",
+             "action": "ALLOW", "@timestamp": "2026-01-01T00:00:00Z"},
+            {"url": "no-slash.example", "client_ip": "1.1.1.1",
+             "action": "BLOCK", "@timestamp": "2026-01-01T00:00:00Z"},
+        ]
+    )
+    regex = _build_pattern_regex(["*porn*"])
+    out = apply_filters(df, regex)
+    assert list(out["url"]) == ["http://evil.example/a"]
+    assert list(out["base_url"]) == ["evil.example"]
+
+
 def test_apply_filters_actions_param():
     df = pd.DataFrame(
         [
