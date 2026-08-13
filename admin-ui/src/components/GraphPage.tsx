@@ -7,15 +7,22 @@ import {
   SearchX,
   Server,
   Users,
+  X,
 } from "lucide-react"
 import {
+  type ClientBreakdown,
+  type ClientUrlCount,
   type FindingsGraph,
   type GraphFlow,
   type GraphNode,
   getBlacklistSet,
+  getClientBreakdown,
   getFindingsGraph,
+  getTopClients,
   listPatterns,
   type Pattern,
+  runClientQuery,
+  type TopClient,
 } from "../api"
 import {
   Button,
@@ -26,6 +33,7 @@ import {
   Panel,
   RankedTable,
   RefreshIntervalSelect,
+  SearchInput,
   Select,
   Skeleton,
   StatCard,
@@ -34,6 +42,7 @@ import { useAutoRefresh } from "../lib/utils"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
+import { RadialDiagram } from "./RadialDiagram"
 
 function formatDetected(ts: string) {
   const date = new Date(ts)
@@ -48,6 +57,24 @@ const LIMIT_OPTIONS = [
   { value: "30", label: "Top 30" },
   { value: "50", label: "Top 50" },
   { value: "100", label: "Top 100" },
+]
+
+const SOURCE_OPTIONS = [
+  { value: "findings", label: "Persisted findings" },
+  { value: "es", label: "Live ES" },
+]
+
+const WINDOW_OPTIONS = [
+  { value: "1440", label: "24h" },
+  { value: "10080", label: "7d" },
+  { value: "43200", label: "30d" },
+  { value: "all", label: "All time" },
+]
+
+const CAP_OPTIONS = [
+  { value: "6", label: "Top 6" },
+  { value: "12", label: "Top 12" },
+  { value: "24", label: "Top 24" },
 ]
 
 /** Strip a URL down to its host (FQDN), e.g. "https://sub.example.com/path?x=1" → "sub.example.com". */
@@ -163,6 +190,70 @@ const GRAPH_FLOWS_COLUMNS: DataTableColumn<GraphFlow>[] = [
   },
 ]
 
+/** Stable row identity for the per-client flows table. */
+function clientUrlRowId(u: ClientUrlCount): string {
+  return u.url
+}
+
+/* Module-scope columns for the focused per-client flows table — referentially
+ * stable so DataTable never re-renders when GraphPage re-renders. */
+const GRAPH_CLIENT_COLUMNS: DataTableColumn<ClientUrlCount>[] = [
+  {
+    id: "url",
+    header: "URL",
+    accessor: (u) => u.url,
+    defaultSortDir: "asc",
+    cell: (u) => (
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="block max-w-[420px] truncate font-mono text-xs" title={u.url}>
+            {u.url}
+          </span>
+          <CopyUrlButton value={u.url} label="URL" />
+        </span>
+        {GRAPH_UI.whitelistIndex[u.base_url] ? (
+          <ListBadge tone="success" icon={CheckCircle2} title="Already in whitelist">
+            whitelist
+          </ListBadge>
+        ) : GRAPH_UI.blacklistIndex[u.base_url] ? (
+          <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
+            blacklist
+          </ListBadge>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    id: "count",
+    header: "Accesses",
+    accessor: (u) => u.count,
+    defaultSortDir: "desc",
+    cell: (u) => <span className="tabular-nums">{u.count.toLocaleString()}</span>,
+    align: "right",
+    width: "w-24",
+  },
+  {
+    id: "last_seen",
+    header: "Last seen",
+    accessor: (u) => u.last_seen,
+    cell: (u) => (
+      <span className="whitespace-nowrap text-muted-foreground">
+        {formatDetected(u.last_seen)}
+      </span>
+    ),
+    width: "w-44",
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: (u) => (
+      <ListActionCell baseUrl={u.base_url} onBlacklisted={GRAPH_UI.onBlacklisted} />
+    ),
+    width: "w-12",
+  },
+]
+
 function toSankey(graph: FindingsGraph): {
   nodes: SankeyNode[]
   links: SankeyLink[]
@@ -232,6 +323,19 @@ export function GraphPage() {
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
 
+  // ── Drill-down state ────────────────────────────────────────────
+  const [selectedClient, setSelectedClient] = useState<string | null>(null)
+  const [source, setSource] = useState<"findings" | "es">("findings")
+  const [windowMinutes, setWindowMinutes] = useState("all")
+  const [cap, setCap] = useState("12")
+  const [urlSearch, setUrlSearch] = useState("")
+  const [urlFilter, setUrlFilter] = useState<string | null>(null)
+  const [breakdown, setBreakdown] = useState<ClientBreakdown | null>(null)
+  const [breakdownLoading, setBreakdownLoading] = useState(false)
+  const [breakdownError, setBreakdownError] = useState<string | null>(null)
+  const [topClients, setTopClients] = useState<TopClient[]>([])
+  const [pickerQuery, setPickerQuery] = useState("")
+
   // Sync live state into the module-scope flows-table column handles.
   GRAPH_UI.whitelistIndex = whitelistIndex
   GRAPH_UI.blacklistIndex = blacklistIndex
@@ -242,6 +346,11 @@ export function GraphPage() {
   // the page doesn't flicker back to skeletons every interval.
   const graphRef = useRef<FindingsGraph | null>(null)
   graphRef.current = graph
+
+  // The auto-refresh tick reads the *current* selection through a ref so the
+  // interval closure never goes stale across client changes.
+  const selectedClientRef = useRef<string | null>(null)
+  selectedClientRef.current = selectedClient
 
   const fetchGraph = useCallback(() => {
     let cancelled = false
@@ -267,8 +376,79 @@ export function GraphPage() {
 
   useEffect(() => fetchGraph(), [fetchGraph])
 
-  // Live updates: refetch the graph on an interval.
-  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(fetchGraph, "graph", 0)
+  const fetchTopClients = useCallback((query: string) => {
+    let cancelled = false
+    getTopClients({ search: query.trim() || undefined, limit: 50 })
+      .then((data) => {
+        if (!cancelled) setTopClients(data.items)
+      })
+      .catch(() => {
+        if (!cancelled) setTopClients([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Debounced picker search — refetch the candidate list as the user types.
+  useEffect(() => {
+    const id = window.setTimeout(() => fetchTopClients(pickerQuery), 250)
+    return () => window.clearTimeout(id)
+  }, [pickerQuery, fetchTopClients])
+
+  const fetchBreakdown = useCallback(() => {
+    const ip = selectedClientRef.current
+    if (!ip) return
+    let cancelled = false
+    setBreakdownLoading(true)
+    setBreakdownError(null)
+    const opts = {
+      minutes: windowMinutes === "all" ? undefined : Number(windowMinutes),
+      search: urlSearch.trim() || undefined,
+      limit: Number(cap),
+    }
+    const call =
+      source === "findings"
+        ? getClientBreakdown(ip, opts)
+        : runClientQuery(ip, opts)
+    call
+      .then((b) => {
+        if (!cancelled) setBreakdown(b)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setBreakdownError((e as Error).message)
+          setBreakdown(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBreakdownLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [source, windowMinutes, urlSearch, cap])
+
+  useEffect(() => fetchBreakdown(), [fetchBreakdown])
+
+  // Live updates: refetch whichever view is active (aggregate graph or the
+  // focused per-client breakdown) on an interval.
+  const refreshActive = useCallback(() => {
+    if (selectedClientRef.current) fetchBreakdown()
+    else fetchGraph()
+  }, [fetchBreakdown, fetchGraph])
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshActive, "graph", 0)
+
+  const selectClient = useCallback((ip: string) => {
+    setSelectedClient(ip)
+    setPickerQuery("")
+    setUrlFilter(null)
+  }, [])
+
+  const clearClient = useCallback(() => {
+    setSelectedClient(null)
+    setUrlFilter(null)
+  }, [])
 
   // Load whitelist patterns and blacklist set for badge indicators.
   useEffect(() => {
@@ -348,6 +528,173 @@ export function GraphPage() {
         </Button>
       </PageHeader>
 
+      {selectedClient ? (
+        /* ── Focused drill-down mode ─────────────────────────────── */
+        <>
+          {/* Drill-down bar */}
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5">
+                <span className="font-mono text-sm font-semibold">{selectedClient}</span>
+                {breakdown && (
+                  <span className="text-xs text-muted-foreground">
+                    {breakdown.total_accesses.toLocaleString()} accesses
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={clearClient}
+                  aria-label="Clear client drill-down"
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+              <Select
+                value={source}
+                onChange={(v) => setSource(v as "findings" | "es")}
+                options={SOURCE_OPTIONS}
+                className="w-40"
+                aria-label="Data source"
+              />
+              <Select
+                value={windowMinutes}
+                onChange={setWindowMinutes}
+                options={WINDOW_OPTIONS}
+                className="w-28"
+                aria-label="Time window"
+              />
+              <Select
+                value={cap}
+                onChange={setCap}
+                options={CAP_OPTIONS}
+                className="w-28"
+                aria-label="Top URLs"
+              />
+              <SearchInput
+                value={urlSearch}
+                onChange={setUrlSearch}
+                placeholder="Filter URL…"
+                className="w-48"
+                aria-label="Filter by URL substring"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchBreakdown}
+                disabled={breakdownLoading}
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+            {breakdown && !breakdown.es_online && (
+              <p className="mt-2 text-xs text-destructive">
+                Live ES source unavailable — showing last known data.
+              </p>
+            )}
+            {urlFilter && (
+              <div className="mt-3 flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Filtered to:</span>
+                <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+                  {urlFilter}
+                  <button
+                    type="button"
+                    onClick={() => setUrlFilter(null)}
+                    aria-label="Clear URL filter"
+                    className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Radial visualization */}
+          <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div className="border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold tracking-tight">URL access radial</h3>
+              <p className="text-xs text-muted-foreground">
+                Hover a URL to highlight its connection; click to filter the table.
+              </p>
+            </div>
+            {breakdownLoading && !breakdown ? (
+              <div className="space-y-3 p-4" aria-busy="true">
+                <Skeleton className="h-[540px] w-full rounded-lg" />
+              </div>
+            ) : breakdownError ? (
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+                <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
+                <p className="text-sm font-medium text-destructive">{breakdownError}</p>
+                <Button variant="outline" size="sm" onClick={fetchBreakdown}>
+                  Try again
+                </Button>
+              </div>
+            ) : breakdown && breakdown.urls.length > 0 ? (
+              <div className="p-4 sm:p-6">
+                <RadialDiagram
+                  clientIp={breakdown.client_ip}
+                  totalAccesses={breakdown.total_accesses}
+                  urls={breakdown.urls}
+                  onSelectUrl={setUrlFilter}
+                  ariaLabel={`URL access radial for ${breakdown.client_ip}`}
+                />
+              </div>
+            ) : (
+              <EmptyState
+                icon={Network}
+                title="No URLs for this client"
+                description={
+                  breakdown && !breakdown.es_online
+                    ? "Live ES is unreachable — no data to graph."
+                    : "No flagged URLs match the current filters in this window."
+                }
+              />
+            )}
+          </div>
+
+          {/* Per-client flows table */}
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Access flows</h3>
+                <p className="text-xs text-muted-foreground">
+                  URLs accessed by {selectedClient}
+                  {urlFilter ? ` — filtered to ${urlFilter}` : ""}
+                </p>
+              </div>
+            </div>
+            {breakdownLoading && !breakdown ? (
+              <div className="space-y-3" aria-busy="true">
+                <Skeleton className="h-48 w-full rounded-lg" />
+              </div>
+            ) : breakdown && breakdown.urls.length > 0 ? (
+              <DataTable
+                columns={GRAPH_CLIENT_COLUMNS}
+                data={
+                  urlFilter
+                    ? breakdown.urls.filter((u) => u.url === urlFilter)
+                    : breakdown.urls
+                }
+                rowId={clientUrlRowId}
+                internalPagination
+                defaultSortBy="count"
+                defaultSortDir="desc"
+                ariaLabel="Per-client access flows"
+              />
+            ) : (
+              <EmptyState
+                icon={Network}
+                title="No access flows"
+                description="Per-client URL flows appear here once the radial has data."
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        /* ── Aggregate mode (existing view + drill-down picker) ── */
+        <>
       {/* Summary chips */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
@@ -379,6 +726,38 @@ export function GraphPage() {
           hint="URLs matching blocked patterns"
         />
       </div>
+
+      {/* Drill-down picker */}
+      <Panel title="Client drill-down" icon={Users}>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Pick a client IP to see exactly which URLs it accessed, and how often.
+        </p>
+        <SearchInput
+          value={pickerQuery}
+          onChange={setPickerQuery}
+          placeholder="Search client IP…"
+          className="w-full"
+          aria-label="Search client IP"
+        />
+        {pickerQuery.trim() && topClients.length > 0 && (
+          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto rounded-md border border-border bg-popover">
+            {topClients.slice(0, 8).map((t) => (
+              <li key={t.client_ip}>
+                <button
+                  type="button"
+                  onClick={() => selectClient(t.client_ip)}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span className="font-mono">{t.client_ip}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {t.count.toLocaleString()} accesses
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
 
       {/* Visualization: alluvial flow — cv-auto skips the (potentially
           large) sankey panel's paint until it's scrolled into view. */}
@@ -444,7 +823,7 @@ export function GraphPage() {
             <RankedTable rows={topRanked.urls.slice(0, 10)} />
           </Panel>
           <Panel title="Top client IPs" icon={Users}>
-            <RankedTable rows={topRanked.ips.slice(0, 10)} />
+            <RankedTable rows={topRanked.ips.slice(0, 10)} onRowClick={selectClient} />
           </Panel>
         </div>
       )}
@@ -481,6 +860,8 @@ export function GraphPage() {
           />
         )}
       </div>
+      </>
+      )}
     </div>
   )
 }
