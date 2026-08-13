@@ -33,3 +33,21 @@ async def run_query(
         exclude_whitelist=exclude_whitelist,
         exclude_blacklist=exclude_blacklist,
     )
+
+
+@router.get("/client")
+async def client_breakdown_live(
+    ip: str = Query(..., min_length=1, max_length=64),
+    minutes: int = Query(60, ge=1, le=20160),
+    search: str | None = Query(None, max_length=200),
+    limit: int = Query(12, ge=1, le=50),
+):
+    """Per-client URL breakdown aggregated from live ES.
+
+    Same response shape as the persisted-findings breakdown endpoint
+    (``source="es"``), for the Traffic page drill-down radial. ES failures
+    degrade gracefully (``es_online: False``, empty urls).
+    """
+    from app.services.monitor import run_client_query
+
+    return await run_client_query(ip, minutes=minutes, search=search or None, limit=limit)
