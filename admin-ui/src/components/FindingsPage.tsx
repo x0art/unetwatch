@@ -42,6 +42,165 @@ function formatDetected(ts: string) {
   return date.toLocaleString()
 }
 
+/* Module-level handles to component state, synced each render, so
+ * FINDINGS_COLUMNS stays referentially stable at module scope while its
+ * cells still read live state (indexes, busy) and trigger actions. */
+const FINDINGS_UI: {
+  whitelistIndex: Record<string, true>
+  blacklistIndex: Record<string, true>
+  trackedIndex: Record<string, true>
+  busy: boolean
+  onBlacklisted: (host: string) => void
+  onCopy: (url: string) => void
+  onTrack: (url: string) => void
+  onDelete: (f: Finding) => void
+} = {
+  whitelistIndex: {},
+  blacklistIndex: {},
+  trackedIndex: {},
+  busy: false,
+  onBlacklisted: () => {},
+  onCopy: () => {},
+  onTrack: () => {},
+  onDelete: () => {},
+}
+
+/** Stable row identity for the findings table. */
+const FINDINGS_ROW_ID = (f: Finding) => f.id
+
+/* Module-scope column definitions — referentially stable, so DataTable never
+ * re-sorts/re-renders when FindingsPage re-renders (search keystrokes,
+ * auto-refresh ticks, busy flips). State reads go through FINDINGS_UI. */
+const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
+  {
+    id: "id",
+    header: "ID",
+    accessor: (f) => f.id,
+    cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
+    width: "w-14",
+  },
+  {
+    id: "client_ip",
+    header: "Client IP",
+    accessor: (f) => f.client_ip,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-sm">{f.client_ip}</span>
+        <CopyUrlButton value={f.client_ip} label="Client IP" />
+      </span>
+    ),
+  },
+  {
+    id: "server_ip",
+    header: "Server IP",
+    accessor: (f) => f.server_ip,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-sm">{f.server_ip}</span>
+        <CopyUrlButton value={f.server_ip} label="Server IP" />
+      </span>
+    ),
+  },
+  {
+    id: "url",
+    header: "URL",
+    accessor: (f) => f.url,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <div className="flex items-center gap-2 max-w-[320px]">
+        <span className="truncate font-mono text-xs" title={f.url}>
+          {f.url}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => FINDINGS_UI.onCopy(f.url)}
+          disabled={FINDINGS_UI.busy}
+          aria-label={`Copy URL ${f.url}`}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    ),
+  },
+  {
+    id: "base_url",
+    header: "Base URL",
+    accessor: (f) => f.base_url,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <div className="flex items-center gap-2">
+        <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
+        <CopyUrlButton value={f.base_url} label="Base URL" />
+        {FINDINGS_UI.whitelistIndex[f.base_url] ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+            title="Already in whitelist"
+            aria-label="Already in whitelist"
+          >
+            <CheckCircle2 className="h-3 w-3" />
+            whitelist
+          </span>
+        ) : FINDINGS_UI.blacklistIndex[f.base_url] ? (
+          <span
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+            title="In blacklist"
+            aria-label="In blacklist"
+          >
+            <CheckCircle2 className="h-3 w-3" />
+            In blacklist
+          </span>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    id: "log_timestamp",
+    header: "Detected",
+    accessor: (f) => f.log_timestamp,
+    cell: (f) => (
+      <span className="whitespace-nowrap text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
+    ),
+    defaultSortDir: "desc",
+  },
+  {
+    id: "actions",
+    header: <span className="sr-only">Actions</span>,
+    enableSorting: false,
+    align: "right",
+    width: "w-40",
+    cell: (f) => (
+      <div className="flex justify-end">
+        <ListActionCell
+          baseUrl={f.base_url}
+          onBlacklisted={FINDINGS_UI.onBlacklisted}
+          extra={[
+            {
+              key: "track",
+              label: FINDINGS_UI.trackedIndex[f.url] ? "Tracked" : "Track redirects",
+              icon: FINDINGS_UI.trackedIndex[f.url] ? History : CornerUpRight,
+              onClick: () => FINDINGS_UI.onTrack(f.url),
+              disabled: FINDINGS_UI.busy || FINDINGS_UI.trackedIndex[f.url],
+            },
+            {
+              key: "delete",
+              label: "Delete finding",
+              icon: Trash2,
+              variant: "destructive",
+              separator: true,
+              onClick: () => FINDINGS_UI.onDelete(f),
+              disabled: FINDINGS_UI.busy,
+            },
+          ]}
+        />
+      </div>
+    ),
+  },
+]
+
 export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const { toast } = useToast()
   const [findings, setFindings] = useState<Finding[]>([])
@@ -274,137 +433,17 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     }
   }
 
-  const columns: DataTableColumn<Finding>[] = [
-    {
-      id: "id",
-      header: "ID",
-      accessor: (f) => f.id,
-      cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
-      width: "w-14",
-    },
-    {
-      id: "client_ip",
-      header: "Client IP",
-      accessor: (f) => f.client_ip,
-      defaultSortDir: "asc",
-      cell: (f) => (
-        <span className="flex items-center gap-1.5">
-          <span className="font-mono text-sm">{f.client_ip}</span>
-          <CopyUrlButton value={f.client_ip} label="Client IP" />
-        </span>
-      ),
-    },
-    {
-      id: "server_ip",
-      header: "Server IP",
-      accessor: (f) => f.server_ip,
-      defaultSortDir: "asc",
-      cell: (f) => (
-        <span className="flex items-center gap-1.5">
-          <span className="font-mono text-sm">{f.server_ip}</span>
-          <CopyUrlButton value={f.server_ip} label="Server IP" />
-        </span>
-      ),
-    },
-    {
-      id: "url",
-      header: "URL",
-      accessor: (f) => f.url,
-      defaultSortDir: "asc",
-      cell: (f) => (
-        <div className="flex items-center gap-2 max-w-[320px]">
-          <span className="truncate font-mono text-xs" title={f.url}>
-            {f.url}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
-            onClick={() => handleCopyUrl(f.url)}
-            disabled={busy}
-            aria-label={`Copy URL ${f.url}`}
-          >
-            <Copy className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ),
-    },
-    {
-      id: "base_url",
-      header: "Base URL",
-      accessor: (f) => f.base_url,
-      defaultSortDir: "asc",
-      cell: (f) => (
-        <div className="flex items-center gap-2">
-          <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
-          <CopyUrlButton value={f.base_url} label="Base URL" />
-          {whitelistIndex[f.base_url] ? (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
-              title="Already in whitelist"
-              aria-label="Already in whitelist"
-            >
-              <CheckCircle2 className="h-3 w-3" />
-              whitelist
-            </span>
-          ) : blacklistIndex[f.base_url] ? (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
-              title="In blacklist"
-              aria-label="In blacklist"
-            >
-              <CheckCircle2 className="h-3 w-3" />
-              In blacklist
-            </span>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      id: "log_timestamp",
-      header: "Detected",
-      accessor: (f) => f.log_timestamp,
-      cell: (f) => (
-        <span className="whitespace-nowrap text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
-      ),
-      defaultSortDir: "desc",
-    },
-    {
-      id: "actions",
-      header: <span className="sr-only">Actions</span>,
-      enableSorting: false,
-      align: "right",
-      width: "w-40",
-      cell: (f) => (
-        <div className="flex justify-end">
-          <ListActionCell
-            baseUrl={f.base_url}
-            onBlacklisted={(host) =>
-              setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
-            }
-            extra={[
-              {
-                key: "track",
-                label: trackedIndex[f.url] ? "Tracked" : "Track redirects",
-                icon: trackedIndex[f.url] ? History : CornerUpRight,
-                onClick: () => handleTrackRedirect(f.url),
-                disabled: busy || trackedIndex[f.url],
-              },
-              {
-                key: "delete",
-                label: "Delete finding",
-                icon: Trash2,
-                variant: "destructive",
-                separator: true,
-                onClick: () => setDeleteTarget(f),
-                disabled: busy,
-              },
-            ]}
-          />
-        </div>
-      ),
-    },
-  ]
+  // Sync live state into the module-scope FINDINGS_COLUMNS handles.
+  FINDINGS_UI.whitelistIndex = whitelistIndex
+  FINDINGS_UI.blacklistIndex = blacklistIndex
+  FINDINGS_UI.trackedIndex = trackedIndex
+  FINDINGS_UI.busy = busy
+  FINDINGS_UI.onBlacklisted = (host) =>
+    setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
+  FINDINGS_UI.onCopy = handleCopyUrl
+  FINDINGS_UI.onTrack = handleTrackRedirect
+  FINDINGS_UI.onDelete = (f) => setDeleteTarget(f)
+  const columns: DataTableColumn<Finding>[] = FINDINGS_COLUMNS
 
   return (
     <div className="space-y-4">
@@ -439,7 +478,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
       <DataTable
         columns={columns}
         data={findings}
-        rowId={(f) => f.id}
+        rowId={FINDINGS_ROW_ID}
         loading={loading}
         selectable
         busy={busy}
