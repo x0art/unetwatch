@@ -24,7 +24,7 @@ import {
 } from "../api"
 import { Button, Panel, RefreshIntervalSelect, Select, Skeleton, StatCard } from "./ui"
 import { CountdownRing } from "./CountdownRing"
-import { useAutoRefresh } from "../lib/utils"
+import { useAutoRefresh, usePageVisible } from "../lib/utils"
 import { type View } from "./Sidebar"
 
 interface DashboardPageProps {
@@ -74,6 +74,10 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
+
+  // Ping animation only runs while the tab is visible (data-paused already
+  // freezes it in the background; this skips mounting the animation entirely).
+  const pageVisible = usePageVisible()
 
   // Setup guidance banner: shown until block patterns exist or ES is back.
   const banner =
@@ -162,11 +166,9 @@ export function DashboardPage({
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
-              <span
-                className={`absolute inline-flex h-full w-full rounded-full ${
-                  isOnline ? "animate-ping bg-success" : "bg-warning"
-                }`}
-              />
+              {pageVisible && isOnline && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success" />
+              )}
               <span
                 className={`relative inline-flex h-2 w-2 rounded-full ${
                   isOnline ? "bg-success" : "bg-warning"

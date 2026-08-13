@@ -65,6 +65,21 @@ export function useAutoRefresh(
 }
 
 /**
+ * True while the browser tab is visible (not hidden, minimized, or covered).
+ * Used to pause infinite CSS animations (data-paused on <html>) and skip
+ * decorative motion work while the tab is in the background.
+ */
+export function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(document.visibilityState !== "hidden")
+  useEffect(() => {
+    const onChange = () => setVisible(document.visibilityState !== "hidden")
+    document.addEventListener("visibilitychange", onChange)
+    return () => document.removeEventListener("visibilitychange", onChange)
+  }, [])
+  return visible
+}
+
+/**
  * Copy text to the clipboard, falling back to a hidden textarea +
  * execCommand for older browsers / non-secure contexts. Resolves
  * `false` when neither path works.

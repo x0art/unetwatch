@@ -60,6 +60,12 @@
 
   /* Radii */
   --radius: 0.5rem;
+
+  /* Motion — global transition defaults. Every transition-* utility that
+     doesn't set its own duration/easing inherits these, so hover, press,
+     and state changes all share one buttery decelerating curve. */
+  --default-transition-duration: 200ms;
+  --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* ── Light override ───────────────────────────────────────────── */
@@ -150,12 +156,14 @@
   }
 }
 
-/* ── Transition utilities for Radix animations ────────────────── */
+/* ── Transition utilities for Radix animations ──────────────────
+   All entrances share the same expo-out curve as the global transition
+   default (cubic-bezier(0.16, 1, 0.3, 1)) — fast start, long soft settle. */
 @utility animate-in {
-  animation: animate-in 0.2s ease-out;
+  animation: animate-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @utility animate-out {
-  animation: animate-out 0.15s ease-in;
+  animation: animate-out 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
 @keyframes animate-in {
   from { opacity: 0; transform: translateY(4px) scale(0.98); }
@@ -168,7 +176,7 @@
 
 /* Slide-from-bottom for toast */
 @utility slide-in-from-bottom {
-  animation: slide-in-from-bottom 0.25s ease-out;
+  animation: slide-in-from-bottom 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes slide-in-from-bottom {
   from { opacity: 0; transform: translateY(16px); }
@@ -177,7 +185,7 @@
 
 /* Fade-in utility */
 @utility fade-in {
-  animation: fade-in 0.2s ease-out;
+  animation: fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes fade-in {
   from { opacity: 0; }
@@ -186,10 +194,27 @@
 
 /* Metric bar grow-from-zero animation (dashboard URL metrics) */
 .metric-bar {
-  animation: metric-bar-grow 0.7s ease-out;
+  animation: metric-bar-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes metric-bar-grow {
   from { width: 0; }
+}
+
+/* content-visibility for below-the-fold panels: the browser skips layout
+   + paint for off-screen content, reserving intrinsic size so no scroll
+   jump. Applied via the `.cv-auto` class in AppShell/panel wrappers. */
+@utility cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 300px;
+}
+
+/* Pause every CSS animation while the tab is hidden (`data-paused` is set
+   on <html> by usePageVisible). OS-level reduced-motion is handled by the
+   prefers-reduced-motion block below. */
+html[data-paused] *,
+html[data-paused] *::before,
+html[data-paused] *::after {
+  animation-play-state: paused !important;
 }
 
 /* Edge flow animation (Traffic Graph) — moving dashes show traffic direction */
