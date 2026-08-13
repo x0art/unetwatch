@@ -995,9 +995,12 @@ export function Panel({
 export function RankedTable({
   rows,
   className,
+  onRowClick,
 }: {
   rows: { label: string; count: number }[]
   className?: string
+  /** Optional row-click handler (e.g. drill into a client). Adds a11y keyboard support. */
+  onRowClick?: (label: string) => void
 }) {
   const max = Math.max(1, ...rows.map((r) => r.count))
   if (rows.length === 0) {
@@ -1020,8 +1023,24 @@ export function RankedTable({
             <StaggerItem
               as="tr"
               key={r.label}
-              className="transition-colors hover:bg-muted/30"
+              className={cn(
+                "transition-colors",
+                onRowClick ? "cursor-pointer hover:bg-muted/40" : "hover:bg-muted/30",
+              )}
               title={`${r.label} — ${r.count.toLocaleString()}`}
+              onClick={onRowClick ? () => onRowClick(r.label) : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        onRowClick(r.label)
+                      }
+                    }
+                  : undefined
+              }
+              tabIndex={onRowClick ? 0 : undefined}
+              role={onRowClick ? "button" : undefined}
             >
               <td
                 className={cn(
