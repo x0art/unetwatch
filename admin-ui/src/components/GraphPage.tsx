@@ -429,7 +429,9 @@ export function GraphPage() {
     }
   }, [source, windowMinutes, urlSearch, cap])
 
-  useEffect(() => fetchBreakdown(), [fetchBreakdown])
+  // fetchBreakdown reads the client through a ref, so it must also re-run
+  // when the *selection* changes — not just when the filter options do.
+  useEffect(() => fetchBreakdown(), [fetchBreakdown, selectedClient])
 
   // Live updates: refetch whichever view is active (aggregate graph or the
   // focused per-client breakdown) on an interval.
