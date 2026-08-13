@@ -1,5 +1,6 @@
 import math
 import re
+import time
 from datetime import UTC, datetime
 from numbers import Integral, Real
 
@@ -545,6 +546,40 @@ def _build_items(
     return items
 
 
+# In-process TTL cache for run_query: identical duplicate ticks (same window,
+# filters and pattern sets) within the TTL return the cached payload instead of
+# re-hitting Elasticsearch. The short TTL only collapses *identical* duplicates
+# — distinct auto-refresh ticks still see fresh data.
+_query_cache: dict[str, tuple[float, dict]] = {}
+_QUERY_TTL_S = 2.0
+
+
+def _query_cache_key(
+    minutes: int,
+    search: str | None,
+    exclude_whitelist: bool,
+    exclude_blacklist: bool,
+    block_patterns: list[str],
+    whitelist_patterns: list[str],
+) -> str:
+    """Stable cache key for a run_query invocation."""
+    return "|".join(
+        [
+            str(minutes),
+            search or "",
+            str(exclude_whitelist),
+            str(exclude_blacklist),
+            "|".join(block_patterns),
+            "|".join(whitelist_patterns),
+        ]
+    )
+
+
+def _invalidate_query_cache() -> None:
+    """Clear the query cache (used by tests and after pattern edits)."""
+    _query_cache.clear()
+
+
 async def run_query(
     minutes: int = 60,
     limit: int = 500,
@@ -577,6 +612,19 @@ async def run_query(
         await db.close()
     blacklist_urls = {r["value"] for r in bl_rows if r["kind"] == "url"}
     blacklist_ips = {r["value"] for r in bl_rows if r["kind"] == "ip"}
+
+    # Serve an identical in-flight/duplicate tick from cache within the TTL.
+    cache_key = _query_cache_key(
+        minutes,
+        search,
+        exclude_whitelist,
+        exclude_blacklist,
+        block_patterns,
+        whitelist_patterns,
+    )
+    hit = _query_cache.get(cache_key)
+    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
+        return dict(hit[1])
 
     result = {
         "window_minutes": minutes,
@@ -679,6 +727,9 @@ async def run_query(
         ):
             log["webhook_reason"] = "Query runs don't trigger webhook delivery"
         await write_log(log)
+        # Cache every completed run (success or degraded) so a duplicate tick
+        # within the TTL reuses it instead of re-querying ES.
+        _query_cache[cache_key] = (time.monotonic(), result)
     return result
 
 
