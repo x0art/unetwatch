@@ -140,21 +140,59 @@ function formatLabel(name: string): string {
   return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
 }
 
+interface ResolvedColors {
+  palette: { label: string; muted: string; card: string; border: string }
+  paletteColors: string[]
+  /** Layer index → resolved color (from the layerColors CSS vars). */
+  nodeColors: Record<string, string>
+}
+
+// getComputedStyle forces a style recalc, so resolved tokens are cached per
+// (theme, layerColors) key — the expensive lookups only re-run when the theme
+// or a layer color actually changes. The theme class is applied synchronously
+// by ThemeProvider before this render commits, so the cached values are always
+// the authoritative ones for the active theme.
+const _resolvedColorsCache = new Map<string, ResolvedColors>()
+
+function resolveAllColors(
+  theme: string,
+  layerColors: Record<string, string> | undefined,
+): ResolvedColors {
+  const key = `${theme}|${JSON.stringify(layerColors ?? {})}`
+  const cached = _resolvedColorsCache.get(key)
+  if (cached) return cached
+  const value: ResolvedColors = {
+    palette: {
+      label: resolveColor("var(--color-foreground)"),
+      muted: resolveColor("var(--color-muted-foreground)"),
+      card: resolveColor("var(--color-card)"),
+      border: resolveColor("var(--color-border)"),
+    },
+    paletteColors: [
+      resolveColor("var(--color-info)"),
+      resolveColor("var(--color-warning)"),
+      resolveColor("var(--color-danger)"),
+    ],
+    nodeColors: Object.fromEntries(
+      Object.entries(layerColors ?? {}).map(([layer, raw]) => [layer, resolveColor(raw)]),
+    ),
+  }
+  _resolvedColorsCache.set(key, value)
+  return value
+}
+
 function buildOption(
   nodes: SankeyNode[],
   links: SankeyLink[],
   layerColors: Record<string, string> | undefined,
-  palette: { label: string; muted: string; card: string; border: string },
+  resolved: ResolvedColors,
+  layoutIterations: number,
 ): EChartsOption {
-  const paletteColors = [
-    resolveColor("var(--color-info)"),
-    resolveColor("var(--color-warning)"),
-    resolveColor("var(--color-danger)"),
-  ]
+  const { palette, paletteColors, nodeColors } = resolved
   const nodeItemStyle =
     layerColors && Object.keys(layerColors).length > 0
       ? (n: SankeyNode) => ({
-          color: resolveColor(layerColors[String(n.layer ?? 0)] ?? paletteColors[0]),
+          color: nodeColors[String(n.layer ?? 0)] ?? paletteColors[0],
         })
       : undefined
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
@@ -216,7 +254,7 @@ function buildOption(
         bottom: 12,
         nodeWidth: 16,
         nodeGap,
-        layoutIterations: 32,
+        layoutIterations,
         emphasis: { focus: "adjacency" },
         // Default stateAnimation duration is 300ms, which animates the
         // emphasis/blur state of EVERY node+link on each hover — laggy on big
@@ -267,6 +305,15 @@ export function SankeyDiagram({
   const { theme } = useTheme()
   const h = height ?? contentHeight(nodes)
 
+  // Resolve every theme token once per (theme, layerColors) — see the
+  // resolveAllColors cache above; the getComputedStyle calls never re-run for
+  // an unchanged theme or layer set.
+  const resolved = resolveAllColors(theme, layerColors)
+
+  // Sankey layout is ~O(iterations × nodes²) — scale iterations down on big
+  // graphs so hover/resize stays responsive without visible layout change.
+  const layoutIterations = nodes.length > 60 ? 8 : nodes.length > 30 ? 12 : 16
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
@@ -301,15 +348,10 @@ export function SankeyDiagram({
     const chart = chartRef.current
     if (!chart) return
 
-    // Resolve theme tokens here, at effect time (after the theme class is
-    // applied and painted), so the chart always matches the active theme —
-    // independent of when the theme class lands relative to a render.
-    const resolvedPalette = {
-      label: resolveColor("var(--color-foreground)"),
-      muted: resolveColor("var(--color-muted-foreground)"),
-      card: resolveColor("var(--color-card)"),
-      border: resolveColor("var(--color-border)"),
-    }
+    // Colors come from the theme-keyed memo above (theme class is applied
+    // synchronously, so the memo is authoritative); the paletteChanged diff
+    // below still guards against a no-op re-render with identical values.
+    const resolvedPalette = resolved.palette
     const paletteChanged =
       prevPalette.current === null ||
       resolvedPalette.label !== prevPalette.current.label ||
@@ -333,9 +375,12 @@ export function SankeyDiagram({
     prevLayerColors.current = layerColors
     prevPalette.current = resolvedPalette
 
-    chart.setOption(buildOption(nodes, links, layerColors, resolvedPalette), contentChanged)
+    chart.setOption(
+      buildOption(nodes, links, layerColors, resolved, layoutIterations),
+      contentChanged,
+    )
     chart.resize()
-  }, [nodes, links, layerColors, theme, h])
+  }, [nodes, links, layerColors, theme, h, resolved, layoutIterations])
 
   return (
     <div
