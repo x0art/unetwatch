@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react"
+import { AnimatePresence } from "framer-motion"
 import {
   type MonitorStatus,
   type PatternCounts,
@@ -14,6 +15,8 @@ import { AppShell } from "./components/AppShell"
 import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { ToastProvider, useToast, Skeleton } from "./components/ui"
+import { MotionGate, MotionPage } from "./components/motion"
+import { usePageVisible } from "./lib/utils"
 
 const DashboardPage = lazy(() =>
   import("./components/DashboardPage").then((m) => ({ default: m.DashboardPage })),
@@ -52,6 +55,7 @@ function PageFallback() {
 
 function AppRoutes() {
   const { toast } = useToast()
+  const pageVisible = usePageVisible()
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
@@ -147,6 +151,12 @@ function AppRoutes() {
     onSessionExpired(() => setLoggedIn(false))
   }, [])
 
+  // Pause infinite CSS animations (ping dots, pulse, edge-flow) while the
+  // tab is hidden — honored by the `html[data-paused]` rule in index.css.
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-paused", !pageVisible)
+  }, [pageVisible])
+
   // Navigation that can optionally pre-filter the Findings page
   // (used by the Graph view when a node is clicked). Any other navigation
   // resets the filter so a stale graph filter never leaks back in.
@@ -177,26 +187,30 @@ function AppRoutes() {
       }
     >
       <Suspense fallback={<PageFallback />}>
-        {view === "dashboard" && (
-          <DashboardPage
-            remaining={remaining}
-            intervalSec={intervalSec}
-            status={status}
-            counts={counts}
-            loadingRun={loadingRun}
-            lastUpdated={lastUpdated}
-            onRefresh={fetchStats}
-            onManualRun={handleManualRun}
-            onNavigate={handleNavigate}
-          />
-        )}
-        {view === "query" && <QueryPage />}
-        {view === "patterns" && <PatternTable />}
-        {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
-        {view === "graph" && <GraphPage />}
-        {view === "blacklist" && <BlacklistPage />}
-        {view === "redirects" && <RedirectsPage />}
-        {view === "logs" && <LogsPage />}
+        <AnimatePresence mode="wait">
+          <MotionPage key={view}>
+            {view === "dashboard" && (
+              <DashboardPage
+                remaining={remaining}
+                intervalSec={intervalSec}
+                status={status}
+                counts={counts}
+                loadingRun={loadingRun}
+                lastUpdated={lastUpdated}
+                onRefresh={fetchStats}
+                onManualRun={handleManualRun}
+                onNavigate={handleNavigate}
+              />
+            )}
+            {view === "query" && <QueryPage />}
+            {view === "patterns" && <PatternTable />}
+            {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
+            {view === "graph" && <GraphPage />}
+            {view === "blacklist" && <BlacklistPage />}
+            {view === "redirects" && <RedirectsPage />}
+            {view === "logs" && <LogsPage />}
+          </MotionPage>
+        </AnimatePresence>
       </Suspense>
     </AppShell>
   )
@@ -206,7 +220,9 @@ function App() {
   return (
     <ThemeProvider>
       <ToastProvider>
-        <AppRoutes />
+        <MotionGate>
+          <AppRoutes />
+        </MotionGate>
       </ToastProvider>
     </ThemeProvider>
   )

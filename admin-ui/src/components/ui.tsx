@@ -26,6 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn, copyText } from "../lib/utils"
+import { AnimatedNumber } from "./motion"
 
 /* ════════════════════════════════════════════════════════════════
  * Button
@@ -34,8 +35,12 @@ import { cn, copyText } from "../lib/utils"
 type ButtonVariant = "default" | "destructive" | "outline" | "secondary" | "ghost"
 type ButtonSize = "default" | "sm" | "lg" | "icon"
 
+// `transition` (not transition-colors) so the active:scale press feedback
+// animates too; duration/easing come from the global motion tokens.
+// Press-down uses a faster 100ms so it feels snappy; release eases back
+// at the global 200ms.
 const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-[0.98]"
+  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition active:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-[0.98]"
 
 const buttonVariants: Record<ButtonVariant, string> = {
   default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
@@ -1105,13 +1110,18 @@ export function StatCard({
   action?: ReactNode
 }) {
   const styles = statToneStyles[tone]
+  // Numeric values count up (expo-out, reduced-motion-safe via MotionGate);
+  // strings like "—" / "Online" render as-is.
+  const animated = typeof value === "number"
   return (
     <Card className={cn("overflow-hidden", className)}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-muted-foreground">{label}</p>
-            <div className="mt-2 text-3xl font-bold tabular-nums tracking-tight">{value}</div>
+            <div className="mt-2 text-3xl font-bold tabular-nums tracking-tight">
+              {animated ? <AnimatedNumber value={value} /> : value}
+            </div>
             {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
           </div>
           <div
