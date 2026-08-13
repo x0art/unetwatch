@@ -472,6 +472,60 @@ export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
   return request(`/findings/graph?limit=${limit}`)
 }
 
+/* ── Per-client URL drill-down (Traffic page) ─────────────────── */
+
+export interface TopClient {
+  client_ip: string
+  count: number
+}
+
+export interface ClientUrlCount {
+  url: string
+  base_url: string
+  count: number
+  last_seen: string
+}
+
+export interface ClientBreakdown {
+  client_ip: string
+  source: "findings" | "es"
+  total_accesses: number
+  es_online: boolean
+  urls: ClientUrlCount[]
+}
+
+export async function getTopClients(opts?: {
+  search?: string
+  limit?: number
+}): Promise<{ items: TopClient[] }> {
+  const qs = new URLSearchParams()
+  if (opts?.search) qs.set("search", opts.search)
+  if (opts?.limit) qs.set("limit", String(opts.limit))
+  return request(`/findings/top-clients?${qs}`)
+}
+
+export async function getClientBreakdown(
+  ip: string,
+  opts?: { minutes?: number; search?: string; limit?: number },
+): Promise<ClientBreakdown> {
+  const qs = new URLSearchParams()
+  if (opts?.minutes) qs.set("minutes", String(opts.minutes))
+  if (opts?.search) qs.set("search", opts.search)
+  if (opts?.limit) qs.set("limit", String(opts.limit))
+  return request(`/findings/client/${encodeURIComponent(ip)}?${qs}`)
+}
+
+export async function runClientQuery(
+  ip: string,
+  opts?: { minutes?: number; search?: string; limit?: number },
+): Promise<ClientBreakdown> {
+  const qs = new URLSearchParams({ ip })
+  if (opts?.minutes) qs.set("minutes", String(opts.minutes))
+  if (opts?.search) qs.set("search", opts.search)
+  if (opts?.limit) qs.set("limit", String(opts.limit))
+  return request(`/query/client?${qs}`)
+}
+
 /* ── Blacklist plain-text feeds (for external integrations) ──────── */
 
 export async function getBlacklistUrls(): Promise<string> {
