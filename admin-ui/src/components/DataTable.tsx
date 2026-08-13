@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { AnimatePresence, motion } from "framer-motion"
 import { ArrowDown, ArrowUp, ArrowUpDown, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/utils"
 import { Button, EmptyState, Pagination, Skeleton } from "./ui"
+import { EASE, Stagger, StaggerItem } from "./motion"
 
 /* ════════════════════════════════════════════════════════════════
  * DataTable — reusable, sortable table with bulk actions
@@ -269,42 +271,49 @@ export function DataTable<T>({
 
   return (
     <div className={className}>
-      {/* Bulk action bar */}
-      {selectable && selected.size > 0 && (
-        <div
-          className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm"
-          role="toolbar"
-          aria-label="Bulk actions"
-        >
-          <span className="font-medium tabular-nums">{selected.size} selected</span>
-          <span className="h-4 w-px bg-border" aria-hidden="true" />
-          {bulkActions.map((action) => {
-            const Icon = action.icon
-            return (
-              <Button
-                key={action.label}
-                size="sm"
-                variant={action.variant ?? "outline"}
-                onClick={() => action.onClick(new Set(selected))}
-                disabled={action.disabled || busy}
-                className={action.className}
-              >
-                {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
-                {action.label}
-              </Button>
-            )
-          })}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelected(new Set())}
-            className="ml-auto"
+      {/* Bulk action bar (animate in/out) */}
+      <AnimatePresence>
+        {selectable && selected.size > 0 && (
+          <motion.div
+            key="bulk-bar"
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.18, ease: EASE }}
+            className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm"
+            role="toolbar"
+            aria-label="Bulk actions"
           >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-            Clear
-          </Button>
-        </div>
-      )}
+            <span className="font-medium tabular-nums">{selected.size} selected</span>
+            <span className="h-4 w-px bg-border" aria-hidden="true" />
+            {bulkActions.map((action) => {
+              const Icon = action.icon
+              return (
+                <Button
+                  key={action.label}
+                  size="sm"
+                  variant={action.variant ?? "outline"}
+                  onClick={() => action.onClick(new Set(selected))}
+                  disabled={action.disabled || busy}
+                  className={action.className}
+                >
+                  {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {action.label}
+                </Button>
+              )
+            })}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+              className="ml-auto"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
+              Clear
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full text-sm" aria-label={ariaLabel}>
@@ -376,9 +385,9 @@ export function DataTable<T>({
               })}
             </tr>
           </thead>
-          <tbody>
-            {loading ? (
-              Array.from({ length: skeletonRows }).map((_, i) => (
+          {loading ? (
+            <tbody>
+              {Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i} className="border-b border-border">
                   {selectable && (
                     <td className="px-4 py-3">
@@ -391,8 +400,10 @@ export function DataTable<T>({
                     </td>
                   ))}
                 </tr>
-              ))
-            ) : data.length === 0 ? (
+              ))}
+            </tbody>
+          ) : data.length === 0 ? (
+            <tbody>
               <tr>
                 <td colSpan={columns.length + (selectable ? 1 : 0)}>
                   {empty ? (
@@ -412,12 +423,17 @@ export function DataTable<T>({
                   )}
                 </td>
               </tr>
-            ) : (
-              displayData.map((row) => {
+            </tbody>
+          ) : (
+            // Stagger only the visible page of rows on first paint — never the
+            // full dataset (internalPagination keeps displayData ≤ page size).
+            <Stagger as="tbody">
+              {displayData.map((row) => {
                 const id = rowId(row)
                 const isSelected = selected.has(id)
                 return (
-                  <tr
+                  <StaggerItem
+                    as="tr"
                     key={id}
                     className={cn(
                       "border-b border-border transition-colors hover:bg-muted/30",
@@ -444,11 +460,11 @@ export function DataTable<T>({
                         {col.srOnly ? <span className="sr-only">{renderCell(col, row)}</span> : renderCell(col, row)}
                       </td>
                     ))}
-                  </tr>
+                  </StaggerItem>
                 )
-              })
-            )}
-          </tbody>
+              })}
+            </Stagger>
+          )}
         </table>
       </div>
 
