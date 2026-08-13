@@ -30,6 +30,97 @@ import {
 
 const PAGE_SIZE = 50
 
+/* Module-level handles to component state, synced each render, so
+ * PATTERNS_COLUMNS stays referentially stable at module scope while its
+ * cells still trigger edits/deletes and read the busy flag. */
+const PATTERNS_UI: {
+  busy: boolean
+  onEdit: (p: Pattern) => void
+  onDelete: (id: number) => void
+} = {
+  busy: false,
+  onEdit: () => {},
+  onDelete: () => {},
+}
+
+/** Stable row identity for the patterns table. */
+const PATTERNS_ROW_ID = (p: Pattern) => p.id
+
+/* Module-scope columns for the patterns table — referentially stable so
+ * DataTable never re-sorts/re-renders when PatternTable re-renders. */
+const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
+  {
+    id: "id",
+    header: "ID",
+    accessor: (p) => p.id,
+    cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
+    width: "w-14",
+  },
+  {
+    id: "pattern",
+    header: "Pattern",
+    accessor: (p) => p.pattern,
+    defaultSortDir: "asc",
+    cell: (p) => (
+      <span className="block max-w-[260px] truncate font-mono text-sm" title={p.pattern}>
+        {p.pattern}
+      </span>
+    ),
+  },
+  {
+    id: "pattern_type",
+    header: "Type",
+    accessor: (p) => p.pattern_type,
+    defaultSortDir: "asc",
+    cell: (p) => (
+      <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
+        {p.pattern_type}
+      </Badge>
+    ),
+    width: "w-24",
+  },
+  {
+    id: "created_at",
+    header: "Created",
+    accessor: (p) => p.created_at,
+    cell: (p) => (
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
+        {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
+      </span>
+    ),
+    width: "w-28",
+  },
+  {
+    id: "actions",
+    header: <span className="sr-only">Actions</span>,
+    enableSorting: false,
+    align: "right",
+    width: "w-20",
+    cell: (p) => (
+      <div className="flex justify-end gap-1">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => PATTERNS_UI.onEdit(p)}
+          aria-label="Edit pattern"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
+          onClick={() => PATTERNS_UI.onDelete(p.id)}
+          disabled={PATTERNS_UI.busy}
+          aria-label="Delete pattern"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    ),
+  },
+]
+
 export function PatternTable() {
   const [patterns, setPatterns] = useState<Pattern[]>([])
   const [loading, setLoading] = useState(true)
@@ -206,78 +297,11 @@ export function PatternTable() {
     { value: "whitelist", label: "Whitelist" },
   ]
 
-  const columns: DataTableColumn<Pattern>[] = [
-    {
-      id: "id",
-      header: "ID",
-      accessor: (p) => p.id,
-      cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
-      width: "w-14",
-    },
-    {
-      id: "pattern",
-      header: "Pattern",
-      accessor: (p) => p.pattern,
-      defaultSortDir: "asc",
-      cell: (p) => (
-        <span className="block max-w-[260px] truncate font-mono text-sm" title={p.pattern}>
-          {p.pattern}
-        </span>
-      ),
-    },
-    {
-      id: "pattern_type",
-      header: "Type",
-      accessor: (p) => p.pattern_type,
-      defaultSortDir: "asc",
-      cell: (p) => (
-        <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
-          {p.pattern_type}
-        </Badge>
-      ),
-      width: "w-24",
-    },
-    {
-      id: "created_at",
-      header: "Created",
-      accessor: (p) => p.created_at,
-      cell: (p) => (
-        <span className="whitespace-nowrap text-xs text-muted-foreground">
-          {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
-        </span>
-      ),
-      width: "w-28",
-    },
-    {
-      id: "actions",
-      header: <span className="sr-only">Actions</span>,
-      enableSorting: false,
-      align: "right",
-      width: "w-20",
-      cell: (p) => (
-        <div className="flex justify-end gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => openEdit(p)}
-            aria-label="Edit pattern"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-destructive hover:text-destructive/80 hover:bg-destructive/10"
-            onClick={() => setDeleteTarget(p.id)}
-            disabled={busy}
-            aria-label="Delete pattern"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ),
-    },
-  ]
+  // Sync live state into the module-scope PATTERNS_COLUMNS handles.
+  PATTERNS_UI.busy = busy
+  PATTERNS_UI.onEdit = openEdit
+  PATTERNS_UI.onDelete = (id) => setDeleteTarget(id)
+  const columns: DataTableColumn<Pattern>[] = PATTERNS_COLUMNS
 
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
@@ -313,7 +337,7 @@ export function PatternTable() {
       <DataTable
         columns={columns}
         data={patterns}
-        rowId={(p) => p.id}
+        rowId={PATTERNS_ROW_ID}
         loading={loading}
         selectable
         busy={busy}

@@ -69,6 +69,154 @@ function formatWhen(ts: string | null) {
   return date.toLocaleString()
 }
 
+/* Module-level handles to component state, synced each render, so
+ * REDIRECTS_COLUMNS stays referentially stable at module scope while its
+ * cells still read live busy state and trigger actions. */
+const REDIRECTS_UI: {
+  busy: boolean
+  busyUrl: string | null
+  onCheck: (i: TrackedUrl) => void
+  onHistory: (i: TrackedUrl) => void
+  onDelete: (i: TrackedUrl) => void
+} = {
+  busy: false,
+  busyUrl: null,
+  onCheck: () => {},
+  onHistory: () => {},
+  onDelete: () => {},
+}
+
+/** Stable row identity for the tracked-URLs table. */
+const REDIRECTS_ROW_ID = (i: TrackedUrl) => i.id
+
+/* Module-scope columns for the tracked-URLs table — referentially stable so
+ * DataTable never re-sorts/re-renders when RedirectsPage re-renders. */
+const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
+  {
+    id: "id",
+    header: "ID",
+    accessor: (i) => i.id,
+    cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.id}</span>,
+    width: "w-14",
+  },
+  {
+    id: "url",
+    header: "URL",
+    accessor: (i) => i.url,
+    defaultSortDir: "asc",
+    cell: (i) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[320px] truncate font-mono text-xs" title={i.url}>
+          {i.url}
+        </span>
+        <CopyUrlButton value={i.url} label="URL" />
+      </span>
+    ),
+  },
+  {
+    id: "status",
+    header: "Status",
+    accessor: (i) => i.status,
+    defaultSortDir: "asc",
+    cell: (i) => (
+      <Badge variant={STATUS_META[i.status].variant}>{STATUS_META[i.status].label}</Badge>
+    ),
+    width: "w-28",
+  },
+  {
+    id: "http_status",
+    header: "HTTP",
+    accessor: (i) => i.http_status,
+    cell: (i) => (
+      <span className="tabular-nums text-xs text-muted-foreground">
+        {i.http_status ?? "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-16",
+  },
+  {
+    id: "final_url",
+    header: "Final URL",
+    accessor: (i) => i.final_url,
+    cell: (i) =>
+      i.final_url && i.final_url !== i.url ? (
+        <span className="flex items-center gap-1.5">
+          <span className="block max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={i.final_url}>
+            {i.final_url}
+          </span>
+          <CopyUrlButton value={i.final_url} label="Final URL" />
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground/60">—</span>
+      ),
+  },
+  {
+    id: "source",
+    header: "Source",
+    accessor: (i) => i.source,
+    defaultSortDir: "asc",
+    cell: (i) => <Badge variant={SOURCE_META[i.source].variant}>{SOURCE_META[i.source].label}</Badge>,
+    width: "w-24",
+  },
+  {
+    id: "last_checked_at",
+    header: "Last checked",
+    accessor: (i) => i.last_checked_at,
+    cell: (i) => (
+      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatWhen(i.last_checked_at)}</span>
+    ),
+    width: "w-40",
+  },
+  {
+    id: "history_count",
+    header: "Targets",
+    accessor: (i) => i.history_count,
+    cell: (i) => <span className="tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
+    align: "right",
+    width: "w-16",
+  },
+  {
+    id: "actions",
+    header: <span className="sr-only">Actions</span>,
+    enableSorting: false,
+    align: "right",
+    width: "w-32",
+    cell: (i) => (
+      <div className="flex justify-end">
+        <ListActionCell
+          baseUrl={i.url}
+          extra={[
+            {
+              key: "check",
+              label: REDIRECTS_UI.busyUrl === i.url ? "Checking…" : "Check now",
+              icon: REDIRECTS_UI.busyUrl === i.url ? RefreshCcw : Zap,
+              onClick: () => REDIRECTS_UI.onCheck(i),
+              disabled: REDIRECTS_UI.busy || REDIRECTS_UI.busyUrl === i.url,
+            },
+            {
+              key: "history",
+              label: "View history",
+              icon: History,
+              onClick: () => REDIRECTS_UI.onHistory(i),
+              disabled: REDIRECTS_UI.busy,
+            },
+            {
+              key: "delete",
+              label: "Delete",
+              icon: Trash2,
+              variant: "destructive",
+              separator: true,
+              onClick: () => REDIRECTS_UI.onDelete(i),
+              disabled: REDIRECTS_UI.busy,
+            },
+          ]}
+        />
+      </div>
+    ),
+  },
+]
+
 /* URLs that don't redirect (direct hits, errors) — shown as chips below
  * the flow. */
 function directNodes(graph: RedirectGraph | null): RedirectGraph["nodes"] {
@@ -428,131 +576,13 @@ export function RedirectsPage() {
 
   /* ── Table columns ───────────────────────────────────────────────── */
 
-  const columns: DataTableColumn<TrackedUrl>[] = [
-    {
-      id: "id",
-      header: "ID",
-      accessor: (i) => i.id,
-      cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.id}</span>,
-      width: "w-14",
-    },
-    {
-      id: "url",
-      header: "URL",
-      accessor: (i) => i.url,
-      defaultSortDir: "asc",
-      cell: (i) => (
-        <span className="flex items-center gap-1.5">
-          <span className="block max-w-[320px] truncate font-mono text-xs" title={i.url}>
-            {i.url}
-          </span>
-          <CopyUrlButton value={i.url} label="URL" />
-        </span>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      accessor: (i) => i.status,
-      defaultSortDir: "asc",
-      cell: (i) => (
-        <Badge variant={STATUS_META[i.status].variant}>{STATUS_META[i.status].label}</Badge>
-      ),
-      width: "w-28",
-    },
-    {
-      id: "http_status",
-      header: "HTTP",
-      accessor: (i) => i.http_status,
-      cell: (i) => (
-        <span className="tabular-nums text-xs text-muted-foreground">
-          {i.http_status ?? "—"}
-        </span>
-      ),
-      align: "right",
-      width: "w-16",
-    },
-    {
-      id: "final_url",
-      header: "Final URL",
-      accessor: (i) => i.final_url,
-      cell: (i) =>
-        i.final_url && i.final_url !== i.url ? (
-          <span className="flex items-center gap-1.5">
-            <span className="block max-w-[280px] truncate font-mono text-xs text-muted-foreground" title={i.final_url}>
-              {i.final_url}
-            </span>
-            <CopyUrlButton value={i.final_url} label="Final URL" />
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground/60">—</span>
-        ),
-    },
-    {
-      id: "source",
-      header: "Source",
-      accessor: (i) => i.source,
-      defaultSortDir: "asc",
-      cell: (i) => <Badge variant={SOURCE_META[i.source].variant}>{SOURCE_META[i.source].label}</Badge>,
-      width: "w-24",
-    },
-    {
-      id: "last_checked_at",
-      header: "Last checked",
-      accessor: (i) => i.last_checked_at,
-      cell: (i) => (
-        <span className="whitespace-nowrap text-xs text-muted-foreground">{formatWhen(i.last_checked_at)}</span>
-      ),
-      width: "w-40",
-    },
-    {
-      id: "history_count",
-      header: "Targets",
-      accessor: (i) => i.history_count,
-      cell: (i) => <span className="tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
-      align: "right",
-      width: "w-16",
-    },
-    {
-      id: "actions",
-      header: <span className="sr-only">Actions</span>,
-      enableSorting: false,
-      align: "right",
-      width: "w-32",
-      cell: (i) => (
-        <div className="flex justify-end">
-          <ListActionCell
-            baseUrl={i.url}
-            extra={[
-              {
-                key: "check",
-                label: busyUrl === i.url ? "Checking…" : "Check now",
-                icon: busyUrl === i.url ? RefreshCcw : Zap,
-                onClick: () => handleCheckOne(i),
-                disabled: busy || busyUrl === i.url,
-              },
-              {
-                key: "history",
-                label: "View history",
-                icon: History,
-                onClick: () => openHistory(i),
-                disabled: busy,
-              },
-              {
-                key: "delete",
-                label: "Delete",
-                icon: Trash2,
-                variant: "destructive",
-                separator: true,
-                onClick: () => setDeleteTarget(i),
-                disabled: busy,
-              },
-            ]}
-          />
-        </div>
-      ),
-    },
-  ]
+  // Sync live state into the module-scope REDIRECTS_COLUMNS handles.
+  REDIRECTS_UI.busy = busy
+  REDIRECTS_UI.busyUrl = busyUrl
+  REDIRECTS_UI.onCheck = handleCheckOne
+  REDIRECTS_UI.onHistory = openHistory
+  REDIRECTS_UI.onDelete = (i) => setDeleteTarget(i)
+  const columns: DataTableColumn<TrackedUrl>[] = REDIRECTS_COLUMNS
 
   return (
     <div className="space-y-6">
@@ -708,7 +738,7 @@ export function RedirectsPage() {
           <DataTable
             columns={columns}
             data={items}
-            rowId={(i) => i.id}
+            rowId={REDIRECTS_ROW_ID}
             loading={loading}
             selectable
             busy={busy}
