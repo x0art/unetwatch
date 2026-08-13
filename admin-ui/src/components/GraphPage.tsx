@@ -90,10 +90,12 @@ const GRAPH_UI: {
   whitelistIndex: Record<string, true>
   blacklistIndex: Record<string, true>
   onBlacklisted: (host: string) => void
+  onClientClick: (ip: string) => void
 } = {
   whitelistIndex: {},
   blacklistIndex: {},
   onBlacklisted: () => {},
+  onClientClick: () => {},
 }
 
 /** Stable row identity for the access-flows table. */
@@ -111,7 +113,15 @@ const GRAPH_FLOWS_COLUMNS: DataTableColumn<GraphFlow>[] = [
     defaultSortDir: "asc",
     cell: (f) => (
       <span className="flex items-center gap-1.5">
-        <span className="font-mono text-xs">{f.client_ip}</span>
+        <button
+          type="button"
+          onClick={() => GRAPH_UI.onClientClick(f.client_ip)}
+          title={`Drill into ${f.client_ip}`}
+          aria-label={`Drill into client ${f.client_ip}`}
+          className="cursor-pointer font-mono text-xs transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {f.client_ip}
+        </button>
         <CopyUrlButton value={f.client_ip} label="Client IP" />
       </span>
     ),
@@ -446,6 +456,10 @@ export function GraphPage() {
     setPickerQuery("")
     setUrlFilter(null)
   }, [])
+
+  // Sync the live selection handler into the module-scope flows-table
+  // columns so every client IP cell is clickable for drill-down.
+  GRAPH_UI.onClientClick = selectClient
 
   const clearClient = useCallback(() => {
     setSelectedClient(null)
@@ -825,7 +839,7 @@ export function GraphPage() {
             <RankedTable rows={topRanked.urls.slice(0, 10)} />
           </Panel>
           <Panel title="Top client IPs" icon={Users}>
-            <RankedTable rows={topRanked.ips.slice(0, 10)} onRowClick={selectClient} />
+            <RankedTable rows={topRanked.ips.slice(0, 15)} onRowClick={selectClient} />
           </Panel>
         </div>
       )}
