@@ -59,6 +59,156 @@ function parseQuery(json: string | null): Record<string, unknown> | null {
   }
 }
 
+/* Module-level handles to component state, synced each render, so
+ * LOGS_COLUMNS stays referentially stable at module scope while its cells
+ * still open the detail dialog and read the busy flag. */
+const LOGS_UI: {
+  busy: boolean
+  onDetail: (l: MonitorLog) => void
+} = {
+  busy: false,
+  onDetail: () => {},
+}
+
+/** Stable row identity for the logs table. */
+const LOGS_ROW_ID = (l: MonitorLog) => l.id
+
+/* Module-scope columns for the logs table — referentially stable so
+ * DataTable never re-sorts/re-renders when LogsPage re-renders. */
+const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
+  {
+    id: "started_at",
+    header: "Time",
+    accessor: (l) => l.started_at,
+    cell: (l) => (
+      <span className="whitespace-nowrap text-xs text-muted-foreground" title={l.started_at}>
+        {formatWhen(l.started_at)}
+      </span>
+    ),
+    width: "w-44",
+    defaultSortDir: "desc",
+  },
+  {
+    id: "kind",
+    header: "Type",
+    accessor: (l) => l.kind,
+    defaultSortDir: "asc",
+    cell: (l) => (
+      <Badge variant={l.kind === "poll" ? "default" : "secondary"}>
+        {l.kind === "poll" ? "Poll" : "Query"}
+      </Badge>
+    ),
+    width: "w-24",
+  },
+  {
+    id: "minutes",
+    header: "Window",
+    accessor: (l) => l.minutes,
+    cell: (l) => (
+      <span className="tabular-nums text-xs text-muted-foreground">
+        {l.minutes !== null && l.minutes !== undefined ? `${l.minutes}m` : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "matches",
+    header: "Hits",
+    accessor: (l) => l.matches,
+    cell: (l) => <span className="tabular-nums">{l.matches.toLocaleString()}</span>,
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "stored",
+    header: "Stored",
+    accessor: (l) => l.stored,
+    cell: (l) => (
+      <span className="tabular-nums text-muted-foreground">
+        {l.kind === "poll" ? l.stored.toLocaleString() : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "flagged",
+    header: "Flagged URLs",
+    accessor: (l) => (l.topUrls?.length ?? 0),
+    cell: (l) => {
+      const urls = l.topUrls ?? []
+      if (urls.length === 0) {
+        return <span className="text-xs text-muted-foreground/50">—</span>
+      }
+      return (
+        <span className="flex max-w-[280px] items-center gap-1.5">
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={urls.join("\n")}>
+            {urls[0]}
+          </span>
+          {urls.length > 1 && (
+            <Badge variant="secondary" className="shrink-0">
+              +{urls.length - 1}
+            </Badge>
+          )}
+        </span>
+      )
+    },
+    width: "w-64",
+  },
+  {
+    id: "webhook_status",
+    header: "Webhook",
+    accessor: (l) => l.webhook_status,
+    cell: (l) => <WebhookBadge log={l} />,
+    enableSorting: true,
+    width: "w-24",
+  },
+  {
+    id: "duration_ms",
+    header: "Duration",
+    accessor: (l) => l.duration_ms,
+    cell: (l) => <span className="tabular-nums text-xs">{formatDuration(l.duration_ms)}</span>,
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "error",
+    header: "Outcome",
+    accessor: (l) => l.error,
+    cell: (l) =>
+      l.error ? (
+        <span className="block max-w-[220px] truncate text-xs text-destructive" title={l.error}>
+          {l.error}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-xs text-success">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          ok
+        </span>
+      ),
+  },
+  {
+    id: "actions",
+    header: <span className="sr-only">Actions</span>,
+    enableSorting: false,
+    align: "right",
+    width: "w-16",
+    cell: (l) => (
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+        onClick={() => LOGS_UI.onDetail(l)}
+        disabled={LOGS_UI.busy}
+        aria-label={`View log ${l.id}`}
+      >
+        <Eye className="h-4 w-4" />
+      </Button>
+    ),
+  },
+]
+
 function WebhookBadge({ log }: { log: MonitorLog }) {
   if (log.kind === "query") {
     return <span className="text-xs text-muted-foreground">—</span>
@@ -182,139 +332,10 @@ export function LogsPage() {
     }
   }
 
-  const columns: DataTableColumn<MonitorLog>[] = [
-    {
-      id: "started_at",
-      header: "Time",
-      accessor: (l) => l.started_at,
-      cell: (l) => (
-        <span className="whitespace-nowrap text-xs text-muted-foreground" title={l.started_at}>
-          {formatWhen(l.started_at)}
-        </span>
-      ),
-      width: "w-44",
-      defaultSortDir: "desc",
-    },
-    {
-      id: "kind",
-      header: "Type",
-      accessor: (l) => l.kind,
-      defaultSortDir: "asc",
-      cell: (l) => (
-        <Badge variant={l.kind === "poll" ? "default" : "secondary"}>
-          {l.kind === "poll" ? "Poll" : "Query"}
-        </Badge>
-      ),
-      width: "w-24",
-    },
-    {
-      id: "minutes",
-      header: "Window",
-      accessor: (l) => l.minutes,
-      cell: (l) => (
-        <span className="tabular-nums text-xs text-muted-foreground">
-          {l.minutes !== null && l.minutes !== undefined ? `${l.minutes}m` : "—"}
-        </span>
-      ),
-      align: "right",
-      width: "w-20",
-    },
-    {
-      id: "matches",
-      header: "Hits",
-      accessor: (l) => l.matches,
-      cell: (l) => <span className="tabular-nums">{l.matches.toLocaleString()}</span>,
-      align: "right",
-      width: "w-20",
-    },
-    {
-      id: "stored",
-      header: "Stored",
-      accessor: (l) => l.stored,
-      cell: (l) => (
-        <span className="tabular-nums text-muted-foreground">
-          {l.kind === "poll" ? l.stored.toLocaleString() : "—"}
-        </span>
-      ),
-      align: "right",
-      width: "w-20",
-    },
-    {
-      id: "flagged",
-      header: "Flagged URLs",
-      accessor: (l) => (l.topUrls?.length ?? 0),
-      cell: (l) => {
-        const urls = l.topUrls ?? []
-        if (urls.length === 0) {
-          return <span className="text-xs text-muted-foreground/50">—</span>
-        }
-        return (
-          <span className="flex max-w-[280px] items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={urls.join("\n")}>
-              {urls[0]}
-            </span>
-            {urls.length > 1 && (
-              <Badge variant="secondary" className="shrink-0">
-                +{urls.length - 1}
-              </Badge>
-            )}
-          </span>
-        )
-      },
-      width: "w-64",
-    },
-    {
-      id: "webhook_status",
-      header: "Webhook",
-      accessor: (l) => l.webhook_status,
-      cell: (l) => <WebhookBadge log={l} />,
-      enableSorting: true,
-      width: "w-24",
-    },
-    {
-      id: "duration_ms",
-      header: "Duration",
-      accessor: (l) => l.duration_ms,
-      cell: (l) => <span className="tabular-nums text-xs">{formatDuration(l.duration_ms)}</span>,
-      align: "right",
-      width: "w-20",
-    },
-    {
-      id: "error",
-      header: "Outcome",
-      accessor: (l) => l.error,
-      cell: (l) =>
-        l.error ? (
-          <span className="block max-w-[220px] truncate text-xs text-destructive" title={l.error}>
-            {l.error}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-xs text-success">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            ok
-          </span>
-        ),
-    },
-    {
-      id: "actions",
-      header: <span className="sr-only">Actions</span>,
-      enableSorting: false,
-      align: "right",
-      width: "w-16",
-      cell: (l) => (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          onClick={() => setDetail(l)}
-          disabled={busy}
-          aria-label={`View log ${l.id}`}
-        >
-          <Eye className="h-4 w-4" />
-        </Button>
-      ),
-    },
-  ]
+  // Sync live state into the module-scope LOGS_COLUMNS handles.
+  LOGS_UI.busy = busy
+  LOGS_UI.onDetail = (l) => setDetail(l)
+  const columns: DataTableColumn<MonitorLog>[] = LOGS_COLUMNS
 
   const parsedQuery = detail ? parseQuery(detail.es_query) : null
 
@@ -370,7 +391,7 @@ export function LogsPage() {
         <DataTable
           columns={columns}
           data={items}
-          rowId={(l) => l.id}
+          rowId={LOGS_ROW_ID}
           loading={loading}
           selectable
           busy={busy}

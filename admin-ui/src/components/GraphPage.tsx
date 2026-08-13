@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 import {
   type FindingsGraph,
+  type GraphFlow,
   type GraphNode,
   getBlacklistSet,
   getFindingsGraph,
@@ -30,7 +31,7 @@ import {
   StatCard,
 } from "./ui"
 import { useAutoRefresh } from "../lib/utils"
-import { DataTable } from "./DataTable"
+import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 
@@ -54,6 +55,113 @@ function hostOf(url: string): string {
   const afterScheme = url.split("://").pop() ?? url
   return afterScheme.split(/[/?#]/)[0] || url
 }
+
+/* Module-level handles to component state, synced each render, so the
+ * flows-table columns stay referentially stable at module scope while the
+ * URL cell still reads live whitelist/blacklist indexes. */
+const GRAPH_UI: {
+  whitelistIndex: Record<string, true>
+  blacklistIndex: Record<string, true>
+  onBlacklisted: (host: string) => void
+} = {
+  whitelistIndex: {},
+  blacklistIndex: {},
+  onBlacklisted: () => {},
+}
+
+/** Stable row identity for the access-flows table. */
+function flowsRowId(f: GraphFlow): string {
+  return `${f.client_ip}|${f.server_ip}|${f.url}|${f.base_url}`
+}
+
+/* Module-scope columns for the access-flows table — referentially stable so
+ * DataTable never re-sorts/re-renders when GraphPage re-renders. */
+const GRAPH_FLOWS_COLUMNS: DataTableColumn<GraphFlow>[] = [
+  {
+    id: "client_ip",
+    header: "Client IP",
+    accessor: (f) => f.client_ip,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-xs">{f.client_ip}</span>
+        <CopyUrlButton value={f.client_ip} label="Client IP" />
+      </span>
+    ),
+  },
+  {
+    id: "server_ip",
+    header: "Server IP",
+    accessor: (f) => f.server_ip,
+    defaultSortDir: "asc",
+    cell: (f) =>
+      f.server_ip ? (
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono text-xs text-muted-foreground">{f.server_ip}</span>
+          <CopyUrlButton value={f.server_ip} label="Server IP" />
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground/50">—</span>
+      ),
+  },
+  {
+    id: "url",
+    header: "URL",
+    accessor: (f) => f.url,
+    defaultSortDir: "asc",
+    cell: (f) => (
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
+            {f.url}
+          </span>
+          <CopyUrlButton value={f.url} label="URL" />
+        </span>
+        {GRAPH_UI.whitelistIndex[f.base_url] ? (
+          <ListBadge tone="success" icon={CheckCircle2} title="Already in whitelist">
+            whitelist
+          </ListBadge>
+        ) : GRAPH_UI.blacklistIndex[f.base_url] ? (
+          <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
+            blacklist
+          </ListBadge>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    id: "count",
+    header: "Accesses",
+    accessor: (f) => f.count,
+    defaultSortDir: "desc",
+    cell: (f) => <span className="tabular-nums">{f.count.toLocaleString()}</span>,
+    align: "right",
+    width: "w-24",
+  },
+  {
+    id: "last_seen",
+    header: "Timestamp",
+    accessor: (f) => f.last_seen,
+    cell: (f) => (
+      <span className="whitespace-nowrap text-muted-foreground">
+        {formatDetected(f.last_seen)}
+      </span>
+    ),
+    width: "w-44",
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: (f) => (
+      <ListActionCell
+        baseUrl={f.base_url}
+        onBlacklisted={GRAPH_UI.onBlacklisted}
+      />
+    ),
+    width: "w-12",
+  },
+]
 
 function toSankey(graph: FindingsGraph): {
   nodes: SankeyNode[]
@@ -123,6 +231,12 @@ export function GraphPage() {
   const [error, setError] = useState<string | null>(null)
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
+
+  // Sync live state into the module-scope flows-table column handles.
+  GRAPH_UI.whitelistIndex = whitelistIndex
+  GRAPH_UI.blacklistIndex = blacklistIndex
+  GRAPH_UI.onBlacklisted = (host) =>
+    setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
 
   // Keep the previous graph visible while an auto-refresh is in flight so
   // the page doesn't flicker back to skeletons every interval.
@@ -350,96 +464,9 @@ export function GraphPage() {
           </div>
         ) : graph && graph.flows.length > 0 ? (
           <DataTable
-            columns={[
-              {
-                id: "client_ip",
-                header: "Client IP",
-                accessor: (f) => f.client_ip,
-                defaultSortDir: "asc",
-                cell: (f) => (
-                  <span className="flex items-center gap-1.5">
-                    <span className="font-mono text-xs">{f.client_ip}</span>
-                    <CopyUrlButton value={f.client_ip} label="Client IP" />
-                  </span>
-                ),
-              },
-              {
-                id: "server_ip",
-                header: "Server IP",
-                accessor: (f) => f.server_ip,
-                defaultSortDir: "asc",
-                cell: (f) =>
-                  f.server_ip ? (
-                    <span className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs text-muted-foreground">{f.server_ip}</span>
-                      <CopyUrlButton value={f.server_ip} label="Server IP" />
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground/50">—</span>
-                  ),
-              },
-              {
-                id: "url",
-                header: "URL",
-                accessor: (f) => f.url,
-                defaultSortDir: "asc",
-                cell: (f) => (
-                  <div className="flex items-center gap-2">
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
-                        {f.url}
-                      </span>
-                      <CopyUrlButton value={f.url} label="URL" />
-                    </span>
-                    {whitelistIndex[f.base_url] ? (
-                      <ListBadge tone="success" icon={CheckCircle2} title="Already in whitelist">
-                        whitelist
-                      </ListBadge>
-                    ) : blacklistIndex[f.base_url] ? (
-                      <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
-                        blacklist
-                      </ListBadge>
-                    ) : null}
-                  </div>
-                ),
-              },
-              {
-                id: "count",
-                header: "Accesses",
-                accessor: (f) => f.count,
-                defaultSortDir: "desc",
-                cell: (f) => <span className="tabular-nums">{f.count.toLocaleString()}</span>,
-                align: "right",
-                width: "w-24",
-              },
-              {
-                id: "last_seen",
-                header: "Timestamp",
-                accessor: (f) => f.last_seen,
-                cell: (f) => (
-                  <span className="whitespace-nowrap text-muted-foreground">
-                    {formatDetected(f.last_seen)}
-                  </span>
-                ),
-                width: "w-44",
-              },
-              {
-                id: "actions",
-                header: "",
-                enableSorting: false,
-                cell: (f) => (
-                  <ListActionCell
-                    baseUrl={f.base_url}
-                    onBlacklisted={(host) =>
-                      setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
-                    }
-                  />
-                ),
-                width: "w-12",
-              },
-            ]}
+            columns={GRAPH_FLOWS_COLUMNS}
             data={graph.flows}
-            rowId={(f) => `${f.client_ip}|${f.server_ip}|${f.url}|${f.base_url}`}
+            rowId={flowsRowId}
             internalPagination
             defaultSortBy="count"
             defaultSortDir="desc"
