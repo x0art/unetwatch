@@ -16,7 +16,9 @@ _HISTORY_COUNT_SQL = (
 async def list_tracked_urls(
     db=Depends(get_db_conn),
     search: str | None = Query(None, max_length=200),
-    limit: int = Query(50, ge=1, le=500),
+    # Cap matches list_patterns (5000): the Findings page loads the full
+    # tracked-URL index with limit=5000 to badge "Tracked" rows.
+    limit: int = Query(50, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     sort_by: str = Query("id", pattern="^(id|url|source|status|last_checked_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
