@@ -243,6 +243,111 @@ async def top_clients(
     return {"items": items}
 
 
+@router.get("/client/{ip}")
+async def client_breakdown(
+    ip: str,
+    db=Depends(get_db_conn),
+    minutes: int | None = Query(None, ge=1, le=20160),
+    search: str | None = Query(None, max_length=200),
+    limit: int = Query(12, ge=1, le=50),
+):
+    """Per-client URL breakdown with counts — data for the drill-down radial.
+
+    The window, URL substring and top-N cap are applied in SQL together with
+    the whitelist ``NOT LIKE`` clauses; the grouped rows still carry
+    url/base_url, so the Python regex fallback re-filters them exactly like
+    ``findings_graph`` (belt-and-braces for patterns that can't be expressed
+    in SQL). ``total_accesses`` is the COUNT over the same WHERE — the cap
+    only trims the URL list, never the hub total.
+    """
+    wl_cursor = await db.execute(
+        "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
+    )
+    wl_rows = await wl_cursor.fetchall()
+    whitelist_patterns = [r[0] for r in wl_rows]
+    whitelist_regex = _build_pattern_regex(whitelist_patterns)
+    sql_clauses = _whitelist_sql_clauses(whitelist_patterns)
+
+    where = ["client_ip = ?", *sql_clauses]
+    params: list = [ip]
+    if minutes:
+        where.append("log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
+        params.append(f"-{minutes} minutes")
+    if search:
+        where.append("url LIKE ?")
+        params.append(f"%{search}%")
+    clause = f"WHERE {' AND '.join(where)}"
+
+    # When any whitelist pattern fell through to the Python fallback, the
+    # grouped rows are the only place the regex can be applied — the total
+    # must be summed from the filtered groups (a COUNT over the SQL WHERE
+    # would silently include whitelisted rows).
+    needs_python_fallback = bool(whitelist_regex) and not _whitelist_fully_sql(
+        whitelist_patterns, sql_clauses
+    )
+    if needs_python_fallback:
+        cursor = await db.execute(
+            f"""
+            SELECT url, base_url, COUNT(*) AS count, MAX(log_timestamp) AS last_seen
+            FROM findings
+            {clause}
+            GROUP BY url, base_url
+            ORDER BY count DESC, url
+            """,
+            params,
+        )
+        rows = [
+            dict(r)
+            for r in await cursor.fetchall()
+            if not (
+                re.search(whitelist_regex, str(r["url"]), re.IGNORECASE)
+                or re.search(whitelist_regex, str(r["base_url"]), re.IGNORECASE)
+            )
+        ]
+        return {
+            "client_ip": ip,
+            "source": "findings",
+            "total_accesses": sum(r["count"] for r in rows),
+            "es_online": True,
+            "urls": rows[:limit],
+        }
+
+    cursor = await db.execute(
+        f"""
+        SELECT url, base_url, COUNT(*) AS count, MAX(log_timestamp) AS last_seen
+        FROM findings
+        {clause}
+        GROUP BY url, base_url
+        ORDER BY count DESC, url
+        LIMIT ?
+        """,
+        (*params, limit),
+    )
+    rows = [dict(r) for r in await cursor.fetchall()]
+    if whitelist_regex:
+        # Belt-and-braces for rows that slipped through the LIKE clauses.
+        rows = [
+            r
+            for r in rows
+            if not (
+                re.search(whitelist_regex, str(r["url"]), re.IGNORECASE)
+                or re.search(whitelist_regex, str(r["base_url"]), re.IGNORECASE)
+            )
+        ]
+
+    total_cursor = await db.execute(
+        f"SELECT COUNT(*) AS total FROM findings {clause}", params
+    )
+    total = (await total_cursor.fetchone())["total"]
+    return {
+        "client_ip": ip,
+        "source": "findings",
+        "total_accesses": total,
+        "es_online": True,
+        "urls": rows,
+    }
+
+
 @router.delete("/", status_code=204)
 async def clear_findings(db=Depends(get_db_conn)):
     """Delete every persisted finding (admin reset of the findings table)."""
