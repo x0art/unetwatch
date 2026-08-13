@@ -228,17 +228,26 @@ export function DataTable<T>({
 
   const sortKey = sortState.key
   const sortDirState = sortState.dir
+
+  // Read the active sort column through a ref so a fresh-but-equal `columns`
+  // array (recreated on every parent render) can never re-trigger the sort
+  // memo. The memo re-runs only when the sort key actually changes.
+  const columnsRef = useRef(columns)
+  columnsRef.current = columns
+  const sortColumn = useMemo(
+    () => columnsRef.current.find((c) => c.id === sortKey) ?? null,
+    [sortKey],
+  )
+
   const sortedData = useMemo(() => {
-    if (controlled || !sortKey) return data
-    const col = columns.find((c) => c.id === sortKey)
-    if (!col) return data
+    if (controlled || !sortKey || !sortColumn) return data
     const dir = sortDirState === "asc" ? 1 : -1
     return [...data].sort((a, b) => {
-      const av = col.accessor ? col.accessor(a) : renderCellValue(col, a)
-      const bv = col.accessor ? col.accessor(b) : renderCellValue(col, b)
+      const av = sortColumn.accessor ? sortColumn.accessor(a) : renderCellValue(sortColumn, a)
+      const bv = sortColumn.accessor ? sortColumn.accessor(b) : renderCellValue(sortColumn, b)
       return compareValues(av, bv) * dir
     })
-  }, [data, columns, sortKey, sortDirState, controlled])
+  }, [data, sortKey, sortDirState, controlled, sortColumn])
 
   const alignClass = (align?: "left" | "center" | "right") =>
     align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"
