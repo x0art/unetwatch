@@ -318,11 +318,32 @@ export function SankeyDiagram({
   // graphs so hover/resize stays responsive without visible layout change.
   const layoutIterations = nodes.length > 60 ? 8 : nodes.length > 30 ? 12 : 16
 
+  // Last-pushed content, used to skip no-op re-renders. Reset whenever a
+  // fresh chart instance is created (see the init effect below): React
+  // StrictMode in dev mounts → unmounts → remounts, and the remounted chart
+  // must receive its option even though the data is unchanged — otherwise
+  // the new instance stays blank forever.
+  const prevNodes = useRef<SankeyNode[] | null>(null)
+  const prevLinks = useRef<SankeyLink[] | null>(null)
+  const prevLayerColors = useRef<Record<string, string> | undefined>(undefined)
+  const prevPalette = useRef<{
+    label: string
+    muted: string
+    card: string
+    border: string
+  } | null>(null)
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const chart = echarts.init(el)
     chartRef.current = chart
+    // A brand-new instance has never received an option — make the data
+    // effect below push one regardless of the unchanged-data guard.
+    prevNodes.current = null
+    prevLinks.current = null
+    prevLayerColors.current = undefined
+    prevPalette.current = null
 
     const onResize = () => chart.resize()
     const onWindowResize = () => onResize()
@@ -337,16 +358,6 @@ export function SankeyDiagram({
       chartRef.current = null
     }
   }, [])
-
-  const prevNodes = useRef<SankeyNode[] | null>(null)
-  const prevLinks = useRef<SankeyLink[] | null>(null)
-  const prevLayerColors = useRef<Record<string, string> | undefined>(undefined)
-  const prevPalette = useRef<{
-    label: string
-    muted: string
-    card: string
-    border: string
-  } | null>(null)
 
   useEffect(() => {
     const chart = chartRef.current
