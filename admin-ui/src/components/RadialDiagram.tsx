@@ -184,7 +184,18 @@ function buildOption(params: {
     },
     {
       type: "lines",
-      // Same dead-rAF rationale as the graph series above — no cartesian2d.
+      // MUST stay on cartesian2d (with the hidden 0-100 axes below): a lines
+      // series without an explicit coordinateSystem defaults to "geo", which
+      // is NOT registered in this tree-shaken build — ECharts' dev-mode
+      // LinesSeriesModel#getInitialData then throws "Unknown coordinate
+      // system geo" inside setOption and the whole chart (graph included)
+      // never paints. "view" is equally unregistered here, and "graphView"
+      // only creates instances for graph series, so the trail would never
+      // draw. cartesian2d is registered via GridComponent and maps the
+      // 0-100 trail coords through the hidden axes. Unlike the graph series
+      // above, this series is only the cosmetic moving-dot overlay — if a
+      // stalled rAF defers its paint, the graph itself is unaffected.
+      coordinateSystem: "cartesian2d",
       z: 3,
       silent: true,
       data: trailData,
@@ -228,6 +239,10 @@ function buildOption(params: {
         return data?.name ?? ""
       },
     },
+    // Hidden 0-100 axes: only the lines series uses cartesian2d (see above);
+    // they are invisible so the radial looks the same as with no axes.
+    xAxis: { min: 0, max: 100, show: false },
+    yAxis: { min: 0, max: 100, show: false },
     series,
   }
 }
@@ -259,11 +274,23 @@ export function RadialDiagram({
   const resolved = resolveAllColors(theme, undefined)
   const { nodes, center } = useMemo(() => layout(urls), [urls])
 
+  // Last-pushed content, used to skip no-op re-renders. Reset whenever a
+  // fresh chart instance is created (see the init effect below): React
+  // StrictMode in dev mounts → unmounts → remounts, and the remounted chart
+  // must receive its option even though the data is unchanged — otherwise
+  // the new instance stays blank forever.
+  const prev = useRef<{ clientIp: string; nodes: RadialNode[] } | null>(null)
+  const prevPalette = useRef<ResolvedColors["palette"] | null>(null)
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
     const chart = echarts.init(el)
     chartRef.current = chart
+    // A brand-new instance has never received an option — make the data
+    // effect below push one regardless of the unchanged-data guard.
+    prev.current = null
+    prevPalette.current = null
 
     const onResize = () => chart.resize()
     const onWindowResize = () => onResize()
@@ -278,9 +305,6 @@ export function RadialDiagram({
       chartRef.current = null
     }
   }, [])
-
-  const prev = useRef<{ clientIp: string; nodes: RadialNode[] } | null>(null)
-  const prevPalette = useRef<ResolvedColors["palette"] | null>(null)
 
   useEffect(() => {
     const chart = chartRef.current
