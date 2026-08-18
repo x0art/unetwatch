@@ -25,7 +25,12 @@ export interface SankeyLink {
   name?: string
 }
 
-const FALLBACK: Record<string, string> = {
+// Fallbacks used only when the live token can't be read or parsed (e.g. a
+// headless/jsdom render). They must match the THEME they belong to — the
+// production CSS minifier rewrites `oklch(0.47 0.13 235)` to the shorter
+// `oklch(47% .13 235)`, which older parsing missed and silently fell back to
+// the dark palette, leaving light-mode diagrams with light text on white.
+const FALLBACK_DARK: Record<string, string> = {
   "--color-info": "#5b8def",
   "--color-warning": "#e8a33d",
   "--color-danger": "#ef6a6a",
@@ -37,10 +42,27 @@ const FALLBACK: Record<string, string> = {
   "--color-border": "#3f3f4d",
 }
 
+const FALLBACK_LIGHT: Record<string, string> = {
+  "--color-info": "#006398",
+  "--color-warning": "#8A5700",
+  "--color-danger": "#C10000",
+  "--color-success": "#006C15",
+  "--color-primary": "#006398",
+  "--color-foreground": "#070B14",
+  "--color-muted-foreground": "#454E5B",
+  "--color-card": "#FFFFFF",
+  "--color-border": "#D0D4DB",
+}
+
+/** Parse an oklch() light/color/hue triple. Accepts both the decimal form
+ * browsers serialize in dev (`oklch(0.47 0.13 235)`) and the percentage
+ * form the production CSS minifier emits (`oklch(47% .13 235)`); hue may
+ * carry an optional `deg` suffix. Any trailing `/ alpha` is ignored. */
 function parseOklch(input: string): [number, number, number] | null {
-  const m = input.match(/^oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/)
+  const m = input.match(/^oklch\(\s*([\d.]+%?)\s+([\d.]+%?)\s+([\d.]+)(?:deg)?/)
   if (!m) return null
-  return [Number(m[1]), Number(m[2]), Number(m[3])]
+  const num = (s: string) => (s.endsWith("%") ? Number(s.slice(0, -1)) / 100 : Number(s))
+  return [num(m[1]), num(m[2]), Number(m[3])]
 }
 
 function oklchToSrgb(L: number, C: number, Hdeg: number): string {
@@ -69,17 +91,17 @@ function oklchToSrgb(L: number, C: number, Hdeg: number): string {
   return `rgb(${clamp(r_lin)}, ${clamp(g_lin)}, ${clamp(b_lin)})`
 }
 
-function resolveColor(raw: string): string {
+function resolveColor(raw: string, fallback: Record<string, string>): string {
   const m = raw.match(/var\((--[\w-]+)\)/)
   if (!m) return raw
   const token = m[1]
   const live = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
-  if (!live) return FALLBACK[token] ?? "#888"
+  if (!live) return fallback[token] ?? "#888"
 
   if (live.startsWith("oklch")) {
     const parsed = parseOklch(live)
     if (parsed) return oklchToSrgb(parsed[0], parsed[1], parsed[2])
-    return FALLBACK[token] ?? "#888"
+    return fallback[token] ?? "#888"
   }
   // Not oklch — a plain hex/rgb/named color passes straight through.
   return live
@@ -161,20 +183,23 @@ export function resolveAllColors(
   const key = `${theme}|${JSON.stringify(layerColors ?? {})}`
   const cached = _resolvedColorsCache.get(key)
   if (cached) return cached
+  // Fallbacks are theme-matched so an unreadable/unparseable token never
+  // paints dark-theme text onto the light-theme card (and vice versa).
+  const fallback = theme === "light" ? FALLBACK_LIGHT : FALLBACK_DARK
   const value: ResolvedColors = {
     palette: {
-      label: resolveColor("var(--color-foreground)"),
-      muted: resolveColor("var(--color-muted-foreground)"),
-      card: resolveColor("var(--color-card)"),
-      border: resolveColor("var(--color-border)"),
+      label: resolveColor("var(--color-foreground)", fallback),
+      muted: resolveColor("var(--color-muted-foreground)", fallback),
+      card: resolveColor("var(--color-card)", fallback),
+      border: resolveColor("var(--color-border)", fallback),
     },
     paletteColors: [
-      resolveColor("var(--color-info)"),
-      resolveColor("var(--color-warning)"),
-      resolveColor("var(--color-danger)"),
+      resolveColor("var(--color-info)", fallback),
+      resolveColor("var(--color-warning)", fallback),
+      resolveColor("var(--color-danger)", fallback),
     ],
     nodeColors: Object.fromEntries(
-      Object.entries(layerColors ?? {}).map(([layer, raw]) => [layer, resolveColor(raw)]),
+      Object.entries(layerColors ?? {}).map(([layer, raw]) => [layer, resolveColor(raw, fallback)]),
     ),
   }
   _resolvedColorsCache.set(key, value)
