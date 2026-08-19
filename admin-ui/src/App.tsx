@@ -18,6 +18,10 @@ import { ToastProvider, useToast, Skeleton } from "./components/ui"
 import { MotionGate, MotionPage } from "./components/motion"
 import { usePageVisible } from "./lib/utils"
 
+const BlockDomainPage = lazy(() =>
+  import("./components/BlockDomainPage").then((m) => ({ default: m.BlockDomainPage })),
+)
+
 const DashboardPage = lazy(() =>
   import("./components/DashboardPage").then((m) => ({ default: m.DashboardPage })),
 )
@@ -53,9 +57,14 @@ function PageFallback() {
   )
 }
 
+function isBlockDomainPath() {
+  return window.location.pathname === "/blockDomain"
+}
+
 function AppRoutes() {
   const { toast } = useToast()
   const pageVisible = usePageVisible()
+  const [blockDomainPath] = useState(isBlockDomainPath)
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
@@ -166,7 +175,29 @@ function AppRoutes() {
   }, [])
 
   if (!loggedIn) {
-    return <LoginPage onLogin={() => setLoggedIn(true)} />
+    // For the /blockDomain path, store the full URL so after login we
+    // redirect back to the same page with all query parameters intact.
+    const handleLogin = () => {
+      setLoggedIn(true)
+      if (blockDomainPath) {
+        // Force a re-render so the logged-in branch picks up the path
+        window.location.reload()
+      }
+    }
+    return (
+      <LoginPage
+        onLogin={handleLogin}
+      />
+    )
+  }
+
+  // Standalone /blockDomain page — rendered outside the normal AppShell
+  if (blockDomainPath) {
+    return (
+      <Suspense fallback={<div className="flex min-h-dvh items-center justify-center bg-background"><Skeleton className="h-10 w-48" /></div>}>
+        <BlockDomainPage />
+      </Suspense>
+    )
   }
 
   return (
