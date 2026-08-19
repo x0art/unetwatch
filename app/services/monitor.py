@@ -420,6 +420,52 @@ async def fetch_logs(minutes: int = 10):
                 log["webhook_error"] = str(e)
                 print(f"[{datetime.now(UTC).isoformat()}][WARN] Webhook failed: {e}")
 
+        # ── MS Teams Workflows Webhook ────────────────────────────────
+        if settings.msteams_webhook_url:
+            try:
+                from app.services.msteams import send_msteams_alert
+
+                # Collect unique domains and URLs from the grouped results
+                all_domains: list[str] = []
+                all_urls: list[str] = []
+                first_client_ip = ""
+                for doc in result:
+                    if not first_client_ip:
+                        first_client_ip = doc["client_ip"]
+                    all_domains.extend(doc.get("base_url", []))
+                    all_urls.extend(doc.get("url", []))
+                # Deduplicate while preserving order
+                seen_domains: set[str] = set()
+                unique_domains: list[str] = []
+                for d in all_domains:
+                    if d not in seen_domains:
+                        seen_domains.add(d)
+                        unique_domains.append(d)
+                seen_urls: set[str] = set()
+                unique_urls: list[str] = []
+                for u in all_urls:
+                    if u not in seen_urls:
+                        seen_urls.add(u)
+                        unique_urls.append(u)
+
+                pattern_names = ", ".join(block_patterns[:3])
+                if len(block_patterns) > 3:
+                    pattern_names += f" +{len(block_patterns) - 3} more"
+
+                await send_msteams_alert(
+                    webhook_url=settings.msteams_webhook_url,
+                    timestamp=datetime.now(UTC).isoformat(),
+                    client_ip=first_client_ip,
+                    pattern_match=pattern_names,
+                    target_domains=unique_domains,
+                    destination_urls=unique_urls,
+                    base_url=settings.base_url,
+                )
+                log["msteams_status"] = 200
+            except Exception as e:
+                log["msteams_error"] = str(e)
+                print(f"[{datetime.now(UTC).isoformat()}][WARN] MS Teams alert failed: {e}")
+
     except Exception as e:
         log["error"] = str(e)
         print(f"Error: {e}")

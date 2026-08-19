@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     elastic_user: str = "elastic"
     elastic_pass: str = "changeme"
     webhook_url: str = "https://n8n.example.com/webhook/your-webhook-id"
+    msteams_webhook_url: str = ""
+    # Base URL for generating clickable links in MS Teams alerts
+    # (e.g. "https://unetwatch.example.com"). Falls back to empty string.
+    base_url: str = ""
     poll_interval_minutes: int = 10
     es_query_size: int = 5000
     redirect_check_interval_minutes: int = 60

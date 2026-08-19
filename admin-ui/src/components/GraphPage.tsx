@@ -41,8 +41,7 @@ import {
 import { useAutoRefresh } from "../lib/utils"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
-import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
-import { RadialDiagram } from "./RadialDiagram"
+import { NetworkGraphDiagram, type NetworkNode, type NetworkLink } from "./NetworkGraphDiagram"
 
 function formatDetected(ts: string) {
   const date = new Date(ts)
@@ -264,21 +263,13 @@ const GRAPH_CLIENT_COLUMNS: DataTableColumn<ClientUrlCount>[] = [
   },
 ]
 
-function toSankey(graph: FindingsGraph): {
-  nodes: SankeyNode[]
-  links: SankeyLink[]
+function toNetworkGraph(graph: FindingsGraph): {
+  nodes: NetworkNode[]
+  links: NetworkLink[]
 } {
-  const layerOf = (id: string): number => {
-    if (id.startsWith("ip:")) return 0
-    if (id.startsWith("server:")) return 1
-    return 2
-  }
-
   // URLs are shown as host (FQDN) only, and every URL sharing a host merges
-  // into a single node so the flow stays readable — the host appears once no
-  // matter how many of its URLs are flagged. Full URLs are listed in the
-  // tooltip and stay available in the Access flows table.
-  const hosts = new Map<string, { id: string; host: string; urls: string[] }>()
+  // into a single node so the graph stays readable.
+  const hosts = new Map<string, { id: string; host: string; urls: string[]; count: number }>()
   const urlNodeToHostId = new Map<string, string>()
   for (const n of graph.nodes) {
     if (n.kind !== "url") continue
@@ -286,23 +277,28 @@ function toSankey(graph: FindingsGraph): {
     const hostId = `host:${host}`
     urlNodeToHostId.set(n.id, hostId)
     const h = hosts.get(host)
-    if (h) h.urls.push(n.label)
-    else hosts.set(host, { id: hostId, host, urls: [n.label] })
+    if (h) {
+      h.urls.push(n.label)
+      h.count += n.count
+    } else {
+      hosts.set(host, { id: hostId, host, urls: [n.label], count: n.count })
+    }
   }
 
-  const nodes: SankeyNode[] = [
+  const nodes: NetworkNode[] = [
     ...graph.nodes
       .filter((n) => n.kind !== "url")
       .map((n) => ({
         id: n.id,
         name: n.label,
-        layer: layerOf(n.id),
+        kind: n.kind,
+        value: n.count,
       })),
     ...[...hosts.values()].map((h) => ({
       id: h.id,
       name: h.host,
-      layer: 2,
-      // ECharts HTML tooltips need <br/> (a literal \n collapses to a space).
+      kind: "url",
+      value: h.count,
       detail:
         h.urls.length <= 4
           ? h.urls.join("<br/>")
@@ -311,14 +307,14 @@ function toSankey(graph: FindingsGraph): {
   ]
 
   // Rewrite url-node endpoints to their host node and merge parallel links.
-  const linkByKey = new Map<string, SankeyLink>()
+  const linkByKey = new Map<string, NetworkLink>()
   for (const l of graph.links) {
     const source = urlNodeToHostId.get(l.source) ?? l.source
     const target = urlNodeToHostId.get(l.target) ?? l.target
     if (source === target) continue
     const key = `${source}|${target}`
     const prev = linkByKey.get(key)
-    if (prev) prev.value += Math.max(1, l.count)
+    if (prev) prev.value = (prev.value ?? 0) + Math.max(1, l.count)
     else linkByKey.set(key, { source, target, value: Math.max(1, l.count) })
   }
 
@@ -519,7 +515,7 @@ export function GraphPage() {
     return { urls, ips }
   }, [graph])
 
-  const sankey = useMemo(() => (graph ? toSankey(graph) : null), [graph])
+  const networkGraph = useMemo(() => (graph ? toNetworkGraph(graph) : null), [graph])
 
   const graphEmpty = !loading && !error && (!graph || graph.nodes.length === 0)
 
@@ -649,12 +645,32 @@ export function GraphPage() {
               </div>
             ) : breakdown && breakdown.urls.length > 0 ? (
               <div className="p-4 sm:p-6">
-                <RadialDiagram
-                  clientIp={breakdown.client_ip}
-                  totalAccesses={breakdown.total_accesses}
-                  urls={breakdown.urls}
+                <NetworkGraphDiagram
+                  nodes={[
+                    {
+                      id: `ip:${breakdown.client_ip}`,
+                      name: breakdown.client_ip,
+                      kind: "ip",
+                      value: breakdown.total_accesses,
+                      detail: breakdown.client_ip,
+                      clickable: false,
+                    },
+                    ...breakdown.urls.map((u) => ({
+                      id: `url:${u.url}`,
+                      name: hostOf(u.url),
+                      kind: "url",
+                      value: u.count,
+                      detail: u.url,
+                      clickable: true,
+                    })),
+                  ]}
+                  links={breakdown.urls.map((u) => ({
+                    source: `ip:${breakdown.client_ip}`,
+                    target: `url:${u.url}`,
+                    value: u.count,
+                  }))}
                   onSelectUrl={setUrlFilter}
-                  ariaLabel={`URL access radial for ${breakdown.client_ip}`}
+                  ariaLabel={`URL access network for ${breakdown.client_ip}`}
                 />
               </div>
             ) : (
@@ -816,17 +832,12 @@ export function GraphPage() {
             }
             className="border-0"
           />
-        ) : sankey ? (
+        ) : networkGraph ? (
           <div className="p-4 sm:p-6">
-            <SankeyDiagram
-              nodes={sankey.nodes}
-              links={sankey.links}
-              layerColors={{
-                0: "var(--color-info)",
-                1: "var(--color-warning)",
-                2: "var(--color-danger)",
-              }}
-              ariaLabel="Client to server to URL alluvial flow"
+            <NetworkGraphDiagram
+              nodes={networkGraph.nodes}
+              links={networkGraph.links}
+              ariaLabel="Client to server to URL network graph"
             />
           </div>
         ) : null}

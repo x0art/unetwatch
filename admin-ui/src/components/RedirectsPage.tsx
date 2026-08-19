@@ -11,7 +11,6 @@ import {
 } from "lucide-react"
 import {
   type RedirectGraph,
-  type RedirectLink,
   type TrackedUrl,
   type UrlRedirectHistory,
   addBaseUrlToBlacklist,
@@ -38,7 +37,7 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
-import { RedirectFlowDiagram, type FlowLink, type FlowNode } from "./RedirectFlowDiagram"
+import { NetworkGraphDiagram, type NetworkNode, type NetworkLink } from "./NetworkGraphDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
@@ -246,21 +245,11 @@ function shortUrl(url: string): string {
  * table + per-URL history drawer, not in the live flow. Tracked URLs keep
  * their status color; pure redirect targets (waypoints/destinations) render
  * as info-colored nodes. */
-function toFlow(graph: RedirectGraph | null): { nodes: FlowNode[]; links: FlowLink[] } {
+function toFlow(graph: RedirectGraph | null): { nodes: NetworkNode[]; links: NetworkLink[] } {
   if (!graph) return { nodes: [], links: [] }
 
   const active = graph.links.filter((l) => l.active)
   if (active.length === 0) return { nodes: [], links: [] }
-
-  // Adjacency for depth computation.
-  const outgoing = new Map<string, RedirectLink[]>()
-  const incoming = new Map<string, RedirectLink[]>()
-  for (const l of active) {
-    if (!outgoing.has(l.source)) outgoing.set(l.source, [])
-    if (!incoming.has(l.target)) incoming.set(l.target, [])
-    outgoing.get(l.source)!.push(l)
-    incoming.get(l.target)!.push(l)
-  }
 
   // Every URL that appears in an active hop is a node; drop nodes with no
   // active edges (e.g. stale tracked URLs whose chain moved on).
@@ -270,32 +259,18 @@ function toFlow(graph: RedirectGraph | null): { nodes: FlowNode[]; links: FlowLi
     nodeIds.add(l.target)
   }
 
-  // Longest-path depth: a node's layer is the farthest a chain can reach
-  // before it, so roots sit at 0 and terminals on the last layer.
-  const depth = new Map<string, number>()
-  const visit = (id: string): number => {
-    const cached = depth.get(id)
-    if (cached !== undefined) return cached
-    const parents = incoming.get(id) ?? []
-    const d = parents.length === 0 ? 0 : 1 + Math.max(...parents.map((p) => visit(p.source)))
-    depth.set(id, d)
-    return d
-  }
-  for (const id of nodeIds) visit(id)
-
-  const nodes: FlowNode[] = [...nodeIds].map((id) => {
+  const nodes: NetworkNode[] = [...nodeIds].map((id) => {
     const tracked = graph.nodes.find((n) => n.id === id)
     return {
       id,
       name: shortUrl(tracked?.label ?? id),
+      kind: tracked?.status === "redirect" ? "destination" : undefined,
       detail: tracked?.label ?? id,
-      layer: depth.get(id) ?? 0,
-      status: tracked?.status,
       clickable: !!tracked,
     }
   })
 
-  const links: FlowLink[] = active.map((l) => ({
+  const links: NetworkLink[] = active.map((l) => ({
     source: l.source,
     target: l.target,
     value: 1,
@@ -668,11 +643,12 @@ export function RedirectsPage() {
         ) : (
           <div className="p-4 sm:p-6">
             {flow && flow.links.length > 0 ? (
-              <RedirectFlowDiagram
+              <NetworkGraphDiagram
                 nodes={flow.nodes}
                 links={flow.links}
+                directed
                 onSelectUrl={focusTable}
-                ariaLabel="Redirect source to destination flow"
+                ariaLabel="Redirect source to destination network"
               />
             ) : (
               <p className="py-8 text-center text-sm text-muted-foreground">
