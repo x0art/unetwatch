@@ -77,8 +77,9 @@ def build_adaptive_card(
         })
 
     card = {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
-        "version": "1.5",
+        "version": "1.4",
         "body": [
             {
                 "type": "TextBlock",
@@ -175,10 +176,18 @@ async def send_msteams_alert(
         base_url=base_url,
     )
 
-    # Teams Workflows webhooks expect the Adaptive Card content directly
-    # at the top level (not wrapped in an attachments array, which is the
-    # format for Office/Outlook connectors).
-    payload = card
+    # Teams Workflows webhooks expect the Adaptive Card wrapped in a
+    # message envelope — NOT sent as a bare card at the top level.
+    payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "contentUrl": None,
+                "content": card,
+            }
+        ],
+    }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(webhook_url, json=payload, timeout=15) as response:
