@@ -396,6 +396,10 @@ export function GraphPage() {
   const [urlBreakdownError, setUrlBreakdownError] = useState<string | null>(null)
   const [urlPickerQuery, setUrlPickerQuery] = useState("")
 
+  // ── Node-click filter state (aggregate flows table) ────────────
+  const [ipFilter, setIpFilter] = useState<string | null>(null)
+  const [graphUrlFilter, setGraphUrlFilter] = useState<string | null>(null)
+
   // Sync live state into the module-scope flows-table column handles.
   GRAPH_UI.whitelistIndex = whitelistIndex
   GRAPH_UI.blacklistIndex = blacklistIndex
@@ -558,6 +562,17 @@ export function GraphPage() {
 
   const clearUrl = useCallback(() => {
     setSelectedUrl(null)
+  }, [])
+
+  // Node click in the aggregate graph → filter the flows table.
+  const handleGraphNodeClick = useCallback((kind: string, name: string) => {
+    if (kind === "ip") {
+      setIpFilter(name)
+      setGraphUrlFilter(null)
+    } else if (kind === "url") {
+      setGraphUrlFilter(name)
+      setIpFilter(null)
+    }
   }, [])
 
   // Load whitelist patterns and blacklist set for badge indicators.
@@ -1116,6 +1131,7 @@ export function GraphPage() {
             <NetworkGraphDiagram
               nodes={networkGraph.nodes}
               links={networkGraph.links}
+              onNodeClick={handleGraphNodeClick}
               ariaLabel="Client to server to URL network graph"
             />
           </div>
@@ -1140,10 +1156,41 @@ export function GraphPage() {
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Access flows</h3>
             <p className="text-xs text-muted-foreground">
-              Client → server → URL triples for the flagged URLs shown above
+              Client → server → URL triples. Click a node in the graph to filter.
             </p>
           </div>
         </div>
+        {(ipFilter || graphUrlFilter) && (
+          <div className="mb-3 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Filtered:</span>
+            {ipFilter && (
+              <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+                IP: {ipFilter}
+                <button
+                  type="button"
+                  onClick={() => setIpFilter(null)}
+                  aria-label="Clear IP filter"
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            )}
+            {graphUrlFilter && (
+              <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+                URL: {graphUrlFilter}
+                <button
+                  type="button"
+                  onClick={() => setGraphUrlFilter(null)}
+                  aria-label="Clear URL filter"
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            )}
+          </div>
+        )}
         {loading ? (
           <div className="space-y-3" aria-busy="true">
             <Skeleton className="h-48 w-full rounded-lg" />
@@ -1151,7 +1198,11 @@ export function GraphPage() {
         ) : graph && graph.flows.length > 0 ? (
           <DataTable
             columns={GRAPH_FLOWS_COLUMNS}
-            data={graph.flows}
+            data={graph.flows.filter((f) => {
+              if (ipFilter && f.client_ip !== ipFilter) return false
+              if (graphUrlFilter && f.base_url !== graphUrlFilter && f.url !== graphUrlFilter) return false
+              return true
+            })}
             rowId={flowsRowId}
             internalPagination
             defaultSortBy="count"

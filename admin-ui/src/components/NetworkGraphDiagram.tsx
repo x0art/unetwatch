@@ -236,6 +236,7 @@ export function NetworkGraphDiagram({
   height = 540,
   directed = true,
   onSelectUrl,
+  onNodeClick,
   className,
   ariaLabel,
 }: {
@@ -244,6 +245,8 @@ export function NetworkGraphDiagram({
   height?: number
   directed?: boolean
   onSelectUrl?: (url: string) => void
+  /** Generic callback for any node click. Fires with the node kind and name. */
+  onNodeClick?: (kind: string, name: string) => void
   className?: string
   ariaLabel?: string
 }) {
@@ -308,19 +311,34 @@ export function NetworkGraphDiagram({
     chart.getZr().flush()
   }, [nodes, links, resolved, reduced, directed])
 
-  // Click a URL node → let the parent filter the table.
+  // Click a node → fire onSelectUrl (for URL nodes) and/or onNodeClick.
   useEffect(() => {
     const chart = chartRef.current
-    if (!chart || !onSelectUrl) return
+    if (!chart) return
+    const hasHandler = !!onSelectUrl || !!onNodeClick
+    if (!hasHandler) return
     const onClick = (params: ECElementEvent) => {
-      const data = (params.data as { url?: string } | undefined)
-      if (data?.url) onSelectUrl(data.url)
+      const data = params.data as
+        | { id?: string; url?: string; name?: string; detail?: string }
+        | undefined
+      if (!data) return
+      // Fire onSelectUrl for nodes that have a clickable URL.
+      if (data.url && onSelectUrl) onSelectUrl(data.url)
+      // Fire onNodeClick for any node — derive kind from the id prefix.
+      if (onNodeClick && data.id) {
+        const kind = data.id.startsWith("ip:") ? "ip"
+          : data.id.startsWith("url:") ? "url"
+          : data.id.startsWith("server:") ? "server"
+          : data.id.startsWith("host:") ? "url"
+          : "unknown"
+        onNodeClick(kind, data.name ?? data.detail ?? data.id)
+      }
     }
     chart.on("click", onClick)
     return () => {
       chart.off("click", onClick)
     }
-  }, [onSelectUrl])
+  }, [onSelectUrl, onNodeClick])
 
   const handleZoomIn = useCallback(() => {
     const chart = chartRef.current
