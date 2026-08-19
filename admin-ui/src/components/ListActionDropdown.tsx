@@ -1,4 +1,5 @@
-import { useCallback, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react"
+import { createPortal } from "react-dom"
 import { Ban, ChevronDown, ShieldCheck } from "lucide-react"
 import { addBaseUrlToBlacklist } from "../api"
 import { Button, useToast } from "./ui"
@@ -44,9 +45,10 @@ export interface RowAction {
 export function RowActionsDropdown({ actions }: { actions: RowAction[] }) {
   const [open, setOpen] = useState(false)
   const anyPending = actions.some((a) => a.disabled)
+  const anchorRef = useRef<HTMLDivElement>(null)
 
   return (
-    <div className="relative inline-block">
+    <div className="relative inline-block" ref={anchorRef}>
       <Button
         variant="ghost"
         size="sm"
@@ -58,43 +60,115 @@ export function RowActionsDropdown({ actions }: { actions: RowAction[] }) {
         <ChevronDown className="h-3.5 w-3.5" />
       </Button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-50 mt-1 w-52 rounded-md border border-border bg-popover p-1 shadow-lg">
-            {actions.map((action) => {
-              const Icon = action.icon
-              const colorClass =
-                action.variant === "destructive"
-                  ? "text-destructive"
-                  : action.variant === "success"
-                    ? "text-success"
-                    : "text-muted-foreground"
-              return (
-                <div key={action.key}>
-                  {action.separator && <div className="my-1 border-t border-border" />}
-                  <button
-                    type="button"
-                    className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted ${
-                      action.variant === "destructive" ? "hover:text-destructive" : ""
-                    }`}
-                    onClick={() => {
-                      setOpen(false)
-                      action.onClick()
-                    }}
-                    disabled={action.disabled}
-                  >
-                    <Icon className={`h-3.5 w-3.5 ${colorClass}`} />
-                    {action.label}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        </>
-      )}
+      {open && <RowActionsMenu actions={actions} anchorRef={anchorRef} onClose={() => setOpen(false)} />}
     </div>
   )
+}
+
+/**
+ * Dropdown menu rendered via a React portal to escape any overflow-
+ * clipping ancestor (e.g. the DataTable's overflow-x-auto wrapper).
+ * Positioned relative to the anchor button using getBoundingClientRect.
+ */
+function RowActionsMenu({
+  actions,
+  anchorRef,
+  onClose,
+}: {
+  actions: RowAction[]
+  anchorRef: React.RefObject<HTMLDivElement | null>
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+
+  // Position the menu below the anchor button, clamped to the viewport.
+  useEffect(() => {
+    const anchor = anchorRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const menuW = 208 // w-52 = 13rem = 208px
+    let left = rect.right - menuW
+    if (left < 4) left = 4
+    if (left + menuW > window.innerWidth - 4) left = window.innerWidth - menuW - 4
+    setPos({ top: rect.bottom + 4, left })
+  }, [anchorRef])
+
+  // Close on click outside or Escape.
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)
+      ) {
+        onClose()
+      }
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("mousedown", handleClick)
+    document.addEventListener("keydown", handleKey)
+    return () => {
+      document.removeEventListener("mousedown", handleClick)
+      document.removeEventListener("keydown", handleKey)
+    }
+  }, [onClose, anchorRef])
+
+  // Create a container element appended to document.body for the portal.
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  if (!containerRef.current) {
+    const el = document.createElement("div")
+    el.className = "fixed z-[100]"
+    document.body.appendChild(el)
+    containerRef.current = el
+  }
+  useEffect(() => {
+    return () => {
+      containerRef.current?.remove()
+      containerRef.current = null
+    }
+  }, [])
+
+  const menu = (
+    <div
+      ref={menuRef}
+      className="w-52 rounded-md border border-border bg-popover p-1 shadow-lg"
+      style={{ position: "fixed", top: pos.top, left: pos.left }}
+    >
+      {actions.map((action) => {
+        const Icon = action.icon
+        const colorClass =
+          action.variant === "destructive"
+            ? "text-destructive"
+            : action.variant === "success"
+              ? "text-success"
+              : "text-muted-foreground"
+        return (
+          <div key={action.key}>
+            {action.separator && <div className="my-1 border-t border-border" />}
+            <button
+              type="button"
+              className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted ${
+                action.variant === "destructive" ? "hover:text-destructive" : ""
+              }`}
+              onClick={() => {
+                onClose()
+                action.onClick()
+              }}
+              disabled={action.disabled}
+            >
+              <Icon className={`h-3.5 w-3.5 ${colorClass}`} />
+              {action.label}
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  if (!containerRef.current) return null
+  return createPortal(menu, containerRef.current)
 }
 
 /* ── Blacklist / Whitelist action factory ──────────────────────────────── */
