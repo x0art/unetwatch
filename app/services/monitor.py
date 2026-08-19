@@ -460,6 +460,24 @@ async def fetch_logs(minutes: int = 10):
                 if len(block_patterns) > 3:
                     pattern_names += f" +{len(block_patterns) - 3} more"
 
+                log[
+                    "msteams_preview"
+                ] = {
+                    "url": settings.msteams_webhook_url[:60] + "..."
+                    if len(settings.msteams_webhook_url) > 60
+                    else settings.msteams_webhook_url,
+                    "client_ip": first_client_ip,
+                    "pattern_match": pattern_names,
+                    "domains_count": len(unique_domains),
+                    "urls_count": len(unique_urls),
+                    "base_url": settings.base_url or "(not set)",
+                }
+                print(
+                    f"[{datetime.now(UTC).isoformat()}][INFO] "
+                    f"MS Teams alert → {len(unique_domains)} domains, "
+                    f"{len(unique_urls)} urls, pattern={pattern_names}"
+                )
+
                 msteams_status = await send_msteams_alert(
                     webhook_url=settings.msteams_webhook_url,
                     timestamp=datetime.now(UTC).isoformat(),
@@ -470,6 +488,10 @@ async def fetch_logs(minutes: int = 10):
                     base_url=settings.base_url,
                 )
                 log["msteams_status"] = msteams_status
+                print(
+                    f"[{datetime.now(UTC).isoformat()}][INFO] "
+                    f"MS Teams webhook response: status={msteams_status}"
+                )
             except Exception as e:
                 log["msteams_error"] = str(e)
                 print(f"[{datetime.now(UTC).isoformat()}][WARN] MS Teams alert failed: {e}")
