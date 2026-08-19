@@ -21,28 +21,6 @@ function formatLabel(name: string): string {
   return name.length > MAX_LABEL ? `${name.slice(0, MAX_LABEL - 1)}…` : name
 }
 
-/** All node ids reachable from `id` through the links, traversed both ways. */
-function componentOf(id: string, links: NetworkLink[]): Set<string> {
-  const adj = new Map<string, Set<string>>()
-  for (const l of links) {
-    if (!adj.has(l.source)) adj.set(l.source, new Set())
-    if (!adj.has(l.target)) adj.set(l.target, new Set())
-    adj.get(l.source)!.add(l.target)
-    adj.get(l.target)!.add(l.source)
-  }
-  const comp = new Set<string>()
-  const queue = [id]
-  while (queue.length) {
-    const cur = queue.pop()!
-    if (comp.has(cur)) continue
-    comp.add(cur)
-    for (const nb of adj.get(cur) ?? []) {
-      if (!comp.has(nb)) queue.push(nb)
-    }
-  }
-  return comp
-}
-
 export interface NetworkNode {
   id: string
   name: string
@@ -113,16 +91,14 @@ function buildOption(params: {
   links: NetworkLink[]
   resolved: ResolvedColors
   reduced: boolean
-  hovered: Set<string> | null
   directed: boolean
 }): EChartsOption {
-  const { nodes, links, resolved, reduced, hovered, directed } = params
+  const { nodes, links, resolved, reduced, directed } = params
   const { palette, paletteColors } = resolved
 
   const maxValue = Math.max(1, ...nodes.map((n) => n.value ?? 1))
 
   const graphData = nodes.map((n) => {
-    const inComponent = hovered === null || hovered.has(n.id)
     const colorIdx = kindColorIndex(n.kind)
     const size = n.value ? 14 + 18 * (n.value / maxValue) : 16
     return {
@@ -135,7 +111,6 @@ function buildOption(params: {
         color: paletteColors[colorIdx],
         borderColor: palette.border,
         borderWidth: 1.5,
-        opacity: hovered === null ? 0.9 : inComponent ? 1 : 0.15,
       },
       label: {
         show: true,
@@ -144,15 +119,12 @@ function buildOption(params: {
         color: palette.label,
         fontFamily: "ui-monospace, SFMono-Regular, monospace",
         fontSize: 10,
-        opacity: hovered === null ? 1 : inComponent ? 1 : 0.25,
         formatter: () => formatLabel(n.name),
       },
     }
   })
 
   const graphLinks = links.map((l) => {
-    const inComponent =
-      hovered === null || (hovered.has(l.source) && hovered.has(l.target))
     const w = l.value ? 1 + Math.min(3, l.value * 0.5) : 1.5
     return {
       source: l.source,
@@ -162,13 +134,16 @@ function buildOption(params: {
       lineStyle: {
         color: palette.muted,
         width: w,
-        opacity: hovered === null ? 0.4 : inComponent ? 0.7 : 0.06,
+        opacity: 0.4,
         curveness: 0.2,
       },
     }
   })
 
   return {
+    // No enter animation: the first paint must not depend on
+    // requestAnimationFrame ticks (stalled rAF in embedded webviews / hidden
+    // tabs leaves the chart blank forever).
     animation: false,
     animationDuration: 0,
     animationEasing: "cubicOut",
@@ -210,9 +185,18 @@ function buildOption(params: {
         data: graphData as unknown as GraphSeriesOption["data"],
         links: graphLinks,
         emphasis: {
+          // Use adjacency focus: ECharts natively highlights the hovered node
+          // and its direct neighbors, dimming everything else. No need to
+          // rebuild the option on every mouse event.
           focus: "adjacency",
           itemStyle: { borderWidth: 2.5 },
+          lineStyle: { opacity: 0.8 },
         },
+        blur: {
+          itemStyle: { opacity: 0.12 },
+          lineStyle: { opacity: 0.05 },
+        },
+        // State changes snap; only data-change animation runs (cheap hover).
         stateAnimation: { duration: 0 },
         edgeSymbol: directed ? ["none", "arrow"] : ["none", "none"],
         edgeSymbolSize: directed ? [0, 6] : [0, 0],
@@ -251,16 +235,6 @@ export function NetworkGraphDiagram({
 
   const prev = useRef<{ nodes: NetworkNode[]; links: NetworkLink[] } | null>(null)
   const prevPalette = useRef<ResolvedColors["palette"] | null>(null)
-  // Imperatively driven hover state (not React state) for synchronous repaint.
-  const hoveredRef = useRef<Set<string> | null>(null)
-  const linksRef = useRef(links)
-  linksRef.current = links
-  const nodesRef = useRef(nodes)
-  nodesRef.current = nodes
-  const resolvedRef = useRef(resolved)
-  resolvedRef.current = resolved
-  const directedRef = useRef(directed)
-  directedRef.current = directed
 
   useEffect(() => {
     const el = ref.current
@@ -269,7 +243,6 @@ export function NetworkGraphDiagram({
     chartRef.current = chart
     prev.current = null
     prevPalette.current = null
-    hoveredRef.current = null
 
     const onResize = () => chart.resize()
     const onWindowResize = () => onResize()
@@ -304,49 +277,13 @@ export function NetworkGraphDiagram({
 
     prev.current = { nodes, links }
     prevPalette.current = resolved.palette
-    hoveredRef.current = null
 
     chart.setOption(
-      buildOption({ nodes, links, resolved, reduced, hovered: null, directed }),
+      buildOption({ nodes, links, resolved, reduced, directed }),
       true,
     )
     chart.getZr().flush()
   }, [nodes, links, resolved, reduced, directed])
-
-  // Hover → highlight connected component; leave → restore.
-  useEffect(() => {
-    const chart = chartRef.current
-    if (!chart) return
-
-    const pushHover = (comp: Set<string> | null) => {
-      hoveredRef.current = comp
-      chart.setOption(
-        buildOption({
-          nodes: nodesRef.current,
-          links: linksRef.current,
-          resolved: resolvedRef.current,
-          reduced,
-          hovered: comp,
-          directed: directedRef.current,
-        }),
-        true,
-      )
-      chart.getZr().flush()
-    }
-
-    const onMouseOver = (params: ECElementEvent) => {
-      const d = params.data as { id?: string } | undefined
-      if (d?.id) pushHover(componentOf(d.id, linksRef.current))
-      else pushHover(null)
-    }
-    const onMouseOut = () => pushHover(null)
-    chart.on("mouseover", onMouseOver)
-    chart.on("mouseout", onMouseOut)
-    return () => {
-      chart.off("mouseover", onMouseOver)
-      chart.off("mouseout", onMouseOut)
-    }
-  }, [reduced])
 
   // Click a URL node → let the parent filter the table.
   useEffect(() => {
