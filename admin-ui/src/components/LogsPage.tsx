@@ -651,7 +651,7 @@ export function LogsPage() {
                             ? detail.msteams_status >= 200 && detail.msteams_status < 300
                               ? "Delivered successfully"
                               : `HTTP ${detail.msteams_status}`
-                            : "No MS Teams webhook configured"}
+                            : "Not attempted"}
                       </p>
                     </div>
                     {detail.msteams_error || (detail.msteams_status !== null && detail.msteams_status !== undefined && detail.msteams_status >= 300) ? (
