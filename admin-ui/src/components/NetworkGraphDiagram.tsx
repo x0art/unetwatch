@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import * as echarts from "echarts/core"
 import { GraphChart, EffectScatterChart } from "echarts/charts"
 import type { GraphSeriesOption, EffectScatterSeriesOption } from "echarts/charts"
@@ -10,6 +10,7 @@ import type {
   ECElementEvent,
   TooltipComponentFormatterCallbackParams,
 } from "echarts"
+import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react"
 import { useTheme } from "./Sidebar"
 import { resolveAllColors, type ResolvedColors } from "./SankeyDiagram"
 
@@ -84,7 +85,6 @@ function buildOption(params: {
 
   const maxValue = Math.max(1, ...nodes.map((n) => n.value ?? 1))
 
-  // ── Graph nodes ─────────────────────────────────────────────────
   const graphData = nodes.map((n) => {
     const colorIdx = kindColorIndex(n.kind)
     const size = n.value ? 14 + 18 * (n.value / maxValue) : 16
@@ -115,7 +115,6 @@ function buildOption(params: {
     }
   })
 
-  // ── Graph edges ─────────────────────────────────────────────────
   const graphLinks = links.map((l) => {
     const w = l.value ? 1 + Math.min(4, l.value * 0.6) : 1.5
     return {
@@ -127,12 +126,11 @@ function buildOption(params: {
         color: palette.muted,
         width: w,
         opacity: 0.35,
-        curveness: 0.15 + Math.random() * 0.15, // slight random curve to reduce overlap
+        curveness: 0.15 + Math.random() * 0.15,
       },
     }
   })
 
-  // ── Glow scatter (subtle pulsing halos on high-value nodes) ─────
   const glowNodes = nodes
     .filter((n) => (n.value ?? 0) > maxValue * 0.4)
     .map((n) => {
@@ -149,7 +147,6 @@ function buildOption(params: {
     })
 
   const series: (GraphSeriesOption | EffectScatterSeriesOption)[] = [
-    // Main graph
     {
       type: "graph",
       layout: "force",
@@ -180,7 +177,6 @@ function buildOption(params: {
     },
   ]
 
-  // Glow halos on prominent nodes (disabled under reduced motion)
   if (!reduced && glowNodes.length > 0) {
     series.push({
       type: "effectScatter",
@@ -326,13 +322,65 @@ export function NetworkGraphDiagram({
     }
   }, [onSelectUrl])
 
+  const handleZoomIn = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    chart.dispatchAction({ type: "graphRoam", zoom: 1.3 })
+  }, [])
+
+  const handleZoomOut = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    chart.dispatchAction({ type: "graphRoam", zoom: 0.77 })
+  }, [])
+
+  const handleFitView = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    // Reset to the original option which resets the zoom/pan state.
+    chart.setOption(
+      buildOption({ nodes, links, resolved, reduced, directed }),
+      true,
+    )
+    chart.getZr().flush()
+  }, [nodes, links, resolved, reduced, directed])
+
   return (
-    <div
-      ref={ref}
-      role="img"
-      aria-label={ariaLabel ?? "Network graph diagram"}
-      className={className}
-      style={{ width: "100%", height }}
-    />
+    <div className="relative">
+      <div
+        ref={ref}
+        role="img"
+        aria-label={ariaLabel ?? "Network graph diagram"}
+        className={className}
+        style={{ width: "100%", height }}
+      />
+      {/* Zoom controls — bottom-right overlay */}
+      <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={handleZoomIn}
+          aria-label="Zoom in"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ZoomIn className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleZoomOut}
+          aria-label="Zoom out"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ZoomOut className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleFitView}
+          aria-label="Reset zoom"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
   )
 }

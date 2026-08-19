@@ -526,6 +526,32 @@ export async function runClientQuery(
   return request(`/query/client?${qs}`)
 }
 
+/* ── Per-URL client drill-down (Traffic page reverse) ─────────── */
+
+export interface UrlClientCount {
+  client_ip: string
+  count: number
+  last_seen: string
+}
+
+export interface UrlBreakdown {
+  url: string
+  source: "findings"
+  total_accesses: number
+  es_online: boolean
+  clients: UrlClientCount[]
+}
+
+export async function getUrlBreakdown(
+  url: string,
+  opts?: { minutes?: number; limit?: number },
+): Promise<UrlBreakdown> {
+  const qs = new URLSearchParams()
+  if (opts?.minutes) qs.set("minutes", String(opts.minutes))
+  if (opts?.limit) qs.set("limit", String(opts.limit))
+  return request(`/findings/url/${encodeURIComponent(url)}?${qs}`)
+}
+
 /* ── Blacklist plain-text feeds (for external integrations) ──────── */
 
 export async function getBlacklistUrls(): Promise<string> {

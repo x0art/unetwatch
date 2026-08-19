@@ -13,11 +13,14 @@ import {
   type ClientBreakdown,
   type ClientUrlCount,
   type FindingsGraph,
+  type UrlBreakdown,
+  type UrlClientCount,
   type GraphFlow,
   type GraphNode,
   getBlacklistSet,
   getClientBreakdown,
   getFindingsGraph,
+  getUrlBreakdown,
   getTopClients,
   listPatterns,
   type Pattern,
@@ -90,11 +93,13 @@ const GRAPH_UI: {
   blacklistIndex: Record<string, true>
   onBlacklisted: (host: string) => void
   onClientClick: (ip: string) => void
+  onUrlClick: (url: string) => void
 } = {
   whitelistIndex: {},
   blacklistIndex: {},
   onBlacklisted: () => {},
   onClientClick: () => {},
+  onUrlClick: () => {},
 }
 
 /** Stable row identity for the access-flows table. */
@@ -148,9 +153,15 @@ const GRAPH_FLOWS_COLUMNS: DataTableColumn<GraphFlow>[] = [
     cell: (f) => (
       <div className="flex items-center gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="block max-w-[420px] truncate font-mono text-xs" title={f.url}>
+          <button
+            type="button"
+            onClick={() => GRAPH_UI.onUrlClick(f.url)}
+            title={`Drill into ${f.url}`}
+            aria-label={`Drill into URL ${f.url}`}
+            className="block max-w-[420px] truncate font-mono text-xs transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             {f.url}
-          </span>
+          </button>
           <CopyUrlButton value={f.url} label="URL" />
         </span>
         {GRAPH_UI.whitelistIndex[f.base_url] ? (
@@ -263,6 +274,42 @@ const GRAPH_CLIENT_COLUMNS: DataTableColumn<ClientUrlCount>[] = [
   },
 ]
 
+/* Module-scope columns for the per-URL clients table. */
+const URL_CLIENT_COLUMNS: DataTableColumn<UrlClientCount>[] = [
+  {
+    id: "client_ip",
+    header: "Client IP",
+    accessor: (c) => c.client_ip,
+    defaultSortDir: "asc",
+    cell: (c) => (
+      <span className="flex items-center gap-1.5">
+        <span className="font-mono text-xs">{c.client_ip}</span>
+        <CopyUrlButton value={c.client_ip} label="Client IP" />
+      </span>
+    ),
+  },
+  {
+    id: "count",
+    header: "Accesses",
+    accessor: (c) => c.count,
+    defaultSortDir: "desc",
+    cell: (c) => <span className="tabular-nums">{c.count.toLocaleString()}</span>,
+    align: "right",
+    width: "w-24",
+  },
+  {
+    id: "last_seen",
+    header: "Last seen",
+    accessor: (c) => c.last_seen,
+    cell: (c) => (
+      <span className="whitespace-nowrap text-muted-foreground">
+        {formatDetected(c.last_seen)}
+      </span>
+    ),
+    width: "w-44",
+  },
+]
+
 function toNetworkGraph(graph: FindingsGraph): {
   nodes: NetworkNode[]
   links: NetworkLink[]
@@ -342,6 +389,13 @@ export function GraphPage() {
   const [topClients, setTopClients] = useState<TopClient[]>([])
   const [pickerQuery, setPickerQuery] = useState("")
 
+  // ── URL drill-down state ────────────────────────────────────────
+  const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
+  const [urlBreakdown, setUrlBreakdown] = useState<UrlBreakdown | null>(null)
+  const [urlBreakdownLoading, setUrlBreakdownLoading] = useState(false)
+  const [urlBreakdownError, setUrlBreakdownError] = useState<string | null>(null)
+  const [urlPickerQuery, setUrlPickerQuery] = useState("")
+
   // Sync live state into the module-scope flows-table column handles.
   GRAPH_UI.whitelistIndex = whitelistIndex
   GRAPH_UI.blacklistIndex = blacklistIndex
@@ -357,6 +411,8 @@ export function GraphPage() {
   // interval closure never goes stale across client changes.
   const selectedClientRef = useRef<string | null>(null)
   selectedClientRef.current = selectedClient
+  const selectedUrlRef = useRef<string | null>(null)
+  selectedUrlRef.current = selectedUrl
 
   const fetchGraph = useCallback(() => {
     let cancelled = false
@@ -439,12 +495,43 @@ export function GraphPage() {
   // when the *selection* changes — not just when the filter options do.
   useEffect(() => fetchBreakdown(), [fetchBreakdown, selectedClient])
 
+  // ── URL drill-down fetch ────────────────────────────────────────
+  const fetchUrlBreakdown = useCallback(() => {
+    const url = selectedUrlRef.current
+    if (!url) return
+    let cancelled = false
+    setUrlBreakdownLoading(true)
+    setUrlBreakdownError(null)
+    getUrlBreakdown(url, {
+      minutes: windowMinutes === "all" ? undefined : Number(windowMinutes),
+      limit: Number(cap),
+    })
+      .then((b) => {
+        if (!cancelled) setUrlBreakdown(b)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setUrlBreakdownError((e as Error).message)
+          setUrlBreakdown(null)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setUrlBreakdownLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [windowMinutes, cap])
+
+  useEffect(() => fetchUrlBreakdown(), [fetchUrlBreakdown, selectedUrl])
+
   // Live updates: refetch whichever view is active (aggregate graph or the
-  // focused per-client breakdown) on an interval.
+  // focused per-client/per-url breakdown) on an interval.
   const refreshActive = useCallback(() => {
-    if (selectedClientRef.current) fetchBreakdown()
+    if (selectedUrlRef.current) fetchUrlBreakdown()
+    else if (selectedClientRef.current) fetchBreakdown()
     else fetchGraph()
-  }, [fetchBreakdown, fetchGraph])
+  }, [fetchBreakdown, fetchGraph, fetchUrlBreakdown])
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshActive, "graph", 0)
 
   const selectClient = useCallback((ip: string) => {
@@ -460,6 +547,17 @@ export function GraphPage() {
   const clearClient = useCallback(() => {
     setSelectedClient(null)
     setUrlFilter(null)
+  }, [])
+
+  const selectUrl = useCallback((url: string) => {
+    setSelectedUrl(url)
+    setUrlPickerQuery("")
+  }, [])
+
+  GRAPH_UI.onUrlClick = selectUrl
+
+  const clearUrl = useCallback(() => {
+    setSelectedUrl(null)
   }, [])
 
   // Load whitelist patterns and blacklist set for badge indicators.
@@ -724,6 +822,148 @@ export function GraphPage() {
             )}
           </div>
         </>
+      ) : selectedUrl ? (
+        /* ── URL drill-down mode ────────────────────────────────── */
+        <>
+          {/* URL drill-down bar */}
+          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5">
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                <span className="max-w-[400px] truncate font-mono text-sm font-semibold" title={selectedUrl}>
+                  {selectedUrl}
+                </span>
+                {urlBreakdown && (
+                  <span className="text-xs text-muted-foreground">
+                    {urlBreakdown.total_accesses.toLocaleString()} accesses
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={clearUrl}
+                  aria-label="Clear URL drill-down"
+                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+              <Select
+                value={windowMinutes}
+                onChange={setWindowMinutes}
+                options={WINDOW_OPTIONS}
+                className="w-28"
+                aria-label="Time window"
+              />
+              <Select
+                value={cap}
+                onChange={setCap}
+                options={CAP_OPTIONS}
+                className="w-28"
+                aria-label="Top clients"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchUrlBreakdown}
+                disabled={urlBreakdownLoading}
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+            </div>
+          </div>
+
+          {/* URL access network */}
+          <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+            <div className="border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold tracking-tight">Client access network</h3>
+              <p className="text-xs text-muted-foreground">
+                Client IPs that accessed this URL. Hover a node to highlight connections.
+              </p>
+            </div>
+            {urlBreakdownLoading && !urlBreakdown ? (
+              <div className="space-y-3 p-4" aria-busy="true">
+                <Skeleton className="h-[540px] w-full rounded-lg" />
+              </div>
+            ) : urlBreakdownError ? (
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+                <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
+                <p className="text-sm font-medium text-destructive">{urlBreakdownError}</p>
+                <Button variant="outline" size="sm" onClick={fetchUrlBreakdown}>
+                  Try again
+                </Button>
+              </div>
+            ) : urlBreakdown && urlBreakdown.clients.length > 0 ? (
+              <div className="p-4 sm:p-6">
+                <NetworkGraphDiagram
+                  nodes={[
+                    {
+                      id: `url:${urlBreakdown.url}`,
+                      name: hostOf(urlBreakdown.url),
+                      kind: "url",
+                      value: urlBreakdown.total_accesses,
+                      detail: urlBreakdown.url,
+                      clickable: false,
+                    },
+                    ...urlBreakdown.clients.map((c) => ({
+                      id: `ip:${c.client_ip}`,
+                      name: c.client_ip,
+                      kind: "ip",
+                      value: c.count,
+                      detail: c.client_ip,
+                      clickable: false,
+                    })),
+                  ]}
+                  links={urlBreakdown.clients.map((c) => ({
+                    source: `url:${urlBreakdown.url}`,
+                    target: `ip:${c.client_ip}`,
+                    value: c.count,
+                  }))}
+                  ariaLabel={`Client access network for ${urlBreakdown.url}`}
+                />
+              </div>
+            ) : (
+              <EmptyState
+                icon={Network}
+                title="No clients for this URL"
+                description="No flagged client IPs match this URL in the current window."
+              />
+            )}
+          </div>
+
+          {/* Per-URL clients table */}
+          <div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold tracking-tight">Client IPs</h3>
+                <p className="text-xs text-muted-foreground">
+                  Client IPs that accessed {selectedUrl}
+                </p>
+              </div>
+            </div>
+            {urlBreakdownLoading && !urlBreakdown ? (
+              <div className="space-y-3" aria-busy="true">
+                <Skeleton className="h-48 w-full rounded-lg" />
+              </div>
+            ) : urlBreakdown && urlBreakdown.clients.length > 0 ? (
+              <DataTable
+                columns={URL_CLIENT_COLUMNS}
+                data={urlBreakdown.clients}
+                rowId={(c) => c.client_ip}
+                internalPagination
+                defaultSortBy="count"
+                defaultSortDir="desc"
+                ariaLabel="Per-URL client IPs"
+              />
+            ) : (
+              <EmptyState
+                icon={Network}
+                title="No client IPs"
+                description="Client IPs appear here once this URL has traffic data."
+              />
+            )}
+          </div>
+        </>
       ) : (
         /* ── Aggregate mode (existing view + drill-down picker) ── */
         <>
@@ -787,6 +1027,45 @@ export function GraphPage() {
                 </button>
               </li>
             ))}
+          </ul>
+        )}
+      </Panel>
+
+      {/* URL drill-down picker */}
+      <Panel title="URL drill-down" icon={Link2}>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Pick a flagged URL to see which client IPs accessed it.
+        </p>
+        <SearchInput
+          value={urlPickerQuery}
+          onChange={setUrlPickerQuery}
+          placeholder="Search URL…"
+          className="w-full"
+          aria-label="Search URL"
+        />
+        {urlPickerQuery.trim() && topRanked.urls.length > 0 && (
+          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto rounded-md border border-border bg-popover">
+            {topRanked.urls
+              .filter((u) =>
+                u.label.toLowerCase().includes(urlPickerQuery.toLowerCase()),
+              )
+              .slice(0, 8)
+              .map((u) => (
+                <li key={u.label}>
+                  <button
+                    type="button"
+                    onClick={() => selectUrl(u.label)}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span className="min-w-0 truncate font-mono" title={u.label}>
+                      {hostOf(u.label)}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {u.count.toLocaleString()} accesses
+                    </span>
+                  </button>
+                </li>
+              ))}
           </ul>
         )}
       </Panel>
