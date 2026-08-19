@@ -34,7 +34,7 @@ import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useAutoRefresh, useDebounce } from "../lib/utils"
 
-const PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 25
 
 function formatDetected(ts: string) {
   const date = new Date(ts)
@@ -207,6 +207,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState(initialSearch ?? "")
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -239,8 +240,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     if (!loadedRef.current) setLoading(true)
     getFindings({
       search: debouncedSearch || undefined,
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
+      limit: pageSize,
+      offset: page * pageSize,
     })
       .then((data) => {
         if (cancelled) return
@@ -262,7 +263,7 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
     return () => {
       cancelled = true
     }
-  }, [debouncedSearch, page])
+  }, [debouncedSearch, page, pageSize])
 
   useEffect(() => {
     const cancel = refetch()
@@ -508,7 +509,8 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
         defaultSortBy="id"
         defaultSortDir="desc"
         page={page}
-        pageSize={PAGE_SIZE}
+        pageSize={pageSize}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
         total={total}
         onPageChange={setPage}
         ariaLabel="Findings"

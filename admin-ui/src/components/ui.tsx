@@ -1208,6 +1208,8 @@ export function Pagination({
   onPageChange,
   hasNext,
   className,
+  onPageSizeChange,
+  pageSizeOptions,
 }: {
   /** 0-indexed current page */
   page: number
@@ -1219,6 +1221,10 @@ export function Pagination({
   /** when total is unknown, Next is enabled iff hasNext is true */
   hasNext?: boolean
   className?: string
+  /** When provided, a page-size selector is rendered next to the summary. */
+  onPageSizeChange?: (size: number) => void
+  /** Dropdown options for the page-size selector (default: [25, 50, 100, 200]). */
+  pageSizeOptions?: number[]
 }) {
   const hasTotal = typeof total === "number"
   const totalPages = hasTotal ? Math.max(1, Math.ceil(total! / pageSize)) : 0
@@ -1259,6 +1265,22 @@ export function Pagination({
             Showing <span className="font-medium text-foreground">{rangeStart}</span>–
             <span className="font-medium text-foreground">{rangeEnd}</span>
           </>
+        )}
+        {onPageSizeChange && (
+          <span className="ml-3">
+            <select
+              className="h-7 rounded border border-border bg-background px-1.5 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              aria-label="Items per page"
+            >
+              {(pageSizeOptions ?? [25, 50, 100, 200]).map((n) => (
+                <option key={n} value={n}>
+                  {n} / page
+                </option>
+              ))}
+            </select>
+          </span>
         )}
       </p>
 

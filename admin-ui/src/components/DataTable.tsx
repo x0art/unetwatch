@@ -97,6 +97,8 @@ interface DataTableProps<T> {
   total?: number
   hasNext?: boolean
   onPageChange?: (page: number) => void
+  /** When provided, a page-size selector is rendered next to the summary. */
+  onPageSizeChange?: (size: number) => void
   /**
    * Client-side pagination: when true, `data` is the full dataset and the
    * component sorts + slices internally. Defaults to false (server mode,
@@ -165,6 +167,7 @@ export function DataTable<T>({
   total,
   hasNext,
   onPageChange,
+  onPageSizeChange,
   internalPagination = false,
   className,
   ariaLabel = "Data table",
@@ -475,6 +478,7 @@ export function DataTable<T>({
           total={paginationTotal}
           hasNext={hasNext}
           onPageChange={onPageChange}
+          onPageSizeChange={onPageSizeChange}
           className="mt-3"
         />
       )}
