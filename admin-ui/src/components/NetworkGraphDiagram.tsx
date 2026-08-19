@@ -245,7 +245,6 @@ export function NetworkGraphDiagram({
   height?: number
   directed?: boolean
   onSelectUrl?: (url: string) => void
-  /** Generic callback for any node click. Fires with the node kind and name. */
   onNodeClick?: (kind: string, name: string) => void
   className?: string
   ariaLabel?: string
@@ -309,6 +308,21 @@ export function NetworkGraphDiagram({
       true,
     )
     chart.getZr().flush()
+
+    // After the force layout settles, fit the content to the viewport.
+    // Use a short delay to let the force simulation position nodes.
+    if (contentChanged && nodes.length > 0) {
+      const timer = setTimeout(() => {
+        // Dispatch a roam action to fit the graph content to the container.
+        chart.dispatchAction({
+          type: "graphRoam",
+          seriesIndex: 0,
+          zoom: 0.85,
+        })
+        chart.getZr().flush()
+      }, 300)
+      return () => clearTimeout(timer)
+    }
   }, [nodes, links, resolved, reduced, directed])
 
   // Click a node → fire onSelectUrl (for URL nodes) and/or onNodeClick.
@@ -322,9 +336,7 @@ export function NetworkGraphDiagram({
         | { id?: string; url?: string; name?: string; detail?: string }
         | undefined
       if (!data) return
-      // Fire onSelectUrl for nodes that have a clickable URL.
       if (data.url && onSelectUrl) onSelectUrl(data.url)
-      // Fire onNodeClick for any node — derive kind from the id prefix.
       if (onNodeClick && data.id) {
         const kind = data.id.startsWith("ip:") ? "ip"
           : data.id.startsWith("url:") ? "url"
@@ -343,24 +355,41 @@ export function NetworkGraphDiagram({
   const handleZoomIn = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.dispatchAction({ type: "graphRoam", zoom: 1.3 })
+    chart.dispatchAction({
+      type: "graphRoam",
+      seriesIndex: 0,
+      zoom: 1.4,
+    })
   }, [])
 
   const handleZoomOut = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.dispatchAction({ type: "graphRoam", zoom: 0.77 })
+    chart.dispatchAction({
+      type: "graphRoam",
+      seriesIndex: 0,
+      zoom: 0.7,
+    })
   }, [])
 
   const handleFitView = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    // Reset to the original option which resets the zoom/pan state.
+    // Reset to the original option which resets the zoom/pan state,
+    // then apply a zoom-out to ensure all content is visible.
     chart.setOption(
       buildOption({ nodes, links, resolved, reduced, directed }),
       true,
     )
     chart.getZr().flush()
+    setTimeout(() => {
+      chart.dispatchAction({
+        type: "graphRoam",
+        seriesIndex: 0,
+        zoom: 0.85,
+      })
+      chart.getZr().flush()
+    }, 200)
   }, [nodes, links, resolved, reduced, directed])
 
   return (
