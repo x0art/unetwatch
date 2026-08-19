@@ -355,7 +355,15 @@ async def fetch_logs(minutes: int = 10):
         # block patterns they hit (stored so the Logs page can show them).
         if not df.empty:
             log["top_urls"] = df["url"].astype(str).value_counts().head(10).index.tolist()
-            log["matched_patterns"] = list(block_patterns)
+            # Only store patterns that actually matched at least one URL
+            # in the filtered results (not all configured patterns).
+            urls = df["url"].astype(str).tolist()
+            actual_patterns: list[str] = []
+            for pat in block_patterns:
+                regex = _glob_to_regex(pat)
+                if regex and any(re.search(regex, u, re.IGNORECASE) for u in urls):
+                    actual_patterns.append(pat)
+            log["matched_patterns"] = actual_patterns or list(block_patterns)
 
         if df.empty:
             log["webhook_reason"] = (
@@ -859,7 +867,14 @@ async def run_query(
             return result
 
         log["top_urls"] = df["url"].astype(str).value_counts().head(10).index.tolist()
-        log["matched_patterns"] = list(block_patterns)
+        # Only store patterns that actually matched at least one URL.
+        urls = df["url"].astype(str).tolist()
+        actual_patterns_q: list[str] = []
+        for pat in block_patterns:
+            regex = _glob_to_regex(pat)
+            if regex and any(re.search(regex, u, re.IGNORECASE) for u in urls):
+                actual_patterns_q.append(pat)
+        log["matched_patterns"] = actual_patterns_q or list(block_patterns)
 
         result["total_requests"] = int(len(df))
         result["unique_ips"] = int(df["client_ip"].nunique())

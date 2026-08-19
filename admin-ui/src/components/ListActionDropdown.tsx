@@ -81,6 +81,7 @@ function RowActionsMenu({
 }) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [placed, setPlaced] = useState(false)
 
   // Position the menu below the anchor button, clamped to the viewport.
   useEffect(() => {
@@ -88,11 +89,20 @@ function RowActionsMenu({
     if (!anchor) return
     const rect = anchor.getBoundingClientRect()
     const menuW = 208 // w-52 = 13rem = 208px
+    const menuH = actions.length * 36 + 8 // approximate height
     let left = rect.right - menuW
     if (left < 4) left = 4
     if (left + menuW > window.innerWidth - 4) left = window.innerWidth - menuW - 4
-    setPos({ top: rect.bottom + 4, left })
-  }, [anchorRef])
+    // If the menu would overflow the viewport bottom, show it above the anchor.
+    let top = rect.bottom + 4
+    if (top + menuH > window.innerHeight - 4) {
+      top = rect.top - menuH - 4
+    }
+    // Clamp top so it never goes above the viewport.
+    if (top < 4) top = 4
+    setPos({ top, left })
+    setPlaced(true)
+  }, [anchorRef, actions.length])
 
   // Close on click outside or Escape.
   useEffect(() => {
@@ -119,7 +129,6 @@ function RowActionsMenu({
   const containerRef = useRef<HTMLDivElement | null>(null)
   if (!containerRef.current) {
     const el = document.createElement("div")
-    el.className = "fixed z-[100]"
     document.body.appendChild(el)
     containerRef.current = el
   }
@@ -130,11 +139,12 @@ function RowActionsMenu({
     }
   }, [])
 
-  const menu = (
+  if (!containerRef.current || !placed) return null
+  return createPortal(
     <div
       ref={menuRef}
-      className="w-52 rounded-md border border-border bg-popover p-1 shadow-lg"
-      style={{ position: "fixed", top: pos.top, left: pos.left }}
+      className="pointer-events-auto w-52 rounded-md border border-border bg-popover p-1 shadow-lg"
+      style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 100 }}
     >
       {actions.map((action) => {
         const Icon = action.icon
@@ -164,11 +174,9 @@ function RowActionsMenu({
           </div>
         )
       })}
-    </div>
+    </div>,
+    containerRef.current,
   )
-
-  if (!containerRef.current) return null
-  return createPortal(menu, containerRef.current)
 }
 
 /* ── Blacklist / Whitelist action factory ──────────────────────────────── */
