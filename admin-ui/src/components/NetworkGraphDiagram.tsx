@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import * as echarts from "echarts/core"
-import { GraphChart } from "echarts/charts"
-import type { GraphSeriesOption } from "echarts/charts"
+import { GraphChart, EffectScatterChart } from "echarts/charts"
+import type { GraphSeriesOption, EffectScatterSeriesOption } from "echarts/charts"
 import { TooltipComponent } from "echarts/components"
 import { CanvasRenderer } from "echarts/renderers"
 import type {
@@ -13,7 +13,7 @@ import type {
 import { useTheme } from "./Sidebar"
 import { resolveAllColors, type ResolvedColors } from "./SankeyDiagram"
 
-echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
+echarts.use([GraphChart, EffectScatterChart, TooltipComponent, CanvasRenderer])
 
 const MAX_LABEL = 36
 
@@ -24,13 +24,9 @@ function formatLabel(name: string): string {
 export interface NetworkNode {
   id: string
   name: string
-  /** Node kind for coloring (e.g. "ip", "server", "url", "destination"). */
   kind?: string
-  /** Full detail shown in tooltip. */
   detail?: string
-  /** Numeric value for sizing. */
   value?: number
-  /** Whether clicking this node triggers a callback. */
   clickable?: boolean
 }
 
@@ -38,7 +34,6 @@ export interface NetworkLink {
   source: string
   target: string
   value?: number
-  /** Optional edge label (e.g. HTTP status code). */
   name?: string
 }
 
@@ -48,12 +43,8 @@ function sameNodes(a: NetworkNode[], b: NetworkNode[]): boolean {
     const x = a[i]
     const y = b[i]
     if (
-      x.id !== y.id ||
-      x.name !== y.name ||
-      x.kind !== y.kind ||
-      x.detail !== y.detail ||
-      x.value !== y.value ||
-      x.clickable !== y.clickable
+      x.id !== y.id || x.name !== y.name || x.kind !== y.kind ||
+      x.detail !== y.detail || x.value !== y.value || x.clickable !== y.clickable
     )
       return false
   }
@@ -71,18 +62,13 @@ function sameLinks(a: NetworkLink[], b: NetworkLink[]): boolean {
   return true
 }
 
-/** Map a node kind to a palette color index. */
 function kindColorIndex(kind: string | undefined): number {
   switch (kind) {
-    case "ip":
-      return 0 // info (blue)
-    case "server":
-      return 1 // warning (amber)
+    case "ip": return 0
+    case "server": return 1
     case "url":
-    case "destination":
-      return 2 // danger (red)
-    default:
-      return 0
+    case "destination": return 2
+    default: return 0
   }
 }
 
@@ -98,6 +84,7 @@ function buildOption(params: {
 
   const maxValue = Math.max(1, ...nodes.map((n) => n.value ?? 1))
 
+  // ── Graph nodes ─────────────────────────────────────────────────
   const graphData = nodes.map((n) => {
     const colorIdx = kindColorIndex(n.kind)
     const size = n.value ? 14 + 18 * (n.value / maxValue) : 16
@@ -107,10 +94,14 @@ function buildOption(params: {
       detail: n.detail,
       url: n.clickable ? (n.detail ?? n.id) : undefined,
       symbolSize: size,
+      x: 0,
+      y: 0,
       itemStyle: {
         color: paletteColors[colorIdx],
         borderColor: palette.border,
         borderWidth: 1.5,
+        shadowBlur: 8,
+        shadowColor: `${paletteColors[colorIdx]}44`,
       },
       label: {
         show: true,
@@ -124,8 +115,9 @@ function buildOption(params: {
     }
   })
 
+  // ── Graph edges ─────────────────────────────────────────────────
   const graphLinks = links.map((l) => {
-    const w = l.value ? 1 + Math.min(3, l.value * 0.5) : 1.5
+    const w = l.value ? 1 + Math.min(4, l.value * 0.6) : 1.5
     return {
       source: l.source,
       target: l.target,
@@ -134,16 +126,78 @@ function buildOption(params: {
       lineStyle: {
         color: palette.muted,
         width: w,
-        opacity: 0.4,
-        curveness: 0.2,
+        opacity: 0.35,
+        curveness: 0.15 + Math.random() * 0.15, // slight random curve to reduce overlap
       },
     }
   })
 
+  // ── Glow scatter (subtle pulsing halos on high-value nodes) ─────
+  const glowNodes = nodes
+    .filter((n) => (n.value ?? 0) > maxValue * 0.4)
+    .map((n) => {
+      const colorIdx = kindColorIndex(n.kind)
+      return {
+        id: `glow:${n.id}`,
+        name: n.name,
+        symbolSize: (n.value ? 14 + 18 * (n.value / maxValue) : 16) + 12,
+        itemStyle: {
+          color: paletteColors[colorIdx],
+          opacity: 0.15,
+        },
+      }
+    })
+
+  const series: (GraphSeriesOption | EffectScatterSeriesOption)[] = [
+    // Main graph
+    {
+      type: "graph",
+      layout: "force",
+      roam: true,
+      draggable: true,
+      force: {
+        repulsion: nodes.length > 30 ? 140 : 100,
+        gravity: 0.08,
+        edgeLength: nodes.length > 30 ? 70 : 100,
+        friction: 0.55,
+        layoutAnimation: !reduced,
+      },
+      data: graphData as unknown as GraphSeriesOption["data"],
+      links: graphLinks,
+      emphasis: {
+        focus: "adjacency",
+        itemStyle: { borderWidth: 3, shadowBlur: 16 },
+        lineStyle: { opacity: 0.85, width: 3 },
+      },
+      blur: {
+        itemStyle: { opacity: 0.1 },
+        lineStyle: { opacity: 0.04 },
+      },
+      stateAnimation: { duration: 200 },
+      edgeSymbol: directed ? ["none", "arrow"] : ["none", "none"],
+      edgeSymbolSize: directed ? [0, 7] : [0, 0],
+      label: { show: false },
+    },
+  ]
+
+  // Glow halos on prominent nodes (disabled under reduced motion)
+  if (!reduced && glowNodes.length > 0) {
+    series.push({
+      type: "effectScatter",
+      z: 0,
+      silent: true,
+      coordinateSystem: undefined as never,
+      data: glowNodes as unknown as EffectScatterSeriesOption["data"],
+      rippleEffect: {
+        brushType: "stroke",
+        scale: 3,
+        period: 5,
+      },
+      label: { show: false },
+    } as EffectScatterSeriesOption)
+  }
+
   return {
-    // No enter animation: the first paint must not depend on
-    // requestAnimationFrame ticks (stalled rAF in embedded webviews / hidden
-    // tabs leaves the chart blank forever).
     animation: false,
     animationDuration: 0,
     animationEasing: "cubicOut",
@@ -159,50 +213,24 @@ function buildOption(params: {
           const src = (params as { source?: string }).source ?? ""
           const tgt = (params as { target?: string }).target ?? ""
           const label = (params as { name?: string }).name
-          return label ? `${label} ${src} → ${tgt}` : `${src} → ${tgt}`
+          const val = (params as { value?: number }).value
+          const valStr = val ? ` (${val.toLocaleString()} accesses)` : ""
+          return label
+            ? `${label} ${src} → ${tgt}${valStr}`
+            : `${src} → ${tgt}${valStr}`
         }
         const data = params.data as
-          | { detail?: string; url?: string; name?: string }
+          | { detail?: string; url?: string; name?: string; value?: number }
           | undefined
         const detail = data?.detail ?? data?.name ?? ""
-        if (data?.url) return `${detail}<br/>Click to filter`
-        return detail
+        const val = data?.value
+        const lines = [detail]
+        if (val) lines.push(`${val.toLocaleString()} accesses`)
+        if (data?.url) lines.push("Click to filter")
+        return lines.join("<br/>")
       },
     },
-    series: [
-      {
-        type: "graph",
-        layout: "force",
-        roam: true,
-        draggable: true,
-        force: {
-          repulsion: nodes.length > 30 ? 120 : 80,
-          gravity: 0.1,
-          edgeLength: nodes.length > 30 ? 60 : 80,
-          friction: 0.6,
-          layoutAnimation: !reduced,
-        },
-        data: graphData as unknown as GraphSeriesOption["data"],
-        links: graphLinks,
-        emphasis: {
-          // Use adjacency focus: ECharts natively highlights the hovered node
-          // and its direct neighbors, dimming everything else. No need to
-          // rebuild the option on every mouse event.
-          focus: "adjacency",
-          itemStyle: { borderWidth: 2.5 },
-          lineStyle: { opacity: 0.8 },
-        },
-        blur: {
-          itemStyle: { opacity: 0.12 },
-          lineStyle: { opacity: 0.05 },
-        },
-        // State changes snap; only data-change animation runs (cheap hover).
-        stateAnimation: { duration: 0 },
-        edgeSymbol: directed ? ["none", "arrow"] : ["none", "none"],
-        edgeSymbolSize: directed ? [0, 6] : [0, 0],
-        label: { show: false },
-      },
-    ],
+    series,
   }
 }
 
@@ -218,7 +246,6 @@ export function NetworkGraphDiagram({
   nodes: NetworkNode[]
   links: NetworkLink[]
   height?: number
-  /** Whether edges have arrows (directed graph). Default true. */
   directed?: boolean
   onSelectUrl?: (url: string) => void
   className?: string
