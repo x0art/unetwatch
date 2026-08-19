@@ -29,7 +29,7 @@ import {
   ListFilter,
 } from "lucide-react"
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 50
 
 /* Module-level handles to component state, synced each render, so
  * PATTERNS_COLUMNS stays referentially stable at module scope while its
@@ -130,6 +130,7 @@ export function PatternTable() {
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [busy, setBusy] = useState(false)
@@ -171,8 +172,8 @@ export function PatternTable() {
       const data = await listPatterns({
         pattern_type: filterType === "all" ? undefined : filterType,
         search: debouncedSearch || undefined,
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
+        limit: pageSize,
+        offset: page * pageSize,
         sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
         sort_order: sortDir,
       })
@@ -182,7 +183,7 @@ export function PatternTable() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, filterType, page, sortBy, sortDir])
+  }, [debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
 
   useEffect(() => {
     fetchPatterns()
@@ -368,8 +369,9 @@ export function PatternTable() {
         sortDir={sortDir}
         onSortChange={handleSortChange}
         page={page}
-        pageSize={PAGE_SIZE}
-        hasNext={patterns.length === PAGE_SIZE}
+        pageSize={pageSize}
+        hasNext={patterns.length === pageSize}
+        onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
         onPageChange={setPage}
         ariaLabel="Patterns"
       />

@@ -41,7 +41,7 @@ import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 
-const PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 25
 
 const WINDOW_OPTIONS = [
   { value: "30", label: "Last 30 minutes" },
@@ -511,6 +511,7 @@ export function QueryPage() {
   }
 
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [docSearch, setDocSearch] = useState("")
   const debouncedDocSearch = useDebounce(docSearch, 200)
   const q = debouncedDocSearch.trim().toLowerCase()
@@ -799,8 +800,9 @@ export function QueryPage() {
               defaultSortBy="timestamp"
               defaultSortDir="desc"
               page={page}
-              pageSize={PAGE_SIZE}
+              pageSize={pageSize}
               onPageChange={setPage}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
               ariaLabel="Query results"
             />
           </div>

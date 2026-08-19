@@ -40,7 +40,7 @@ import { ListActionCell } from "./ListActionDropdown"
 import { NetworkGraphDiagram, type NetworkNode, type NetworkLink } from "./NetworkGraphDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
-const PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 25
 
 const STATUS_META: Record<
   TrackedUrl["status"],
@@ -290,6 +290,7 @@ export function RedirectsPage() {
   const [graph, setGraph] = useState<RedirectGraph | null>(null)
   const [graphLoading, setGraphLoading] = useState(true)
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState("")
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
@@ -310,8 +311,8 @@ export function RedirectsPage() {
     setLoading(true)
     listTrackedUrls({
       search: debouncedSearch || undefined,
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
+      limit: pageSize,
+      offset: page * pageSize,
       sort_by: (sortBy ?? "id") as "id" | "url" | "source" | "status" | "last_checked_at",
       sort_order: sortDir,
     })
@@ -332,7 +333,7 @@ export function RedirectsPage() {
     return () => {
       cancelled = true
     }
-  }, [debouncedSearch, page, sortBy, sortDir])
+  }, [debouncedSearch, page, pageSize, sortBy, sortDir])
 
   const loadGraph = useCallback(() => {
     let cancelled = false
@@ -756,7 +757,8 @@ export function RedirectsPage() {
             sortDir={sortDir}
             onSortChange={handleSortChange}
             page={page}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
             total={total}
             onPageChange={setPage}
             ariaLabel="Tracked URLs"

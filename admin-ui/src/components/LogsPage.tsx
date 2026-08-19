@@ -32,7 +32,7 @@ import {
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { cn } from "../lib/utils"
 
-const PAGE_SIZE = 25
+const DEFAULT_PAGE_SIZE = 25
 
 const KIND_OPTIONS = [
   { value: "", label: "All kinds" },
@@ -294,6 +294,7 @@ export function LogsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [kind, setKind] = useState("")
   const [sortBy, setSortBy] = useState<SortKey | null>("started_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
@@ -309,8 +310,8 @@ export function LogsPage() {
     setLoading(true)
     listLogs({
       kind: (kind || undefined) as "poll" | "query" | undefined,
-      limit: PAGE_SIZE,
-      offset: page * PAGE_SIZE,
+      limit: pageSize,
+      offset: page * pageSize,
       sort_by: sortBy ?? "started_at",
       sort_order: sortDir,
     })
@@ -331,7 +332,7 @@ export function LogsPage() {
     return () => {
       cancelled = true
     }
-  }, [kind, page, sortBy, sortDir])
+  }, [kind, page, pageSize, sortBy, sortDir])
 
   useEffect(() => load(), [load])
 
@@ -452,7 +453,8 @@ export function LogsPage() {
           sortDir={sortDir}
           onSortChange={handleSortChange}
           page={page}
-          pageSize={PAGE_SIZE}
+          pageSize={pageSize}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
           total={total}
           onPageChange={setPage}
           ariaLabel="Monitor logs"
