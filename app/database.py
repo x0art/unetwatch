@@ -134,6 +134,10 @@ async def init_db():
             webhook_status INTEGER,
             webhook_error TEXT,
             webhook_reason TEXT,                     -- why the webhook was NOT called
+            msteams_status INTEGER,                  -- HTTP status from MS Teams webhook
+            msteams_error TEXT,                       -- error from MS Teams webhook
+            webhook_payload TEXT,                    -- JSON payload for n8n retry
+            msteams_payload TEXT,                    -- JSON payload for MS Teams retry
             top_urls TEXT,                           -- JSON array: top flagged URLs
             matched_patterns TEXT,                   -- JSON array: block patterns that matched
             error TEXT
@@ -146,6 +150,16 @@ async def init_db():
     cursor = await db.execute("PRAGMA table_info(monitor_logs)")
     columns = {row[1] for row in await cursor.fetchall()}
     for col in ("webhook_reason", "top_urls", "matched_patterns"):
+        if col not in columns:
+            await db.execute(f"ALTER TABLE monitor_logs ADD COLUMN {col} TEXT")
+
+    # Migration: add per-provider webhook status and retry payload columns.
+    for col in (
+        "msteams_status",
+        "msteams_error",
+        "webhook_payload",
+        "msteams_payload",
+    ):
         if col not in columns:
             await db.execute(f"ALTER TABLE monitor_logs ADD COLUMN {col} TEXT")
 

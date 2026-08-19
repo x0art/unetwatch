@@ -17,6 +17,7 @@ import {
   bulkDeleteLogs,
   clearLogs,
   listLogs,
+  retryWebhook,
 } from "../api"
 import {
   Badge,
@@ -162,7 +163,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     accessor: (l) => l.webhook_status,
     cell: (l) => <WebhookBadge log={l} />,
     enableSorting: true,
-    width: "w-24",
+    width: "w-44",
   },
   {
     id: "duration_ms",
@@ -213,38 +214,78 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
   if (log.kind === "query") {
     return <span className="text-xs text-muted-foreground">—</span>
   }
-  if (log.webhook_error) {
-    return (
-      <span title={log.webhook_error}>
-        <Badge variant="destructive">
-          <XCircle className="mr-1 h-3 w-3" />
-          Failed
-        </Badge>
-      </span>
-    )
+
+  const hasN8n = log.webhook_status !== null || log.webhook_error || log.webhook_reason
+  const hasMsteams = log.msteams_status !== null || log.msteams_error
+
+  if (!hasN8n && !hasMsteams) {
+    return <span className="text-xs text-muted-foreground">not sent</span>
   }
-  if (log.webhook_status !== null && log.webhook_status !== undefined) {
-    const ok = log.webhook_status >= 200 && log.webhook_status < 300
-    return (
-      <span title={`HTTP ${log.webhook_status}`}>
-        <Badge variant={ok ? "success" : "destructive"}>
-          {ok ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <XCircle className="mr-1 h-3 w-3" />}
-          {log.webhook_status}
-        </Badge>
-      </span>
-    )
-  }
-  if (log.webhook_reason) {
-    return (
-      <span title={log.webhook_reason}>
-        <Badge variant="secondary">
-          <CircleSlash className="mr-1 h-3 w-3" />
-          Skipped
-        </Badge>
-      </span>
-    )
-  }
-  return <span className="text-xs text-muted-foreground">not sent</span>
+
+  return (
+    <span className="flex flex-wrap gap-1">
+      {hasN8n && (
+        <span
+          title={
+            log.webhook_error
+              ? `n8n: ${log.webhook_error}`
+              : log.webhook_status !== null && log.webhook_status !== undefined
+                ? `n8n: HTTP ${log.webhook_status}`
+                : log.webhook_reason ?? "n8n: skipped"
+          }
+        >
+          <Badge
+            variant={
+              log.webhook_error || (log.webhook_status !== null && log.webhook_status >= 300)
+                ? "destructive"
+                : log.webhook_status !== null
+                  ? "success"
+                  : "secondary"
+            }
+          >
+            {log.webhook_error || (log.webhook_status !== null && log.webhook_status >= 300) ? (
+              <XCircle className="mr-1 h-3 w-3" />
+            ) : log.webhook_status !== null ? (
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+            ) : (
+              <CircleSlash className="mr-1 h-3 w-3" />
+            )}
+            n8n: {log.webhook_error ? "err" : log.webhook_status !== null ? log.webhook_status : "skip"}
+          </Badge>
+        </span>
+      )}
+      {hasMsteams && (
+        <span
+          title={
+            log.msteams_error
+              ? `Teams: ${log.msteams_error}`
+              : log.msteams_status !== null
+                ? `Teams: HTTP ${log.msteams_status}`
+                : "Teams: not sent"
+          }
+        >
+          <Badge
+            variant={
+              log.msteams_error || (log.msteams_status !== null && log.msteams_status >= 300)
+                ? "destructive"
+                : log.msteams_status !== null
+                  ? "success"
+                  : "secondary"
+            }
+          >
+            {log.msteams_error || (log.msteams_status !== null && log.msteams_status >= 300) ? (
+              <XCircle className="mr-1 h-3 w-3" />
+            ) : log.msteams_status !== null ? (
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+            ) : (
+              <CircleSlash className="mr-1 h-3 w-3" />
+            )}
+            Teams: {log.msteams_error ? "err" : log.msteams_status !== null ? log.msteams_status : "skip"}
+          </Badge>
+        </span>
+      )}
+    </span>
+  )
 }
 
 export function LogsPage() {
@@ -261,6 +302,7 @@ export function LogsPage() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
+  const [retryingProvider, setRetryingProvider] = useState<"webhook" | "msteams" | null>(null)
 
   const load = useCallback(() => {
     let cancelled = false
@@ -520,33 +562,129 @@ export function LogsPage() {
               </pre>
             </div>
 
-            {/* Webhook */}
+            {/* Webhooks */}
             {detail.kind === "poll" && (
-              <div>
-                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Send className="h-3.5 w-3.5" aria-hidden="true" />
-                  Webhook delivery
+              <div className="space-y-3">
+                {/* n8n Webhook */}
+                <div>
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                    n8n Webhook
+                  </div>
+                  <div
+                    className={cn(
+                      "flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-xs",
+                      detail.webhook_error || (detail.webhook_status !== null && detail.webhook_status >= 300)
+                        ? "border-danger/40 bg-danger/10"
+                        : detail.webhook_status !== null
+                          ? "border-success/40 bg-success/10"
+                          : "border-border/60 bg-muted/30",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono">{detail.webhook_url ?? "Not configured"}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {detail.webhook_error
+                          ? `Delivery failed: ${detail.webhook_error}`
+                          : detail.webhook_status !== null && detail.webhook_status !== undefined
+                            ? `HTTP ${detail.webhook_status}`
+                            : detail.webhook_reason
+                              ? detail.webhook_reason
+                              : "No webhook call was made"}
+                      </p>
+                    </div>
+                    {detail.webhook_error || (detail.webhook_status !== null && detail.webhook_status >= 300) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={retryingProvider !== null}
+                        onClick={async () => {
+                          setRetryingProvider("webhook")
+                          try {
+                            const res = await retryWebhook(detail.id, "webhook")
+                            setDetail({
+                              ...detail,
+                              webhook_status: res.status,
+                              webhook_error: res.status >= 200 && res.status < 300 ? null : res.body,
+                            })
+                            toast({
+                              title: res.status >= 200 && res.status < 300 ? "n8n webhook retry succeeded" : `Retry returned HTTP ${res.status}`,
+                              variant: res.status >= 200 && res.status < 300 ? "success" : "error",
+                            })
+                          } catch (e) {
+                            toast({ title: "Retry failed", description: (e as Error).message, variant: "error" })
+                          } finally {
+                            setRetryingProvider(null)
+                          }
+                        }}
+                      >
+                        <RefreshCcw className={cn("h-3.5 w-3.5", retryingProvider === "webhook" && "animate-spin")} />
+                        Retry
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-                <div
-                  className={cn(
-                    "rounded-md border px-3 py-2 text-xs",
-                    detail.webhook_error || (detail.webhook_status !== null && detail.webhook_status >= 300)
-                      ? "border-danger/40 bg-danger/10"
-                      : detail.webhook_status !== null
-                        ? "border-success/40 bg-success/10"
-                        : "border-border/60 bg-muted/30",
-                  )}
-                >
-                  <p className="truncate font-mono">{detail.webhook_url ?? "Not configured"}</p>
-                  <p className="mt-1 text-muted-foreground">
-                    {detail.webhook_error
-                      ? `Delivery failed: ${detail.webhook_error}`
-                      : detail.webhook_status !== null && detail.webhook_status !== undefined
-                        ? `HTTP ${detail.webhook_status}`
-                        : detail.webhook_reason
-                          ? detail.webhook_reason
-                          : "No webhook call was made"}
-                  </p>
+
+                {/* MS Teams Webhook */}
+                <div>
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                    MS Teams Webhook
+                  </div>
+                  <div
+                    className={cn(
+                      "flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-xs",
+                      detail.msteams_error || (detail.msteams_status !== null && detail.msteams_status !== undefined && detail.msteams_status >= 300)
+                        ? "border-danger/40 bg-danger/10"
+                        : detail.msteams_status !== null && detail.msteams_status !== undefined
+                          ? "border-success/40 bg-success/10"
+                          : "border-border/60 bg-muted/30",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono">{detail.msteams_status !== null && detail.msteams_status !== undefined ? `HTTP ${detail.msteams_status}` : "Not sent"}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {detail.msteams_error
+                          ? `Delivery failed: ${detail.msteams_error}`
+                          : detail.msteams_status !== null && detail.msteams_status !== undefined
+                            ? detail.msteams_status >= 200 && detail.msteams_status < 300
+                              ? "Delivered successfully"
+                              : `HTTP ${detail.msteams_status}`
+                            : "No MS Teams webhook configured"}
+                      </p>
+                    </div>
+                    {detail.msteams_error || (detail.msteams_status !== null && detail.msteams_status !== undefined && detail.msteams_status >= 300) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={retryingProvider !== null}
+                        onClick={async () => {
+                          setRetryingProvider("msteams")
+                          try {
+                            const res = await retryWebhook(detail.id, "msteams")
+                            setDetail({
+                              ...detail,
+                              msteams_status: res.status,
+                              msteams_error: res.status >= 200 && res.status < 300 ? null : res.body,
+                            })
+                            toast({
+                              title: res.status >= 200 && res.status < 300 ? "MS Teams retry succeeded" : `Retry returned HTTP ${res.status}`,
+                              variant: res.status >= 200 && res.status < 300 ? "success" : "error",
+                            })
+                          } catch (e) {
+                            toast({ title: "Retry failed", description: (e as Error).message, variant: "error" })
+                          } finally {
+                            setRetryingProvider(null)
+                          }
+                        }}
+                      >
+                        <RefreshCcw className={cn("h-3.5 w-3.5", retryingProvider === "msteams" && "animate-spin")} />
+                        Retry
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             )}

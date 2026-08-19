@@ -244,6 +244,10 @@ export interface MonitorLog {
   webhook_status: number | null
   webhook_error: string | null
   webhook_reason: string | null
+  /** MS Teams webhook HTTP status. */
+  msteams_status: number | null
+  /** MS Teams webhook error message. */
+  msteams_error: string | null
   /** Top flagged URLs (JSON string from the backend; parsed by listLogs). */
   top_urls: string | null
   /** Block patterns that matched (JSON string; parsed by listLogs). */
@@ -308,6 +312,13 @@ export async function bulkDeleteLogs(ids: number[]): Promise<{ deleted: number }
     method: "POST",
     body: JSON.stringify({ ids }),
   })
+}
+
+export async function retryWebhook(
+  logId: number,
+  provider: "webhook" | "msteams",
+): Promise<{ provider: string; status: number; body: string }> {
+  return request(`/logs/${logId}/retry/${provider}`, { method: "POST" })
 }
 
 const API = "/api"
