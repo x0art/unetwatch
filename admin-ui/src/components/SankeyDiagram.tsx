@@ -3,7 +3,12 @@ import * as echarts from "echarts/core"
 import { SankeyChart } from "echarts/charts"
 import { TooltipComponent } from "echarts/components"
 import { CanvasRenderer } from "echarts/renderers"
-import type { ECharts, EChartsOption, TooltipComponentFormatterCallbackParams } from "echarts"
+import type {
+  ECharts,
+  EChartsOption,
+  ECElementEvent,
+  TooltipComponentFormatterCallbackParams,
+} from "echarts"
 import { useTheme } from "./Sidebar"
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
@@ -30,7 +35,7 @@ export interface SankeyLink {
 // production CSS minifier rewrites `oklch(0.47 0.13 235)` to the shorter
 // `oklch(47% .13 235)`, which older parsing missed and silently fell back to
 // the dark palette, leaving light-mode diagrams with light text on white.
-const FALLBACK_DARK: Record<string, string> = {
+export const FALLBACK_DARK: Record<string, string> = {
   "--color-info": "#5b8def",
   "--color-warning": "#e8a33d",
   "--color-danger": "#ef6a6a",
@@ -42,7 +47,7 @@ const FALLBACK_DARK: Record<string, string> = {
   "--color-border": "#3f3f4d",
 }
 
-const FALLBACK_LIGHT: Record<string, string> = {
+export const FALLBACK_LIGHT: Record<string, string> = {
   "--color-info": "#006398",
   "--color-warning": "#8A5700",
   "--color-danger": "#C10000",
@@ -91,7 +96,7 @@ function oklchToSrgb(L: number, C: number, Hdeg: number): string {
   return `rgb(${clamp(r_lin)}, ${clamp(g_lin)}, ${clamp(b_lin)})`
 }
 
-function resolveColor(raw: string, fallback: Record<string, string>): string {
+export function resolveColor(raw: string, fallback: Record<string, string>): string {
   const m = raw.match(/var\((--[\w-]+)\)/)
   if (!m) return raw
   const token = m[1]
@@ -105,6 +110,31 @@ function resolveColor(raw: string, fallback: Record<string, string>): string {
   }
   // Not oklch — a plain hex/rgb/named color passes straight through.
   return live
+}
+
+/** All node ids reachable from `id` through the flow's links, traversed
+ * both ways — i.e. the node's whole connected component. Used for hover
+ * emphasis: hovering any node/edge lights up the entire cluster it belongs
+ * to, not just its direct neighbors. */
+function componentOf(id: string, links: SankeyLink[]): Set<string> {
+  const adj = new Map<string, Set<string>>()
+  for (const l of links) {
+    if (!adj.has(l.source)) adj.set(l.source, new Set())
+    if (!adj.has(l.target)) adj.set(l.target, new Set())
+    adj.get(l.source)!.add(l.target)
+    adj.get(l.target)!.add(l.source)
+  }
+  const comp = new Set<string>()
+  const queue = [id]
+  while (queue.length) {
+    const cur = queue.pop()!
+    if (comp.has(cur)) continue
+    comp.add(cur)
+    for (const nb of adj.get(cur) ?? []) {
+      if (!comp.has(nb)) queue.push(nb)
+    }
+  }
+  return comp
 }
 
 function sameNodes(a: SankeyNode[], b: SankeyNode[]): boolean {
@@ -212,6 +242,7 @@ function buildOption(
   layerColors: Record<string, string> | undefined,
   resolved: ResolvedColors,
   layoutIterations: number,
+  hovered: Set<string> | null,
 ): EChartsOption {
   const { palette, paletteColors, nodeColors } = resolved
   const nodeItemStyle =
@@ -237,13 +268,40 @@ function buildOption(
   const hasOutgoing = new Set(links.map((l) => l.source))
   const isLastColumn = (n: SankeyNode) =>
     (n.layer ?? 0) === maxLayer || !hasOutgoing.has(n.id)
+
+  // Connected-component hover emphasis: when a node/edge is hovered, only
+  // items in its connected component keep full opacity — everything else
+  // dims, so the whole chain lights up instead of just the direct neighbors
+  // (ECharts' built-in `focus: "adjacency"` only reaches one hop).
   const data = nodes.map((n) => {
-    const item: (SankeyNode & { itemStyle?: { color: string }; label?: { position: "left" } }) = {
+    const inComponent = hovered === null || hovered.has(n.id)
+    const item: SankeyNode & {
+      itemStyle: { color?: string; opacity: number }
+      label?: { position?: "left"; opacity: number }
+    } = {
       ...n,
-      ...(nodeItemStyle ? { itemStyle: nodeItemStyle(n) } : {}),
-      ...(isLastColumn(n) ? { label: { position: "left" } } : {}),
+      itemStyle: {
+        ...(nodeItemStyle ? nodeItemStyle(n) : {}),
+        opacity: hovered === null ? 0.92 : inComponent ? 1 : 0.12,
+      },
+      label: {
+        ...(isLastColumn(n) ? { position: "left" as const } : {}),
+        opacity: hovered === null ? 1 : inComponent ? 1 : 0.3,
+      },
     }
     return item
+  })
+  const linkData = links.map((l) => {
+    const inComponent =
+      hovered === null || (hovered.has(l.source) && hovered.has(l.target))
+    return {
+      ...l,
+      lineStyle: {
+        color: "gradient",
+        curveness: 0.5,
+        opacity: hovered === null ? 0.45 : inComponent ? 0.75 : 0.05,
+      },
+    }
   })
 
   return {
@@ -276,7 +334,7 @@ function buildOption(
       {
         type: "sankey",
         data,
-        links,
+        links: linkData,
         left: 8,
         right: 8,
         top: 12,
@@ -284,7 +342,12 @@ function buildOption(
         nodeWidth: 16,
         nodeGap,
         layoutIterations,
-        emphasis: { focus: "adjacency" },
+        emphasis: {
+          // Hover emphasis is driven by the connected-component opacity in
+          // the data above — ECharts' adjacency focus would fight it.
+          focus: "none",
+          itemStyle: { borderWidth: 2.5 },
+        },
         // Default stateAnimation duration is 300ms, which animates the
         // emphasis/blur state of EVERY node+link on each hover — laggy on big
         // graphs. Snap state transitions to 0ms; data-change animation stays.
@@ -357,6 +420,21 @@ export function SankeyDiagram({
     card: string
     border: string
   } | null>(null)
+  // Connected-component hover is driven imperatively from event handlers
+  // (not React state) so the canvas repaints synchronously within the same
+  // mouseover frame — no async gap between the mouse event and the repaint.
+  const hoveredRef = useRef<Set<string> | null>(null)
+  const buildOptRef = useRef<typeof buildOption>(buildOption)
+  const linksRef = useRef(links)
+  linksRef.current = links
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+  const layerColorsRef = useRef(layerColors)
+  layerColorsRef.current = layerColors
+  const resolvedRef = useRef(resolved)
+  resolvedRef.current = resolved
+  const layoutIterRef = useRef(layoutIterations)
+  layoutIterRef.current = layoutIterations
 
   useEffect(() => {
     const el = ref.current
@@ -369,6 +447,7 @@ export function SankeyDiagram({
     prevLinks.current = null
     prevLayerColors.current = undefined
     prevPalette.current = null
+    hoveredRef.current = null
 
     const onResize = () => chart.resize()
     const onWindowResize = () => onResize()
@@ -388,9 +467,6 @@ export function SankeyDiagram({
     const chart = chartRef.current
     if (!chart) return
 
-    // Colors come from the theme-keyed memo above (theme class is applied
-    // synchronously, so the memo is authoritative); the paletteChanged diff
-    // below still guards against a no-op re-render with identical values.
     const resolvedPalette = resolved.palette
     const paletteChanged =
       prevPalette.current === null ||
@@ -406,7 +482,6 @@ export function SankeyDiagram({
       !sameLayerColors(prevLayerColors.current, layerColors)
 
     if (!contentChanged && !paletteChanged) {
-      // Parent re-render with identical data/palette — nothing to do.
       return
     }
 
@@ -414,13 +489,55 @@ export function SankeyDiagram({
     prevLinks.current = links
     prevLayerColors.current = layerColors
     prevPalette.current = resolvedPalette
+    // Clear hover on data/theme change so stale component highlights don't
+    // persist across a layout rebuild.
+    hoveredRef.current = null
 
     chart.setOption(
-      buildOption(nodes, links, layerColors, resolved, layoutIterations),
-      contentChanged,
+      buildOption(nodes, links, layerColors, resolved, layoutIterations, null),
+      true,
     )
-    chart.resize()
+    chart.getZr().flush()
   }, [nodes, links, layerColors, theme, h, resolved, layoutIterations])
+
+  // Hover any node/edge → highlight its whole connected component; leaving
+  // the chart restores full opacity. Driven directly from ECharts event
+  // handlers (not React state) so the setOption + flush happens synchronously
+  // in the same frame as the mouse event — no async gap.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const pushHover = (comp: Set<string> | null) => {
+      hoveredRef.current = comp
+      chart.setOption(
+        buildOptRef.current(
+          nodesRef.current,
+          linksRef.current,
+          layerColorsRef.current,
+          resolvedRef.current,
+          layoutIterRef.current,
+          comp,
+        ),
+        true,
+      )
+      chart.getZr().flush()
+    }
+
+    const onMouseOver = (params: ECElementEvent) => {
+      const d = params.data as { id?: string; source?: string } | undefined
+      const id = params.dataType === "node" ? d?.id : d?.source
+      if (id) pushHover(componentOf(id, linksRef.current))
+      else pushHover(null)
+    }
+    const onMouseOut = () => pushHover(null)
+    chart.on("mouseover", onMouseOver)
+    chart.on("mouseout", onMouseOut)
+    return () => {
+      chart.off("mouseover", onMouseOver)
+      chart.off("mouseout", onMouseOut)
+    }
+  }, [])
 
   return (
     <div
