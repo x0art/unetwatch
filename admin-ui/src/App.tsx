@@ -21,6 +21,9 @@ import { usePageVisible } from "./lib/utils"
 const BlockDomainPage = lazy(() =>
   import("./components/BlockDomainPage").then((m) => ({ default: m.BlockDomainPage })),
 )
+const WhitelistDomainPage = lazy(() =>
+  import("./components/WhitelistDomainPage").then((m) => ({ default: m.WhitelistDomainPage })),
+)
 
 const DashboardPage = lazy(() =>
   import("./components/DashboardPage").then((m) => ({ default: m.DashboardPage })),
@@ -57,14 +60,15 @@ function PageFallback() {
   )
 }
 
-function isBlockDomainPath() {
-  return window.location.pathname === "/blockDomain"
+function isStandalonePath() {
+  const p = window.location.pathname
+  return p === "/blockDomain" || p === "/whitelistDomain"
 }
 
 function AppRoutes() {
   const { toast } = useToast()
   const pageVisible = usePageVisible()
-  const [blockDomainPath] = useState(isBlockDomainPath)
+  const [standalonePath] = useState(isStandalonePath)
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
@@ -175,12 +179,11 @@ function AppRoutes() {
   }, [])
 
   if (!loggedIn) {
-    // For the /blockDomain path, store the full URL so after login we
-    // redirect back to the same page with all query parameters intact.
+    // For standalone paths (/blockDomain, /whitelistDomain), reload after
+    // login so the authenticated branch picks up the correct page.
     const handleLogin = () => {
       setLoggedIn(true)
-      if (blockDomainPath) {
-        // Force a re-render so the logged-in branch picks up the path
+      if (standalonePath) {
         window.location.reload()
       }
     }
@@ -191,11 +194,12 @@ function AppRoutes() {
     )
   }
 
-  // Standalone /blockDomain page — rendered outside the normal AppShell
-  if (blockDomainPath) {
+  // Standalone pages rendered outside the normal AppShell
+  if (standalonePath) {
+    const p = window.location.pathname
     return (
       <Suspense fallback={<div className="flex min-h-dvh items-center justify-center bg-background"><Skeleton className="h-10 w-48" /></div>}>
-        <BlockDomainPage />
+        {p === "/blockDomain" ? <BlockDomainPage /> : <WhitelistDomainPage />}
       </Suspense>
     )
   }
