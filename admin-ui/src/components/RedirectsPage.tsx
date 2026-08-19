@@ -38,7 +38,7 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
-import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
+import { RedirectFlowDiagram, type FlowLink, type FlowNode } from "./RedirectFlowDiagram"
 import { cn, useDebounce } from "../lib/utils"
 
 const PAGE_SIZE = 25
@@ -226,22 +226,27 @@ function directNodes(graph: RedirectGraph | null): RedirectGraph["nodes"] {
     .sort((a, b) => a.label.localeCompare(b.label))
 }
 
-/* Layered (alluvial) input for the redirect flow.
+/** Compact node label: strip the scheme and keep host + a bit of path. */
+function shortUrl(url: string): string {
+  const afterScheme = url.split("://").pop() ?? url
+  return afterScheme.length > 32 ? `${afterScheme.slice(0, 31)}…` : afterScheme
+}
+
+/* Node-graph (layered DAG) input for the redirect flow.
  *
  * The backend graph exposes every hop of every chain as a `links` edge
  * (source → target, http_status). Layering by longest-path depth turns
- * those hops into a true alluvial flow, so chains longer than one hop
- * show their intermediate destinations:
+ * those hops into a left → right flow, so chains longer than one hop show
+ * their intermediate destinations:
  *
- *   [] url1  final_url1 []
- *   [] url2  [] url2_1  [] url2_2  final_url2 []
+ *   url1 ──▶ final_url1
+ *   url2 ──▶ url2_1 ──▶ url2_2 ──▶ final_url2
  *
  * Only `active` edges render — historical (superseded) hops stay in the
- * table + per-URL history drawer, not in the live flow. */
-function toSankey(graph: RedirectGraph | null): {
-  nodes: SankeyNode[]
-  links: SankeyLink[]
-} {
+ * table + per-URL history drawer, not in the live flow. Tracked URLs keep
+ * their status color; pure redirect targets (waypoints/destinations) render
+ * as info-colored nodes. */
+function toFlow(graph: RedirectGraph | null): { nodes: FlowNode[]; links: FlowLink[] } {
   if (!graph) return { nodes: [], links: [] }
 
   const active = graph.links.filter((l) => l.active)
@@ -278,17 +283,23 @@ function toSankey(graph: RedirectGraph | null): {
   }
   for (const id of nodeIds) visit(id)
 
-  const nodes: SankeyNode[] = [...nodeIds].map((id) => ({
-    id,
-    name: graph.nodes.find((n) => n.id === id)?.label ?? id,
-    layer: depth.get(id) ?? 0,
-  }))
+  const nodes: FlowNode[] = [...nodeIds].map((id) => {
+    const tracked = graph.nodes.find((n) => n.id === id)
+    return {
+      id,
+      name: shortUrl(tracked?.label ?? id),
+      detail: tracked?.label ?? id,
+      layer: depth.get(id) ?? 0,
+      status: tracked?.status,
+      clickable: !!tracked,
+    }
+  })
 
-  const links: SankeyLink[] = active.map((l) => ({
+  const links: FlowLink[] = active.map((l) => ({
     source: l.source,
     target: l.target,
     value: 1,
-    name: `${l.http_status} →`,
+    name: String(l.http_status),
   }))
 
   return { nodes, links }
@@ -559,7 +570,7 @@ export function RedirectsPage() {
   /* ── Derived data ────────────────────────────────────────────────── */
 
   const direct = useMemo(() => directNodes(graph), [graph])
-  const redirectSankey = useMemo(() => toSankey(graph), [graph])
+  const flow = useMemo(() => toFlow(graph), [graph])
 
   const stats = useMemo(() => {
     const nodes = graph?.nodes ?? []
@@ -632,13 +643,13 @@ export function RedirectsPage() {
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Redirect flow</h3>
             <p className="text-xs text-muted-foreground">
-              Sources grouped by the destination they currently land on. Click a source to
-              filter the table.
+              Sources grouped by the destination they currently land on. Hover a node to
+              highlight its chain; click a source to filter the table.
             </p>
           </div>
           {graph && !graphEmpty && (
             <span className="text-xs text-muted-foreground">
-              {redirectSankey.links.length} flow{redirectSankey.links.length === 1 ? "" : "s"}
+              {flow.links.length} hop{flow.links.length === 1 ? "" : "s"}
             </span>
           )}
         </div>
@@ -656,15 +667,12 @@ export function RedirectsPage() {
           />
         ) : (
           <div className="p-4 sm:p-6">
-            {redirectSankey && redirectSankey.links.length > 0 ? (
-              <SankeyDiagram
-                nodes={redirectSankey.nodes}
-                links={redirectSankey.links}
-                layerColors={{
-                  0: "var(--color-warning)",
-                  1: "var(--color-success)",
-                }}
-                ariaLabel="Redirect source to final URL flow"
+            {flow && flow.links.length > 0 ? (
+              <RedirectFlowDiagram
+                nodes={flow.nodes}
+                links={flow.links}
+                onSelectUrl={focusTable}
+                ariaLabel="Redirect source to destination flow"
               />
             ) : (
               <p className="py-8 text-center text-sm text-muted-foreground">
