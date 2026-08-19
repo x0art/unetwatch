@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
         await db.close()
 
     settings = get_settings()
+    print(
+        f"[INIT] msteams_webhook_url={'configured' if settings.msteams_webhook_url else 'NOT SET'}"
+    )
     from app.services.monitor import fetch_logs
     from app.services.redirects import check_all
 
