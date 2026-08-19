@@ -34,38 +34,48 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="relative flex min-h-dvh px-4 py-10 sm:py-16">
-      {/* Decorative background glow */}
+    <div className="relative flex min-h-dvh items-center justify-center px-4 py-10 sm:py-16">
+      {/* Atmospheric background: layered glows + subtle dot grid */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        <div className="absolute -top-40 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute -bottom-32 -right-24 h-72 w-72 rounded-full bg-info/10 blur-3xl" />
+        {/* Primary glow — top center */}
+        <div className="absolute -top-32 left-1/2 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-primary/[0.07] blur-[100px]" />
+        {/* Info glow — bottom right */}
+        <div className="absolute -bottom-24 -right-20 h-80 w-80 rounded-full bg-info/[0.06] blur-[80px]" />
+        {/* Warm accent — bottom left */}
+        <div className="absolute -bottom-16 -left-16 h-64 w-64 rounded-full bg-warning/[0.04] blur-[70px]" />
+        {/* Subtle dot grid for texture */}
+        <div
+          className="absolute inset-0 opacity-[0.035]"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle, currentColor 1px, transparent 1px)",
+            backgroundSize: "24px 24px",
+          }}
+        />
       </div>
 
       {/* m-auto centers both axes and scrolls cleanly when the card is
           taller than the viewport (short laptop windows / mobile landscape). */}
       <div className="fade-in relative m-auto w-full max-w-sm">
-        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/20">
-          {/* Brand accent bar */}
+        <div className="overflow-hidden rounded-xl border border-border/80 bg-card/95 shadow-2xl shadow-black/25 backdrop-blur-sm">
+          {/* Brand accent bar — gradient sweep */}
           <div
-            className="h-1 bg-gradient-to-r from-primary/70 via-info/60 to-primary/70"
+            className="h-[3px] bg-gradient-to-r from-primary/60 via-info/50 to-primary/60"
             aria-hidden="true"
           />
 
           <div className="p-8 sm:p-9">
             {/* Brand header */}
             <div className="mb-8 text-center">
-              <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/25 to-primary/5 text-primary ring-1 ring-primary/30">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/[0.05] text-primary ring-1 ring-primary/20 shadow-sm shadow-primary/10">
                 <ShieldCheck className="h-7 w-7" aria-hidden="true" />
               </span>
-              <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                Admin Console
-              </p>
-              <h1 className="mt-1 text-xl font-bold tracking-tight">uNetWatch</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Sign in to continue</p>
+              <h1 className="mt-4 text-xl font-bold tracking-tight">uNetWatch</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">Sign in to the admin console</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="login-username">Username</Label>
                 <div className="relative">
                   <User
@@ -88,7 +98,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="login-password">Password</Label>
                 <div className="relative">
                   <Lock
@@ -114,7 +124,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                     aria-label={showPassword ? "Hide password" : "Show password"}
                     aria-controls="login-password"
                     aria-pressed={showPassword}
-                    className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {showPassword ? (
                       <EyeOff className="h-4 w-4" aria-hidden="true" />

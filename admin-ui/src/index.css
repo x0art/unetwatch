@@ -134,9 +134,19 @@
     margin: 0;
   }
 
-  /* Focus-visible ring */
+  /* Focus-visible ring with smooth transition */
   :focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+    transition: box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Smooth focus ring on form inputs specifically */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [role="combobox"]:focus-visible {
+    transition: border-color 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   /* Scrollbar styling */

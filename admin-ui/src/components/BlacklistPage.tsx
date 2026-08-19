@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  Ban,
   Copy,
   Link2,
   ListPlus,
@@ -377,11 +376,10 @@ export function BlacklistPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2.5">
-        <Ban className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Blacklist</h1>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold tracking-tight">Blacklist</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             Concrete URLs and IPs blacklisted from findings. Entries are stored as bare hosts (no protocol or path).
           </p>
         </div>
