@@ -176,6 +176,91 @@ def _whitelist_fully_sql(patterns: list[str], sql_clauses: list[str]) -> bool:
     return len([p for p in map(str.strip, patterns) if p]) == len(sql_clauses)
 
 
+@router.get("/url/{url:path}")
+async def url_breakdown(
+    url: str,
+    db=Depends(get_db_conn),
+    minutes: int | None = Query(None, ge=1, le=20160),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Per-URL client IP breakdown — reverse of client_breakdown.
+
+    Returns all client IPs that accessed the given URL (or base_url),
+    with counts and last-seen timestamps. Used by the Traffic page's
+    URL drill-down mode.
+    """
+    wl_cursor = await db.execute(
+        "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
+    )
+    wl_rows = await wl_cursor.fetchall()
+    whitelist_patterns = [r[0] for r in wl_rows]
+    whitelist_regex = _build_pattern_regex(whitelist_patterns)
+    sql_clauses = _whitelist_sql_clauses(whitelist_patterns)
+
+    # Match on both the exact URL and the base_url (host) so clicking a
+    # host-level node in the graph finds all IPs that hit any path on it.
+    where = ["(url = ? OR base_url = ?)", *sql_clauses]
+    params: list = [url, url]
+    if minutes:
+        where.append("log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
+        params.append(f"-{minutes} minutes")
+    clause = f"WHERE {' AND '.join(where)}"
+
+    needs_python_fallback = bool(whitelist_regex) and not _whitelist_fully_sql(
+        whitelist_patterns, sql_clauses
+    )
+    if needs_python_fallback:
+        cursor = await db.execute(
+            f"""
+            SELECT client_ip, COUNT(*) AS count, MAX(log_timestamp) AS last_seen
+            FROM findings
+            {clause}
+            GROUP BY client_ip
+            ORDER BY count DESC, client_ip
+            """,
+            params,
+        )
+        rows = [
+            dict(r)
+            for r in await cursor.fetchall()
+            if not (
+                re.search(whitelist_regex, url, re.IGNORECASE)
+            )
+        ]
+        return {
+            "url": url,
+            "source": "findings",
+            "total_accesses": sum(r["count"] for r in rows),
+            "es_online": True,
+            "clients": rows[:limit],
+        }
+
+    cursor = await db.execute(
+        f"""
+        SELECT client_ip, COUNT(*) AS count, MAX(log_timestamp) AS last_seen
+        FROM findings
+        {clause}
+        GROUP BY client_ip
+        ORDER BY count DESC, client_ip
+        LIMIT ?
+        """,
+        (*params, limit),
+    )
+    rows = [dict(r) for r in await cursor.fetchall()]
+
+    total_cursor = await db.execute(
+        f"SELECT COUNT(*) AS total FROM findings {clause}", params
+    )
+    total = (await total_cursor.fetchone())["total"]
+    return {
+        "url": url,
+        "source": "findings",
+        "total_accesses": total,
+        "es_online": True,
+        "clients": rows,
+    }
+
+
 @router.get("/top-clients")
 async def top_clients(
     db=Depends(get_db_conn),
