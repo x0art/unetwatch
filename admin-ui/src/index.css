@@ -210,6 +210,37 @@
   from { width: 0; }
 }
 
+/* Skeleton shimmer — a soft highlight sweeps left-to-right across the
+   muted surface. The gradient is translucent so it works on both dark
+   and light backgrounds without hardcoding any color. */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(1 0 0 / 0.04) 30%,
+    oklch(1 0 0 / 0.07) 50%,
+    oklch(1 0 0 / 0.04) 70%,
+    transparent 100%
+  );
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Light-mode shimmer uses slightly stronger white for visibility */
+.light .skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0 0 0 / 0.03) 30%,
+    oklch(0 0 0 / 0.06) 50%,
+    oklch(0 0 0 / 0.03) 70%,
+    transparent 100%
+  );
+}
+
 /* content-visibility for below-the-fold panels: the browser skips layout
    + paint for off-screen content, reserving intrinsic size so no scroll
    jump. Applied via the `.cv-auto` class in AppShell/panel wrappers. */
