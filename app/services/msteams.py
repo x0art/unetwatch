@@ -189,12 +189,22 @@ async def send_msteams_alert(
         ],
     }
 
+    import json as _json
+
+    log.info("MS Teams webhook POST → %s", webhook_url)
+    log.info("MS Teams payload:\n%s", _json.dumps(payload, indent=2, default=str))
+
     async with aiohttp.ClientSession() as session:
         async with session.post(webhook_url, json=payload, timeout=15) as response:
             status = response.status
+            body = await response.text()
             if status == 200:
-                log.info("MS Teams alert sent successfully")
+                log.info(
+                    "MS Teams alert sent successfully [status=%s body=%s]",
+                    status, body,
+                )
             else:
-                body = await response.text()
-                log.warning("MS Teams webhook returned %s: %s", status, body)
+                log.warning(
+                    "MS Teams webhook returned [status=%s]: %s", status, body
+                )
             return status
