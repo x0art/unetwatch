@@ -36,8 +36,10 @@ async def write_log(entry: dict) -> None:
             "INSERT INTO monitor_logs"
             " (kind, started_at, duration_ms, minutes, es_online, matches, filtered,"
             "  stored, es_query, webhook_url, webhook_status, webhook_error,"
-            "  webhook_reason, top_urls, matched_patterns, error)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  webhook_reason, msteams_status, msteams_error,"
+            "  webhook_payload, msteams_payload,"
+            "  top_urls, matched_patterns, error)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.get("kind", "poll"),
                 entry.get("started_at") or datetime.now(UTC).isoformat(),
@@ -52,6 +54,10 @@ async def write_log(entry: dict) -> None:
                 entry.get("webhook_status"),
                 entry.get("webhook_error"),
                 entry.get("webhook_reason"),
+                entry.get("msteams_status"),
+                entry.get("msteams_error"),
+                entry.get("webhook_payload"),
+                entry.get("msteams_payload"),
                 _json_list(entry.get("top_urls")),
                 _json_list(entry.get("matched_patterns")),
                 entry.get("error"),
@@ -132,6 +138,10 @@ def default_log(kind: str, minutes: int | None) -> dict:
         "webhook_status": None,
         "webhook_error": None,
         "webhook_reason": None,
+        "msteams_status": None,
+        "msteams_error": None,
+        "webhook_payload": None,
+        "msteams_payload": None,
         "top_urls": [],
         "matched_patterns": [],
         "error": None,

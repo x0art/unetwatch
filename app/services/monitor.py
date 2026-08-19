@@ -1,3 +1,4 @@
+import json
 import math
 import re
 import time
@@ -413,6 +414,12 @@ async def fetch_logs(minutes: int = 10):
             log["error"] = f"Failed to store findings: {e}"
             print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")
 
+        # Store payload for retry before sending
+        try:
+            log["webhook_payload"] = json.dumps(payload, default=str)
+        except (TypeError, ValueError):
+            pass
+
         if not settings.webhook_url:
             log["webhook_reason"] = "Webhook URL not configured — nothing sent"
             print(
@@ -477,6 +484,34 @@ async def fetch_logs(minutes: int = 10):
                     f"MS Teams alert → {len(unique_domains)} domains, "
                     f"{len(unique_urls)} urls, pattern={pattern_names}"
                 )
+
+                # Build and store MS Teams payload for retry
+                from app.services.msteams import build_adaptive_card
+
+                msteams_card = build_adaptive_card(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    client_ip=first_client_ip,
+                    pattern_match=pattern_names,
+                    target_domains=unique_domains,
+                    destination_urls=unique_urls,
+                    base_url=settings.base_url,
+                )
+                msteams_full_payload = {
+                    "type": "message",
+                    "attachments": [
+                        {
+                            "contentType": "application/vnd.microsoft.card.adaptive",
+                            "contentUrl": None,
+                            "content": msteams_card,
+                        }
+                    ],
+                }
+                try:
+                    log["msteams_payload"] = json.dumps(
+                        msteams_full_payload, default=str
+                    )
+                except (TypeError, ValueError):
+                    pass
 
                 msteams_status = await send_msteams_alert(
                     webhook_url=settings.msteams_webhook_url,
