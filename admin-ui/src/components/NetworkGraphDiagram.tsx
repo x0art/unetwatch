@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react"
 import * as echarts from "echarts/core"
-import { GraphChart, EffectScatterChart } from "echarts/charts"
-import type { GraphSeriesOption, EffectScatterSeriesOption } from "echarts/charts"
+import { GraphChart } from "echarts/charts"
+import type { GraphSeriesOption } from "echarts/charts"
 import { TooltipComponent } from "echarts/components"
 import { CanvasRenderer } from "echarts/renderers"
 import type {
@@ -14,7 +14,7 @@ import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react"
 import { useTheme } from "./Sidebar"
 import { resolveAllColors, type ResolvedColors } from "./SankeyDiagram"
 
-echarts.use([GraphChart, EffectScatterChart, TooltipComponent, CanvasRenderer])
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const MAX_LABEL = 36
 
@@ -77,10 +77,9 @@ function buildOption(params: {
   nodes: NetworkNode[]
   links: NetworkLink[]
   resolved: ResolvedColors
-  reduced: boolean
   directed: boolean
 }): EChartsOption {
-  const { nodes, links, resolved, reduced, directed } = params
+  const { nodes, links, resolved, directed } = params
   const { palette, paletteColors } = resolved
 
   const maxValue = Math.max(1, ...nodes.map((n) => n.value ?? 1))
@@ -94,8 +93,6 @@ function buildOption(params: {
       detail: n.detail,
       url: n.clickable ? (n.detail ?? n.id) : undefined,
       symbolSize: size,
-      x: 0,
-      y: 0,
       itemStyle: {
         color: paletteColors[colorIdx],
         borderColor: palette.border,
@@ -131,72 +128,7 @@ function buildOption(params: {
     }
   })
 
-  const glowNodes = nodes
-    .filter((n) => (n.value ?? 0) > maxValue * 0.4)
-    .map((n) => {
-      const colorIdx = kindColorIndex(n.kind)
-      return {
-        id: `glow:${n.id}`,
-        name: n.name,
-        symbolSize: (n.value ? 14 + 18 * (n.value / maxValue) : 16) + 12,
-        itemStyle: {
-          color: paletteColors[colorIdx],
-          opacity: 0.15,
-        },
-      }
-    })
-
-  const series: (GraphSeriesOption | EffectScatterSeriesOption)[] = [
-    {
-      type: "graph",
-      layout: "force",
-      roam: true,
-      draggable: true,
-      force: {
-        repulsion: nodes.length > 30 ? 140 : 100,
-        gravity: 0.08,
-        edgeLength: nodes.length > 30 ? 70 : 100,
-        friction: 0.55,
-        layoutAnimation: !reduced,
-      },
-      data: graphData as unknown as GraphSeriesOption["data"],
-      links: graphLinks,
-      emphasis: {
-        focus: "adjacency",
-        itemStyle: { borderWidth: 3, shadowBlur: 16 },
-        lineStyle: { opacity: 0.85, width: 3 },
-      },
-      blur: {
-        itemStyle: { opacity: 0.1 },
-        lineStyle: { opacity: 0.04 },
-      },
-      stateAnimation: { duration: 200 },
-      edgeSymbol: directed ? ["none", "arrow"] : ["none", "none"],
-      edgeSymbolSize: directed ? [0, 7] : [0, 0],
-      label: { show: false },
-    },
-  ]
-
-  if (!reduced && glowNodes.length > 0) {
-    series.push({
-      type: "effectScatter",
-      z: 0,
-      silent: true,
-      coordinateSystem: undefined as never,
-      data: glowNodes as unknown as EffectScatterSeriesOption["data"],
-      rippleEffect: {
-        brushType: "stroke",
-        scale: 3,
-        period: 5,
-      },
-      label: { show: false },
-    } as EffectScatterSeriesOption)
-  }
-
   return {
-    animation: false,
-    animationDuration: 0,
-    animationEasing: "cubicOut",
     tooltip: {
       trigger: "item",
       triggerOn: "mousemove",
@@ -226,8 +158,48 @@ function buildOption(params: {
         return lines.join("<br/>")
       },
     },
-    series,
+    series: [
+      {
+        type: "graph",
+        layout: "force",
+        roam: true,
+        draggable: true,
+        force: {
+          repulsion: nodes.length > 30 ? 140 : 100,
+          gravity: 0.08,
+          edgeLength: nodes.length > 30 ? 70 : 100,
+          friction: 0.55,
+          layoutAnimation: true,
+        },
+        data: graphData as unknown as GraphSeriesOption["data"],
+        links: graphLinks,
+        emphasis: {
+          focus: "adjacency",
+          itemStyle: { borderWidth: 3, shadowBlur: 16 },
+          lineStyle: { opacity: 0.85, width: 3 },
+        },
+        blur: {
+          itemStyle: { opacity: 0.1 },
+          lineStyle: { opacity: 0.04 },
+        },
+        stateAnimation: { duration: 200 },
+        edgeSymbol: directed ? ["none", "arrow"] : ["none", "none"],
+        edgeSymbolSize: directed ? [0, 7] : [0, 0],
+        label: { show: false },
+        animationDurationUpdate: 300,
+        animationEasingUpdate: "cubicOut",
+      } as GraphSeriesOption,
+    ],
   }
+}
+
+/** Minimal wrapper around chart.setOption for zoom/center updates.
+ *  Uses merge mode (no notMerge flag) so it doesn't restart the force layout. */
+function applyView(chart: ECharts, zoom: number) {
+  chart.setOption(
+    { series: [{ zoom, center: ["50%", "50%"] }] } as EChartsOption,
+    { replaceMerge: ["series"] },
+  )
 }
 
 export function NetworkGraphDiagram({
@@ -261,28 +233,36 @@ export function NetworkGraphDiagram({
   const prev = useRef<{ nodes: NetworkNode[]; links: NetworkLink[] } | null>(null)
   const prevPalette = useRef<ResolvedColors["palette"] | null>(null)
 
+  // ── Init: create chart, ensure correct dimensions, then dispose on unmount ──
   useEffect(() => {
     const el = ref.current
     if (!el) return
+
+    // Force a read of the container's layout so ECharts gets correct dimensions.
+    // This avoids the race where echarts.init runs before the browser has laid
+    // out the flex/grid parent, resulting in a 0-width canvas and all nodes
+    // collapsing into the top-left corner.
+    void el.offsetWidth
+
     const chart = echarts.init(el)
     chartRef.current = chart
     prev.current = null
     prevPalette.current = null
 
-    const onResize = () => chart.resize()
-    const onWindowResize = () => onResize()
-    window.addEventListener("resize", onWindowResize)
-    const ro = new ResizeObserver(onResize)
+    // Resize once after init to pick up any pending layout.
+    chart.resize()
+
+    const ro = new ResizeObserver(() => chart.resize())
     ro.observe(el)
 
     return () => {
-      window.removeEventListener("resize", onWindowResize)
       ro.disconnect()
       chart.dispose()
       chartRef.current = null
     }
   }, [])
 
+  // ── Data: push new nodes/links into the chart ──────────────────────────
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
@@ -303,29 +283,27 @@ export function NetworkGraphDiagram({
     prev.current = { nodes, links }
     prevPalette.current = resolved.palette
 
+    // Replace the entire option — this restarts the force simulation.
     chart.setOption(
-      buildOption({ nodes, links, resolved, reduced, directed }),
+      buildOption({ nodes, links, resolved, directed }),
       true,
     )
-    chart.getZr().flush()
 
-    // After the force layout settles, fit the content to the viewport.
-    // Use a short delay to let the force simulation position nodes.
+    // After the force layout settles, fit content to the viewport.
     if (contentChanged && nodes.length > 0) {
+      const settleTime = reduced ? 0 : 600
       const timer = setTimeout(() => {
-        // Dispatch a roam action to fit the graph content to the container.
-        chart.dispatchAction({
-          type: "graphRoam",
-          seriesIndex: 0,
-          zoom: 0.85,
-        })
+        // Ensure the canvas dimensions are still correct after layout.
+        chart.resize()
+        // Center the graph and zoom to fit.
+        applyView(chart, 0.85)
         chart.getZr().flush()
-      }, 300)
+      }, settleTime)
       return () => clearTimeout(timer)
     }
   }, [nodes, links, resolved, reduced, directed])
 
-  // Click a node → fire onSelectUrl (for URL nodes) and/or onNodeClick.
+  // ── Click handler ──────────────────────────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
@@ -352,44 +330,40 @@ export function NetworkGraphDiagram({
     }
   }, [onSelectUrl, onNodeClick])
 
+  // ── Zoom controls ──────────────────────────────────────────────────────
   const handleZoomIn = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.dispatchAction({
-      type: "graphRoam",
-      seriesIndex: 0,
-      zoom: 1.4,
-    })
+    // Read the current zoom, multiply by 1.4x.
+    const opt = chart.getOption() as { series?: { zoom?: number }[] }
+    const current = opt.series?.[0]?.zoom ?? 1
+    applyView(chart, current * 1.4)
   }, [])
 
   const handleZoomOut = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.dispatchAction({
-      type: "graphRoam",
-      seriesIndex: 0,
-      zoom: 0.7,
-    })
+    const opt = chart.getOption() as { series?: { zoom?: number }[] }
+    const current = opt.series?.[0]?.zoom ?? 1
+    applyView(chart, current * 0.7)
   }, [])
 
   const handleFitView = useCallback(() => {
     const chart = chartRef.current
     if (!chart) return
-    // Reset to the original option which resets the zoom/pan state,
-    // then apply a zoom-out to ensure all content is visible.
+    // Reset the entire graph option (re-runs the force simulation) then
+    // center + zoom to fit.
     chart.setOption(
-      buildOption({ nodes, links, resolved, reduced, directed }),
+      buildOption({ nodes, links, resolved, directed }),
       true,
     )
     chart.getZr().flush()
+    const settleTime = reduced ? 0 : 500
     setTimeout(() => {
-      chart.dispatchAction({
-        type: "graphRoam",
-        seriesIndex: 0,
-        zoom: 0.85,
-      })
+      chart.resize()
+      applyView(chart, 0.85)
       chart.getZr().flush()
-    }, 200)
+    }, settleTime)
   }, [nodes, links, resolved, reduced, directed])
 
   return (
