@@ -377,7 +377,15 @@ export function Label({
 
 export function Skeleton({ className }: { className?: string }) {
   return (
-    <div className={cn("animate-pulse rounded-md bg-muted", className)} aria-hidden="true" />
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-md bg-muted/60",
+        className,
+      )}
+      aria-hidden="true"
+    >
+      <div className="skeleton-shimmer absolute inset-0" />
+    </div>
   )
 }
 
