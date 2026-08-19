@@ -14,6 +14,7 @@ import {
   Select,
   Label,
   ConfirmDialog,
+  PageHeader,
   SearchInput,
   useToast,
 } from "./ui"
@@ -306,13 +307,16 @@ export function PatternTable() {
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
-      {/* ── Toolbar ── */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* ── Header + Toolbar ── */}
+      <PageHeader
+        title="Patterns"
+        description="Manage block and whitelist patterns used for URL matching"
+      >
         <SearchInput
           placeholder="Search patterns..."
           value={search}
           onChange={handleSearchChange}
-          className="max-w-xs"
+          className="w-56"
           aria-label="Search patterns"
         />
         <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
@@ -321,7 +325,7 @@ export function PatternTable() {
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk Import
         </Button>
-      </div>
+      </PageHeader>
 
       {/* ── Error banner ── */}
       {error && (

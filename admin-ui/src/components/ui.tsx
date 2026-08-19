@@ -226,12 +226,12 @@ export function Textarea({
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning"
 
 const badgeVariants: Record<BadgeVariant, string> = {
-  default: "bg-primary/15 text-primary border border-primary/30",
-  secondary: "bg-secondary text-secondary-foreground",
-  destructive: "bg-danger/15 text-danger border border-danger/30",
-  outline: "border border-input text-foreground",
-  success: "bg-success/15 text-success border border-success/30",
-  warning: "bg-warning/15 text-warning border border-warning/30",
+  default: "bg-primary/12 text-primary border border-primary/25",
+  secondary: "bg-secondary/80 text-secondary-foreground",
+  destructive: "bg-danger/12 text-danger border border-danger/25",
+  outline: "border border-input/80 text-foreground",
+  success: "bg-success/12 text-success border border-success/25",
+  warning: "bg-warning/12 text-warning border border-warning/25",
 }
 
 export function Badge({
@@ -305,7 +305,7 @@ export function Card({ className, children }: { className?: string; children: Re
   return (
     <div
       className={cn(
-        "rounded-lg border border-border bg-card text-card-foreground shadow-sm",
+        "rounded-lg border border-border/80 bg-card text-card-foreground shadow-sm shadow-black/[0.04]",
         className,
       )}
     >
@@ -824,11 +824,11 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-dashed border-border px-6 py-16 text-center",
+        "flex flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-16 text-center",
         className,
       )}
     >
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-secondary/80 text-muted-foreground/70">
         <Icon className="h-7 w-7" aria-hidden="true" />
       </div>
       <h3 className="text-base font-semibold tracking-tight">{title}</h3>
@@ -964,12 +964,12 @@ export function Panel({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6",
+        "rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm shadow-black/[0.03] sm:p-6",
         className,
       )}
     >
       {(title || action) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/50 pb-3">
           {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
           {title && <h3 className="text-sm font-semibold tracking-tight">{title}</h3>}
           {description && (
@@ -1112,6 +1112,14 @@ const statToneStyles: Record<StatTone, { iconWrap: string; icon: string }> = {
   },
 }
 
+const statToneAccent: Record<StatTone, string> = {
+  default: "",
+  success: "from-success/60 to-success/0",
+  warning: "from-warning/60 to-warning/0",
+  danger: "from-danger/60 to-danger/0",
+  info: "from-info/60 to-info/0",
+}
+
 export function StatCard({
   icon: Icon,
   label,
@@ -1130,11 +1138,22 @@ export function StatCard({
   action?: ReactNode
 }) {
   const styles = statToneStyles[tone]
+  const accent = statToneAccent[tone]
   // Numeric values count up (expo-out, reduced-motion-safe via MotionGate);
   // strings like "—" / "Online" render as-is.
   const animated = typeof value === "number"
   return (
-    <Card className={cn("overflow-hidden", className)}>
+    <Card className={cn("relative overflow-hidden", className)}>
+      {/* Subtle top-edge accent line */}
+      {accent && (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r",
+            accent,
+          )}
+          aria-hidden="true"
+        />
+      )}
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">

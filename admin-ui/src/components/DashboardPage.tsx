@@ -372,46 +372,46 @@ export function DashboardPage({
         <button
           type="button"
           onClick={() => onNavigate("query")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-info/40 hover:bg-info/5"
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-info/40 hover:bg-info/[0.04] hover:shadow-md hover:shadow-info/[0.04]"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info transition-colors group-hover:bg-info/25">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info transition-colors duration-200 group-hover:bg-info/25">
             <FileSearch className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">Query Console</p>
             <p className="text-xs text-muted-foreground">Live ES queries & sankey</p>
           </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-info" />
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-info" />
         </button>
 
         <button
           type="button"
           onClick={() => onNavigate("graph")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-warning/40 hover:bg-warning/5"
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-warning/40 hover:bg-warning/[0.04] hover:shadow-md hover:shadow-warning/[0.04]"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning transition-colors group-hover:bg-warning/25">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning transition-colors duration-200 group-hover:bg-warning/25">
             <Link2 className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">Traffic Flow</p>
             <p className="text-xs text-muted-foreground">Client → server → URL graph</p>
           </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-warning" />
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-warning" />
         </button>
 
         <button
           type="button"
           onClick={() => onNavigate("patterns")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-success/40 hover:bg-success/5"
+          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-success/40 hover:bg-success/[0.04] hover:shadow-md hover:shadow-success/[0.04]"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/15 text-success transition-colors group-hover:bg-success/25">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/15 text-success transition-colors duration-200 group-hover:bg-success/25">
             <Ban className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold">Patterns</p>
             <p className="text-xs text-muted-foreground">Manage block & whitelist rules</p>
           </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-success" />
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-success" />
         </button>
       </div>
     </div>
