@@ -193,13 +193,11 @@ function buildOption(params: {
   }
 }
 
-/** Minimal wrapper around chart.setOption for zoom/center updates.
- *  Uses merge mode (no notMerge flag) so it doesn't restart the force layout. */
+/** Update zoom and center on the existing graph series without restarting
+ *  the force layout. Uses default merge mode (no notMerge, no replaceMerge)
+ *  so only the listed properties are patched into series[0]. */
 function applyView(chart: ECharts, zoom: number) {
-  chart.setOption(
-    { series: [{ zoom, center: ["50%", "50%"] }] } as EChartsOption,
-    { replaceMerge: ["series"] },
-  )
+  chart.setOption({ series: [{ zoom, center: ["50%", "50%"] }] } as EChartsOption)
 }
 
 export function NetworkGraphDiagram({
