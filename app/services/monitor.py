@@ -463,9 +463,11 @@ async def fetch_logs(minutes: int = 10):
                         seen_urls.add(u)
                         unique_urls.append(u)
 
-                pattern_names = ", ".join(block_patterns[:3])
-                if len(block_patterns) > 3:
-                    pattern_names += f" +{len(block_patterns) - 3} more"
+                # Show only patterns that actually matched, not the full DSL list
+                matched_pats = log.get("matched_patterns", block_patterns)
+                pattern_names = ", ".join(matched_pats[:3])
+                if len(matched_pats) > 3:
+                    pattern_names += f" +{len(matched_pats) - 3} more"
 
                 log[
                     "msteams_preview"
