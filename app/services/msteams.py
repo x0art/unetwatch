@@ -29,7 +29,7 @@ def build_adaptive_card(
       - Timestamp, Client IP, Pattern Match as facts
       - Target domains (monospace, in an emphasis container)
       - Destination URLs (monospace, in an emphasis container)
-      - Action buttons: Block Source IP, Block Domain, Add to Whitelist
+      - Action buttons: Block Domain, Add to Whitelist
     """
     # Truncate long lists for readability
     domains_text = "\n".join(target_domains[:20])
@@ -41,7 +41,6 @@ def build_adaptive_card(
         urls_text += f"\n… +{len(destination_urls) - 20} more"
 
     # Build action URLs using the base_url from settings
-    block_ip_url = f"{base_url}/blockDomain?url={client_ip}" if base_url else ""
     block_domain_url = (
         f"{base_url}/blockDomain?url={','.join(target_domains[:10])}"
         if base_url and target_domains
@@ -54,13 +53,6 @@ def build_adaptive_card(
     )
 
     actions = []
-    if block_ip_url:
-        actions.append({
-            "type": "Action.OpenUrl",
-            "title": "Block Source IP",
-            "style": "destructive",
-            "url": block_ip_url,
-        })
     if block_domain_url:
         actions.append({
             "type": "Action.OpenUrl",
