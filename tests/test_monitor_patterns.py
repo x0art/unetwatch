@@ -93,8 +93,8 @@ def test_build_logs_query_narrows_matches_when_search_given():
     # Tokenized, whitespace-collapsed, and escaped — must never break grammar.
     assert len(must) == 2  # block-pattern clause + search clause
     search_qs = must[1]["query_string"]["query"]
-    assert "(url:*1.2.3.4* OR client_ip:*1.2.3.4* OR server_ip:*1.2.3.4*)" in search_qs
-    assert "(url:*bad.example* OR client_ip:*bad.example* OR server_ip:*bad.example*)" in search_qs
+    assert "(url.keyword:*1.2.3.4* OR client_ip.keyword:*1.2.3.4* OR server_ip.keyword:*1.2.3.4*)" in search_qs
+    assert "(url.keyword:*bad.example* OR client_ip.keyword:*bad.example* OR server_ip.keyword:*bad.example*)" in search_qs
 
     # No search term → only the block-pattern clause.
     plain = build_logs_query(["*porn*"], 10, 50)
@@ -109,8 +109,8 @@ def test_build_logs_query_caps_search_tokens():
     assert len(must) == 2
     search_qs = must[1]["query_string"]["query"]
     # Exactly 20 ANDed clauses; token 20+ dropped.
-    assert search_qs.count("(url:*tok") == 20
-    assert "(url:*tok39*" not in search_qs
+    assert search_qs.count("(url.keyword:*tok") == 20
+    assert "(url.keyword:*tok39*" not in search_qs
 
 
 # ── apply_filters resilience ───────────────────────────────────────────────
