@@ -157,7 +157,7 @@ def build_logs_query(
     if terms:
         clauses = [
             "("
-            "url:*{t}* OR client_ip:*{t}* OR server_ip:*{t}*"
+            "url.keyword:*{t}* OR client_ip.keyword:*{t}* OR server_ip.keyword:*{t}*"
             ")".format(t=_escape_query_string(term))
             for term in terms
         ]
