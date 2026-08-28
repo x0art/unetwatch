@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     admin_pass: str = "changeme"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Risk scoring weights (env: RISK_WEIGHT_<CLASS> or risk_weight_<class> in .env)
+    # Default 1.0 per class if not specified.
+    risk_weight_malware: float | None = None
+    risk_weight_phishing: float | None = None
+    risk_weight_c2: float | None = None
+    risk_weight_exploit: float | None = None
+    risk_weight_suspicious: float | None = None
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @model_validator(mode="after")

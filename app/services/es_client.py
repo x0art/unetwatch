@@ -5,8 +5,8 @@ connection lifecycle management. Extracted from ``monitor.py`` to
 centralize ES connection concerns.
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from elasticsearch import AsyncElasticsearch
 

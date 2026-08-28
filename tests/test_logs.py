@@ -334,14 +334,30 @@ async def test_fetch_logs_records_query_and_webhook(client, monkeypatch):
         async def close(self):
             pass
 
+        async def field_caps(self, index):
+            return {"fields": {}}
+
+        async def ping(self):
+            return True
+
+    fake_es = FakeES()
+
     def fake_build(*args, **kwargs):
-        return FakeES()
+        return fake_es
 
     async def fake_send(webhook_url, n_item, payload):
         return 200
 
+    # Patch both monitor's build_es_client AND es_fields' es_client context manager
+    # The app lifespan runs before this test and calls warm_field_inventory()
+    # which uses app.services.es_client.es_client
     monkeypatch.setattr(svc, "build_es_client", fake_build)
-    monkeypatch.setattr(svc, "send_logs", fake_send)
+    monkeypatch.setattr("app.services.es_client.es_client", lambda *a, **kw: fake_es)
+    monkeypatch.setattr("app.services.es_client.build_es_client", fake_build)
+    # Patch send_logs in delivery module (used by deliver_n8n) AND set webhook_url
+    monkeypatch.setattr("app.services.delivery.send_logs", fake_send)
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "webhook_url", "https://hooks.example/test")
 
     await svc.fetch_logs(minutes=5)
 

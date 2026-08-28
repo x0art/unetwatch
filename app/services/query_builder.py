@@ -82,6 +82,7 @@ def build_logs_query(
     size: int,
     search: str | None = None,
     client_ip: str | None = None,
+    fields: list[str] | None = None,
 ) -> dict:
     """ES query that flags URLs matching any block pattern within the window.
 
@@ -90,6 +91,8 @@ def build_logs_query(
     IP or server IP. Tokens are escaped so the operator can never break out
     of the query_string grammar. ``client_ip`` (optional) narrows to a single
     client via a ``term`` filter — used by the drill-down radial.
+    ``fields`` (optional) limits ``_source`` to only the listed fields for
+    projection — only requested fields are fetched from ES.
     """
     query_string = " OR ".join(
         f"url : {escape_query_string(p)}" for p in block_patterns
@@ -123,7 +126,30 @@ def build_logs_query(
     ]
     if client_ip:
         filters.append({"term": {"client_ip": client_ip}})
-    return {
+    result: dict = {
         "size": size,
         "query": {"bool": {"filter": filters, "must": must}},
+    }
+    if fields is not None:
+        result["_source"] = fields
+    return result
+
+
+def build_client_session_query(client: str, minutes: int, size: int) -> dict:
+    """ES query for all requests from one client in a time window.
+
+    Filter-only: term filter on client_ip without the block-pattern query_string
+    used by build_logs_query. Sorted @timestamp ascending for session timeline.
+    """
+    return {
+        "size": size,
+        "sort": [{"@timestamp": {"order": "asc"}}],
+        "query": {
+            "bool": {
+                "filter": [
+                    {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}},
+                    {"term": {"client_ip": client}},
+                ]
+            }
+        },
     }

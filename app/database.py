@@ -56,6 +56,38 @@ async def init_db():
         await db.execute(
             "ALTER TABLE findings ADD COLUMN server_ip TEXT NOT NULL DEFAULT ''"
         )
+    # Migration: add matched_patterns to existing databases that predate the column.
+    # JSON array of block patterns that matched at poll time — needed for
+    # ranking to attribute persisted hits to policy classes.
+    if "matched_patterns" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN matched_patterns TEXT NOT NULL DEFAULT '[]'"
+        )
+
+    # Migration: add user_agent to existing databases that predate the column.
+    # Only added in UC-A/UC-B modes (where user_agent field is confirmed present).
+    # In COLLAPSED mode, the column is not added.
+    from app.services.es_fields import mode_has_extended_findings
+
+    if mode_has_extended_findings() and "user_agent" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''"
+        )
+
+    # Migration: add action and duration_seconds (Schema S3 — OPTIONAL, UC-A/UC-B only).
+    # These columns round out the retained view only if F1 wants them (UC-A/UC-B mode).
+    # Anti-scope: leave them ES-only if not needed (COLLAPSED mode).
+    from app.services.es_fields import mode_has_extended_findings
+
+    if mode_has_extended_findings():
+        if "action" not in columns:
+            await db.execute(
+                "ALTER TABLE findings ADD COLUMN action TEXT NOT NULL DEFAULT ''"
+            )
+        if "duration_seconds" not in columns:
+            await db.execute(
+                "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
+            )
 
     # Indexes for the findings graph + list queries (url/base_url lookups,
     # whitelist SQL filtering).

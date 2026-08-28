@@ -9,7 +9,6 @@ Outgoing Webhook format:
 """
 
 import logging
-from datetime import UTC, datetime
 
 log = logging.getLogger("unetwatch.msteams")
 

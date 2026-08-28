@@ -1,5 +1,4 @@
 import json
-from datetime import UTC, datetime
 
 import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, Query

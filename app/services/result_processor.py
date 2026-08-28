@@ -5,6 +5,7 @@ Extracted from ``monitor.py`` to create a deep module with clear testability:
 every function takes a DataFrame and returns a dict/list, with zero I/O.
 """
 
+import json
 import math
 import re
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ from numbers import Integral, Real
 
 import pandas as pd
 
+from app.services.es_fields import mode_has_extended_findings
 from app.services.query_builder import glob_to_regex
 
 
@@ -83,7 +85,15 @@ def apply_filters(
     ``actions=None`` to keep every row regardless of action.
     """
     df = df.copy()
-    for col in ("url", "client_ip", "action", "@timestamp"):
+    for col in (
+    "url",
+    "client_ip",
+    "action",
+    "@timestamp",
+    "matched_patterns",
+    "user_agent",
+    "duration_seconds",
+):
         if col not in df.columns:
             df[col] = ""
     # Vectorized base_url extraction — equivalent to the old per-row
@@ -99,12 +109,16 @@ def apply_filters(
     return df
 
 
-async def store_findings(db, df: pd.DataFrame) -> int:
+async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | None = None) -> int:
     """Persist filtered matches so they surface in the Findings page.
 
     Uses INSERT OR IGNORE + a UNIQUE(client_ip, url, log_timestamp) constraint so
     overlapping poll windows never create duplicate rows. Returns the number of
     rows actually inserted.
+
+    Schema S2/S3 columns (user_agent, action, duration_seconds) are only written
+    when mode_has_extended_findings() returns True (UC-A/UC-B). In COLLAPSED mode
+    these columns don't exist in the DB and are left ES-only.
     """
     rows = []
     now = datetime.now(UTC).isoformat()
@@ -113,23 +127,53 @@ async def store_findings(db, df: pd.DataFrame) -> int:
     # than df.iterrows() for large batches.
     if "server_ip" not in df.columns:
         df["server_ip"] = ""
-    cols = ["client_ip", "server_ip", "url", "base_url", "@timestamp"]
-    for r in df[cols].itertuples(index=False, name=None):
-        rows.append(
-            (
-                str(r[0] or ""),
-                str(r[1] or ""),
-                str(r[2] or ""),
-                str(r[3] or ""),
-                normalize_timestamp(r[4], now),
-            )
-        )
+    matched_json = json.dumps(matched_patterns or [])
+
+    # Check if extended findings columns exist in DB (UC-A/UC-B mode)
+    extended = mode_has_extended_findings()
+
+    # Base columns (always present) - DataFrame column names
+    base_cols = ["client_ip", "server_ip", "url", "base_url", "@timestamp"]
+    # Database column names (log_timestamp instead of @timestamp, plus matched_patterns)
+    db_base_cols = [
+        "client_ip",
+        "server_ip",
+        "url",
+        "base_url",
+        "log_timestamp",
+        "matched_patterns",
+    ]
+    # Extended columns (only in UC-A/UC-B)
+    ext_cols = ["user_agent", "action", "duration_seconds"] if extended else []
+
+    all_cols = db_base_cols + ext_cols
+    placeholders = ", ".join(["?"] * len(all_cols))
+    col_names = ", ".join(all_cols)
+
+    # Iterate over base columns, use df.iloc[i].get for extra columns with defaults
+    for i, r in enumerate(df[base_cols].itertuples(index=False, name=None)):
+        vals = [
+            str(r[0] or ""),
+            str(r[1] or ""),
+            str(r[2] or ""),
+            str(r[3] or ""),
+            normalize_timestamp(r[4], now),
+            matched_json,
+        ]
+        if extended:
+            # user_agent defaults to ""
+            vals.append(str(df.iloc[i].get("user_agent", "")) if "user_agent" in df.columns else "")
+            # action defaults to ""
+            vals.append(str(df.iloc[i].get("action", "")) if "action" in df.columns else "")
+            # duration_seconds defaults to 0
+            dur = df.iloc[i].get("duration_seconds") if "duration_seconds" in df.columns else None
+            vals.append(int(dur) if dur is not None else 0)
+        rows.append(tuple(vals))
+
     if not rows:
         return 0
     cursor = await db.executemany(
-        "INSERT OR IGNORE INTO findings"
-        " (client_ip, server_ip, url, base_url, log_timestamp)"
-        " VALUES (?, ?, ?, ?, ?)",
+        f"INSERT OR IGNORE INTO findings ({col_names}) VALUES ({placeholders})",
         rows,
     )
     await db.commit()

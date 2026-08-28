@@ -13,11 +13,16 @@ so that existing imports in routes, tests, and scheduler continue to work.
 import json
 import re
 import time
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pandas as pd
 
 from app.config import get_settings
+from app.services.es_client import (  # noqa: F401
+    build_es_client,
+    is_es_online,
+)
 
 # ── Re-exports from deep modules (backward compatibility) ──────────────────
 from app.services.query_builder import (  # noqa: F401
@@ -27,34 +32,40 @@ from app.services.query_builder import (  # noqa: F401
     glob_to_regex as _glob_to_regex,
     whitelist_sql_clauses as _whitelist_sql_clauses,
 )
-from app.services.es_client import (  # noqa: F401
-    build_es_client,
-    is_es_online,
-)
-from contextlib import asynccontextmanager
 
 
 @asynccontextmanager
-async def _es_client_context(settings=None, *, timeout=5, retry_on_timeout=False, max_retries=0):
+async def _es_client_context(
+    settings=None, *, timeout=5, retry_on_timeout=False, max_retries=0
+):
     """Context manager that delegates to the (patchable) build_es_client."""
-    client = build_es_client(settings, timeout=timeout, retry_on_timeout=retry_on_timeout, max_retries=max_retries)
+    client = build_es_client(
+        settings,
+        timeout=timeout,
+        retry_on_timeout=retry_on_timeout,
+        max_retries=max_retries,
+    )
     try:
         yield client
     finally:
         await client.close()
-from app.services.result_processor import (  # noqa: F401
-    apply_filters,
-    build_flow as _build_flow,
-    build_items as _build_items,
-    build_timeline as _build_timeline,
-    normalize_timestamp as _normalize_timestamp,
-    safe_number as _safe_number,
-    store_findings,
-)
 from app.services.delivery import (  # noqa: F401
     deliver_msteams,
     deliver_n8n,
     send_logs,
+)
+from app.services.result_processor import (  # noqa: F401
+    apply_filters,
+    store_findings,
+)
+from app.services.result_processor import (
+    build_flow as _build_flow,
+)
+from app.services.result_processor import (
+    build_items as _build_items,
+)
+from app.services.result_processor import (
+    build_timeline as _build_timeline,
 )
 
 
@@ -379,6 +390,27 @@ async def run_query(
     return result
 
 
+# ── Startup: field-sample gate (best-effort, never crashes boot) ────────────
+
+async def warm_field_inventory() -> None:
+    """Fetch ES field inventory at startup (best-effort).
+
+    Runs once per process. Logs on failure but never raises — the monitor
+    must start even if ES is unreachable. The inventory is cached in
+    es_fields._field_inventory for subsequent use by /api/es/fields and
+    downstream consumers.
+    """
+    import logging
+
+    from app.services.es_fields import fetch_field_inventory
+
+    _log = logging.getLogger(__name__)
+    try:
+        await fetch_field_inventory()
+    except Exception as e:
+        _log.warning(f"[monitor] Field inventory warmup failed (non-fatal): {e}")
+
+
 # ── Poll (scheduler entry point) ───────────────────────────────────────────
 
 def _default_log(kind: str, minutes: int | None) -> dict:
@@ -491,7 +523,8 @@ async def fetch_logs(minutes: int = 10):
 
         # Persist locally before webhook delivery
         try:
-            log["stored"] = await store_findings(db, df)
+            matched_pats = log.get("matched_patterns", block_patterns)
+            log["stored"] = await store_findings(db, df, matched_pats)
         except Exception as e:
             log["error"] = f"Failed to store findings: {e}"
             print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")

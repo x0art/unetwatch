@@ -212,3 +212,24 @@ def test_apply_filters_actions_param():
     # A specific action filters to that action.
     out_deny = apply_filters(df, "", actions=("DENY",))
     assert out_deny["action"].tolist() == ["DENY"]
+
+
+# ── build_client_session_query (filter-only, no query_string) ────────────────
+
+
+def test_build_client_session_query_shape():
+    from app.services.query_builder import build_client_session_query
+
+    q = build_client_session_query("10.0.0.1", 60, 200)
+
+    # Size and sort
+    assert q["size"] == 200
+    assert q["sort"] == [{"@timestamp": {"order": "asc"}}]
+
+    # Filter-only: range + term on client_ip, no query_string
+    bool_q = q["query"]["bool"]
+    assert "must" not in bool_q or bool_q.get("must") == []
+    filters = bool_q["filter"]
+    assert len(filters) == 2
+    assert filters[0] == {"range": {"@timestamp": {"gte": "now-60m", "lte": "now"}}}
+    assert filters[1] == {"term": {"client_ip": "10.0.0.1"}}

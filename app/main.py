@@ -73,6 +73,12 @@ async def lifespan(app: FastAPI):
         minutes=settings.redirect_check_interval_minutes,
     )
     scheduler.start()
+
+    # Warm ES field inventory (best-effort, never crashes boot)
+    from app.services.monitor import warm_field_inventory
+
+    await warm_field_inventory()
+
     yield
     scheduler.shutdown(wait=False)
 
@@ -152,6 +158,31 @@ app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
+
+from app.routes import readout as readout_routes
+
+app.include_router(readout_routes.router, dependencies=[Depends(verify_admin)])
+
+# ── ES Field Inventory Debug Endpoint ───────────────────────────────────────
+from app.services.es_fields import fetch_field_inventory
+
+
+@app.get("/api/es/fields", dependencies=[Depends(verify_admin)])
+async def es_fields():
+    """Return cached ES field inventory or trigger fresh fetch.
+
+    Response shape:
+    {
+        "sample": {...},
+        "field_caps": {...},
+        "cached": true|false,
+        "mode": "UC-A|UC-B|COLLAPSED|UNKNOWN",
+        "es_online": true|false
+    }
+
+    Always returns 200 — never 5xx on ES failure.
+    """
+    return await fetch_field_inventory()
 
 
 @app.get("/health")
