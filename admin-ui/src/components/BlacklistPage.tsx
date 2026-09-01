@@ -79,9 +79,9 @@ function FeedCard({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <CardTitle>{title}</CardTitle>
-            {searchActive && typeof totalEntries === "number" && (
+            {typeof totalEntries === "number" && (
               <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
-                {entries.length}/{totalEntries}
+                {searchActive ? `${entries.length}/${totalEntries}` : totalEntries}
               </span>
             )}
           </div>
