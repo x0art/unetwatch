@@ -424,6 +424,8 @@ async def test_query_run_returns_allow_and_deny(client, monkeypatch):
 
 
 def test_query_run_minutes_ceiling(client):
-    """minutes beyond 20160 (14 days) is rejected; 20160 is accepted."""
-    assert client.get("/api/query/run?minutes=20160").status_code == 200
-    assert client.get("/api/query/run?minutes=20161").status_code == 422
+    """minutes beyond 43200 (30 days) is rejected; 43200 and 0 (all-time) are accepted."""
+    assert client.get("/api/query/run?minutes=43200").status_code == 200
+    assert client.get("/api/query/run?minutes=0").status_code == 200
+    assert client.get("/api/query/run?minutes=43201").status_code == 422
+    assert client.get("/api/query/run?minutes=-1").status_code == 422

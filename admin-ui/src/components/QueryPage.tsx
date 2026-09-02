@@ -53,6 +53,8 @@ const WINDOW_OPTIONS = [
   { value: "4320", label: "Last 3 days" },
   { value: "10080", label: "Last 7 days" },
   { value: "20160", label: "Last 14 days" },
+  { value: "43200", label: "Last 30 days" },
+  { value: "0", label: "All time" },
 ]
 
 const WHITELIST_OPTIONS = [
@@ -614,7 +616,7 @@ export function QueryPage() {
           label="Total requests"
           value={result ? result.total_requests.toLocaleString() : "—"}
           tone="info"
-          hint={`Matching block patterns · ${result?.window_minutes ?? 60}m window`}
+          hint={`Matching block patterns · ${result?.window_minutes === 0 ? "all-time" : `${result?.window_minutes ?? 60}m`} window`}
         />
         <StatCard
           icon={Users}

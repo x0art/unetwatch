@@ -121,9 +121,12 @@ def build_logs_query(
                 }
             }
         )
-    filters: list[dict] = [
-        {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
-    ]
+    filters: list[dict] = []
+    # minutes <= 0 is the "all time" sentinel — no time range filter at all.
+    if minutes > 0:
+        filters.append(
+            {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
+        )
     if client_ip:
         filters.append({"term": {"client_ip": client_ip}})
     result: dict = {
@@ -141,15 +144,14 @@ def build_client_session_query(client: str, minutes: int, size: int) -> dict:
     Filter-only: term filter on client_ip without the block-pattern query_string
     used by build_logs_query. Sorted @timestamp ascending for session timeline.
     """
+    session_filters: list[dict] = []
+    if minutes > 0:
+        session_filters.append(
+            {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
+        )
+    session_filters.append({"term": {"client_ip": client}})
     return {
         "size": size,
         "sort": [{"@timestamp": {"order": "asc"}}],
-        "query": {
-            "bool": {
-                "filter": [
-                    {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}},
-                    {"term": {"client_ip": client}},
-                ]
-            }
-        },
+        "query": {"bool": {"filter": session_filters}},
     }

@@ -86,6 +86,19 @@ def test_build_logs_query_escapes_block_patterns():
     assert q["query"]["bool"]["filter"][0]["range"]["@timestamp"]["gte"] == "now-10m"
     assert q["size"] == 50
 
+def test_build_logs_query_all_time_omits_range_filter():
+    """minutes=0 is the all-time sentinel — no @timestamp range filter."""
+    from app.services.query_builder import build_client_session_query
+
+    q = build_logs_query(["*porn*"], 0, 50)
+    filters = q["query"]["bool"]["filter"]
+    assert not any("range" in f for f in filters)
+
+    session = build_client_session_query("1.2.3.4", 0, 50)
+    s_filters = session["query"]["bool"]["filter"]
+    assert not any("range" in f for f in s_filters)
+    assert {"term": {"client_ip": "1.2.3.4"}} in s_filters
+
 
 def test_build_logs_query_narrows_matches_when_search_given():
     q = build_logs_query(["*porn*"], 10, 50, search=" 1.2.3.4   bad.example ")

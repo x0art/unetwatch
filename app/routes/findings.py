@@ -180,7 +180,7 @@ def _whitelist_fully_sql(patterns: list[str], sql_clauses: list[str]) -> bool:
 async def url_breakdown(
     url: str,
     db=Depends(get_db_conn),
-    minutes: int | None = Query(None, ge=1, le=20160),
+    minutes: int | None = Query(None, ge=0, le=43200),
     limit: int = Query(50, ge=1, le=200),
 ):
     """Per-URL client IP breakdown — reverse of client_breakdown.
@@ -332,7 +332,7 @@ async def top_clients(
 async def client_breakdown(
     ip: str,
     db=Depends(get_db_conn),
-    minutes: int | None = Query(None, ge=1, le=20160),
+    minutes: int | None = Query(None, ge=0, le=43200),
     search: str | None = Query(None, max_length=200),
     limit: int = Query(12, ge=1, le=50),
 ):

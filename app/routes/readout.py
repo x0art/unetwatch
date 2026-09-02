@@ -7,7 +7,7 @@ router = APIRouter(prefix="/api/readout", tags=["readout"], dependencies=[Depend
 
 @router.get("/ranked")
 async def get_ranked(
-    minutes: int = Query(1440, ge=1, le=20160),
+    minutes: int = Query(1440, ge=0, le=43200),
     limit: int = Query(50, ge=1, le=200),
     source: str = Query("sqlite", pattern="^(sqlite|es|auto)$"),
     search: str | None = Query(None, max_length=200),
@@ -21,7 +21,7 @@ async def get_ranked(
 @router.get("/client/{client}")
 async def get_client_timeline(
     client: str,
-    minutes: int = Query(1440, ge=1, le=20160),
+    minutes: int = Query(1440, ge=0, le=43200),
     limit: int = Query(200, ge=1, le=1000),
 ):
     """Per-client session drilldown: timeline from live ES + persisted breakdown ."""
@@ -32,7 +32,7 @@ async def get_client_timeline(
 
 @router.get("/policy-classes")
 async def get_policy_classes(
-    minutes: int = Query(1440, ge=1, le=20160),
+    minutes: int = Query(1440, ge=0, le=43200),
 ):
     """Policy class breakdown across all clients."""
     from app.services.readout import get_policy_classes

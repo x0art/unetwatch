@@ -189,7 +189,13 @@ def build_timeline(df: pd.DataFrame, minutes: int) -> list[dict]:
     ts = pd.to_datetime(df["@timestamp"], errors="coerce", utc=True).dropna()
     if ts.empty:
         return []
-    span = max(1, minutes // 48)
+    if minutes <= 0:
+        # All-time window: bucket from the data's own span instead of a
+        # fixed minute window, keeping ~48 buckets.
+        span_min = (ts.max() - ts.min()).total_seconds() / 60
+        span = max(1, int(span_min) // 48)
+    else:
+        span = max(1, minutes // 48)
     binned = ts.dt.floor(f"{span}min")
     counts = binned.value_counts().sort_index()
     if counts.empty:

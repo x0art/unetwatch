@@ -5,7 +5,7 @@ router = APIRouter(prefix="/api/query", tags=["query"])
 
 @router.get("/run")
 async def run_query(
-    minutes: int = Query(60, ge=1, le=20160),
+    minutes: int = Query(60, ge=0, le=43200),
     q: str | None = Query(
         None, max_length=200, description="ES substring filter (URL / client IP / server IP)"
     ),
@@ -38,7 +38,7 @@ async def run_query(
 @router.get("/client")
 async def client_breakdown_live(
     ip: str = Query(..., min_length=1, max_length=64),
-    minutes: int = Query(60, ge=1, le=20160),
+    minutes: int = Query(60, ge=0, le=43200),
     search: str | None = Query(None, max_length=200),
     limit: int = Query(12, ge=1, le=50),
 ):
