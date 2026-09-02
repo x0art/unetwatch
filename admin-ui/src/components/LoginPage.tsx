@@ -70,8 +70,8 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
               <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/[0.05] text-primary ring-1 ring-primary/20 shadow-sm shadow-primary/10">
                 <ShieldCheck className="h-7 w-7" aria-hidden="true" />
               </span>
-              <h1 className="mt-4 text-xl font-bold tracking-tight">uNetWatch</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">Sign in to the admin console</p>
+              <h1 className="font-display mt-4 text-[22px] font-bold tracking-tight">uNetWatch</h1>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">Sign in to the admin console</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">

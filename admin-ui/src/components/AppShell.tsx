@@ -1,6 +1,23 @@
-import { useState, type ReactNode } from "react"
+import { useState, type ReactNode, useEffect, useRef } from "react"
 import { MobileSidebar, MobileMenuButton, Sidebar, useTheme, type View } from "./Sidebar"
 import { cn } from "../lib/utils"
+
+function useSpotlight(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onMove = (e: MouseEvent) => {
+      const cards = el.querySelectorAll<HTMLElement>(".spotlight-card")
+      for (const card of cards) {
+        const rect = card.getBoundingClientRect()
+        card.style.setProperty("--mx", `${e.clientX - rect.left}px`)
+        card.style.setProperty("--my", `${e.clientY - rect.top}px`)
+      }
+    }
+    el.addEventListener("mousemove", onMove)
+    return () => el.removeEventListener("mousemove", onMove)
+  }, [ref])
+}
 
 export function AppShell({
   currentView,
@@ -25,6 +42,8 @@ export function AppShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { theme, toggle } = useTheme()
+  const mainRef = useRef<HTMLElement>(null)
+  useSpotlight(mainRef)
 
   const handleNavigate = (view: View) => {
     onNavigate(view)
@@ -32,7 +51,10 @@ export function AppShell({
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-dvh bg-background text-foreground">
+      {/* Grain texture — fixed, behind content */}
+      <div className="grain-overlay" aria-hidden="true" />
+
       {/* Skip link for keyboard users — first focusable element */}
       <a
         href="#main-content"
@@ -68,7 +90,7 @@ export function AppShell({
         <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-6">
           <MobileMenuButton onClick={() => setMobileOpen(true)} />
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-base font-semibold tracking-tight sm:text-lg">
+            <h1 className="font-display truncate text-base font-bold tracking-tight sm:text-lg">
               {title}
             </h1>
             {description && (
@@ -78,11 +100,18 @@ export function AppShell({
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>
 
-        <main id="main-content" className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}>
-          {/* cv-auto: skip layout/paint for the below-the-fold part of every
-              page until scrolled into view (intrinsic size reserved, so no
-              scroll jump). */}
-          <div className="w-full fade-in cv-auto">{children}</div>
+        <main
+          id="main-content"
+          ref={mainRef as React.RefObject<HTMLElement>}
+          className={cn("relative flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}
+        >
+          {/* Contained width — prevents stretch on ultrawide */}
+          <div className="mx-auto w-full max-w-[1440px]">
+            {/* cv-auto: skip layout/paint for the below-the-fold part of every
+                page until scrolled into view (intrinsic size reserved, so no
+                scroll jump). */}
+            <div className="w-full fade-in cv-auto">{children}</div>
+          </div>
         </main>
       </div>
     </div>

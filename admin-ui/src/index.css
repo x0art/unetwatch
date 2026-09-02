@@ -1,5 +1,5 @@
 /* ── Fonts (must precede @import "tailwindcss" per CSS spec) ──── */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;0,9..144,800;1,9..144,600&display=swap');
 @import "tailwindcss";
 
 /* ── Dark mode: class-based ────────────────────────────────────── */
@@ -7,8 +7,9 @@
 
 /* ── Design System tokens (dark-mode-first) ──────────────────── */
 @theme {
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Surface & text */
   --color-background: oklch(0.147 0.02 260);
@@ -58,8 +59,16 @@
   --color-sidebar-hover: oklch(0.22 0.028 260);
   --color-sidebar-border: oklch(0.18 0.02 260);
 
-  /* Radii */
-  --radius: 0.5rem;
+  /* Radii — tiered hierarchy */
+  --radius: 0.625rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+
+  /* Tinted shadow (navy ground, not pure black) */
+  --shadow-color: oklch(0.12 0.02 260);
 
   /* Motion — global transition defaults. Every transition-* utility that
      doesn't set its own duration/easing inherits these, so hover, press,
@@ -115,6 +124,8 @@
   --color-sidebar-active: oklch(0.68 0.16 235);
   --color-sidebar-hover: oklch(0.22 0.028 260);
   --color-sidebar-border: oklch(0.18 0.02 260);
+
+  --shadow-color: oklch(0.22 0.02 260);
 }
 
 /* ── Base layer ───────────────────────────────────────────────── */
@@ -128,10 +139,44 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+    /* Tabular figures for data surfaces; proportional restored per-element where needed */
+    font-variant-ligatures: common-ligatures;
+    font-feature-settings: "ss01" 1, "ss02" 1;
   }
 
   body {
     margin: 0;
+    /* Prevent horizontal bleed on overlapped / bleed layouts */
+    overflow-x: clip;
+  }
+
+  /* Display headlines — tighter tracking, display face at large sizes */
+  h1, h2 {
+    text-wrap: balance;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  h3, h4 {
+    text-wrap: pretty;
+    letter-spacing: -0.015em;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Numeric surfaces use tabular figures */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Small caps / label treatment */
+  .label-caps {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   /* Focus-visible ring with smooth transition */
@@ -164,6 +209,105 @@
   ::-webkit-scrollbar-thumb:hover {
     background: oklch(0.4 0.04 260);
   }
+}
+
+/* ── Ambient & texture ────────────────────────────────────────── */
+/* Grain overlay — fixed, pointer-events-none, subtle film grain to break flatness */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  mix-blend-mode: soft-light;
+}
+.light .grain-overlay {
+  opacity: 0.022;
+  mix-blend-mode: multiply;
+}
+
+/* Mesh ambient — radial washes behind the dashboard / query header */
+.mesh-ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mesh-ambient::before {
+  content: "";
+  position: absolute;
+  width: 720px;
+  height: 520px;
+  left: -80px;
+  top: -120px;
+  background: radial-gradient(ellipse at 30% 30%, oklch(0.68 0.16 235 / 0.10) 0%, transparent 60%);
+  filter: blur(32px);
+}
+.mesh-ambient::after {
+  content: "";
+  position: absolute;
+  width: 600px;
+  height: 480px;
+  right: -60px;
+  top: -40px;
+  background: radial-gradient(ellipse at 70% 40%, oklch(0.65 0.18 145 / 0.06) 0%, transparent 62%);
+  filter: blur(28px);
+}
+.light .mesh-ambient::before {
+  background: radial-gradient(ellipse at 30% 30%, oklch(0.68 0.16 235 / 0.06) 0%, transparent 60%);
+}
+.light .mesh-ambient::after {
+  background: radial-gradient(ellipse at 70% 40%, oklch(0.65 0.18 145 / 0.04) 0%, transparent 62%);
+}
+
+/* Tinted shadow helper — use instead of shadow-black */
+.shadow-tinted {
+  box-shadow: 0 1px 2px oklch(0.12 0.02 260 / 0.06), 0 8px 24px oklch(0.12 0.02 260 / 0.08);
+}
+.light .shadow-tinted {
+  box-shadow: 0 1px 3px oklch(0.22 0.02 260 / 0.08), 0 10px 28px oklch(0.22 0.02 260 / 0.06);
+}
+.card-glass {
+  background: color-mix(in oklch, var(--color-card) 92%, transparent);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  border-color: color-mix(in oklch, var(--color-border) 70%, transparent);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.04), 0 1px 2px oklch(0.12 0.02 260 / 0.06), 0 8px 24px oklch(0.12 0.02 260 / 0.07);
+}
+.light .card-glass {
+  background: color-mix(in oklch, var(--color-card) 96%, transparent);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.6), 0 1px 3px oklch(0.22 0.02 260 / 0.07), 0 10px 28px oklch(0.22 0.02 260 / 0.05);
+}
+
+/* Spotlight border — follows cursor via --mx/--my (set by JS); fallback is invisible */
+.spotlight-card {
+  position: relative;
+  isolation: isolate;
+}
+.spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(320px circle at var(--mx, -999px) var(--my, -999px), oklch(0.68 0.16 235 / 0.35), transparent 60%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.spotlight-card:hover::before {
+  opacity: 1;
+}
+
+/* Display type utility */
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.025em;
 }
 
 /* ── Transition utilities for Radix animations ──────────────────

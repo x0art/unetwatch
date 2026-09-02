@@ -154,35 +154,40 @@ export function DashboardPage({
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
 
   return (
-    <div className="space-y-6">
-      {/* ── Header ── */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Dashboard</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            uNetWatch monitoring system overview
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="relative flex h-2 w-2">
-              {pageVisible && isOnline && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success" />
-              )}
-              <span
-                className={`relative inline-flex h-2 w-2 rounded-full ${
-                  isOnline ? "bg-success" : "bg-warning"
-                }`}
-              />
+    <div className="space-y-8">
+      {/* ── Header — display type, mesh wash, tighter tracking ── */}
+      <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card/60 px-5 py-6 shadow-tinted sm:px-7 sm:py-7">
+        <div className="mesh-ambient" aria-hidden="true" />
+        <div className="relative flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-display text-[32px] font-bold leading-none tracking-tight sm:text-[38px]">
+              Dashboard
+            </h2>
+            <p className="mt-2 max-w-[52ch] text-[13px] leading-relaxed text-muted-foreground">
+              uNetWatch monitoring — live poll health, findings, and redirect watch.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2.5 py-1 text-xs font-medium backdrop-blur">
+              <span className="relative flex h-2 w-2">
+                {pageVisible && isOnline && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success" />
+                )}
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${
+                    isOnline ? "bg-success" : "bg-warning"
+                  }`}
+                />
+              </span>
+              {statusLabel}
             </span>
-            {statusLabel}
-          </span>
-          <span>Updated {formatLastUpdated(lastUpdated)}</span>
-          <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
-          <Button variant="outline" size="sm" onClick={onRefresh}>
-            <RefreshCcw className="h-4 w-4" />
-            Refresh
-          </Button>
+            <span className="text-xs tabular-nums">Updated {formatLastUpdated(lastUpdated)}</span>
+            <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
+            <Button variant="outline" size="sm" onClick={onRefresh}>
+              <RefreshCcw className="h-4 w-4" />
+              Refresh
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -206,54 +211,63 @@ export function DashboardPage({
         </div>
       )}
 
-      {/* ── Primary stats row ── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          icon={Clock3}
-          label="Next Poll"
-          value={<CountdownRing remaining={remaining} total={intervalSec} />}
-          tone="default"
-          hint="Until next ES query"
-        />
-        <StatCard
-          icon={SearchX}
-          label="Findings"
-          value={status ? status.findings_count.toLocaleString() : "—"}
-          tone="info"
-          hint="Persisted by ES poll"
-          action={
-            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("findings")}>
-              View all <ArrowRight className="h-3 w-3" />
-            </Button>
-          }
-        />
-        <StatCard
-          icon={ShieldAlert}
-          label="Blacklist"
-          value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
-          tone="danger"
-          hint="Hosts & IPs blocked"
-          action={
-            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("blacklist")}>
-              Manage <ArrowRight className="h-3 w-3" />
-            </Button>
-          }
-        />
-        <StatCard
-          icon={Globe}
-          label="Tracked URLs"
-          value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
-          tone="warning"
-          hint="Monitored for redirects"
-          action={
-            <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("redirects")}>
-              View all <ArrowRight className="h-3 w-3" />
-            </Button>
-          }
-        />
+      {/* ── Primary stats — bento: featured findings, offset for depth ── */}
+      <div className="grid gap-3 lg:grid-cols-12">
+        <div className="lg:col-span-3">
+          <StatCard
+            icon={Clock3}
+            label="Next Poll"
+            value={<CountdownRing remaining={remaining} total={intervalSec} />}
+            tone="default"
+            hint="Until next ES query"
+          />
+        </div>
+        <div className="lg:col-span-5 lg:-mt-1">
+          <StatCard
+            icon={SearchX}
+            label="Findings"
+            value={status ? status.findings_count.toLocaleString() : "—"}
+            tone="info"
+            hint="Persisted by ES poll"
+            className="lg:py-1"
+            action={
+              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("findings")}>
+                View all <ArrowRight className="h-3 w-3" />
+              </Button>
+            }
+          />
+        </div>
+        <div className="lg:col-span-2 lg:mt-1">
+          <StatCard
+            icon={ShieldAlert}
+            label="Blacklist"
+            value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
+            tone="danger"
+            hint="Hosts & IPs blocked"
+            action={
+              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("blacklist")}>
+                Manage <ArrowRight className="h-3 w-3" />
+              </Button>
+            }
+          />
+        </div>
+        <div className="lg:col-span-2 lg:mt-1">
+          <StatCard
+            icon={Globe}
+            label="Tracked URLs"
+            value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
+            tone="warning"
+            hint="Monitored for redirects"
+            action={
+              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("redirects")}>
+                View all <ArrowRight className="h-3 w-3" />
+              </Button>
+            }
+          />
+        </div>
       </div>
 
-      {/* ── Secondary stats row ── */}
+      {/* ── Secondary stats — 4-up but with staggered offset to break rigid grid ── */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           icon={Ban}
@@ -262,13 +276,15 @@ export function DashboardPage({
           tone="danger"
           hint="URL patterns to flag"
         />
-        <StatCard
-          icon={CheckCircle2}
-          label="Whitelist Patterns"
-          value={counts?.whitelist ?? "—"}
-          tone="success"
-          hint="URL patterns to allow"
-        />
+        <div className="lg:translate-y-1">
+          <StatCard
+            icon={CheckCircle2}
+            label="Whitelist Patterns"
+            value={counts?.whitelist ?? "—"}
+            tone="success"
+            hint="URL patterns to allow"
+          />
+        </div>
         <StatCard
           icon={Zap}
           label="ES Status"
@@ -276,13 +292,15 @@ export function DashboardPage({
           tone={isOnline ? "success" : "danger"}
           hint="Elasticsearch connectivity"
         />
-        <StatCard
-          icon={History}
-          label="Poll Interval"
-          value={status ? `${status.poll_interval_minutes}m` : "—"}
-          tone="default"
-          hint="Automatic check frequency"
-        />
+        <div className="lg:translate-y-1">
+          <StatCard
+            icon={History}
+            label="Poll Interval"
+            value={status ? `${status.poll_interval_minutes}m` : "—"}
+            tone="default"
+            hint="Automatic check frequency"
+          />
+        </div>
       </div>
 
       {/* ── Manual run + Recent findings side by side ── */}
@@ -367,52 +385,55 @@ export function DashboardPage({
         </Panel>
       </div>
 
-      {/* ── Quick links ── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      {/* ── Quick links — asymmetric: featured Query + stacked pair — breaks 3-equal cliche ── */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
         <button
           type="button"
           onClick={() => onNavigate("query")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-info/40 hover:bg-info/[0.04] hover:shadow-md hover:shadow-info/[0.04]"
+          className="spotlight-card group relative flex items-center gap-4 overflow-hidden rounded-xl border border-border/60 bg-card p-5 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-info/35 hover:shadow-tinted lg:col-span-3 lg:p-6"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info transition-colors duration-200 group-hover:bg-info/25">
+          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-info/10 blur-2xl" aria-hidden="true" />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/12 text-info ring-1 ring-info/15 transition-colors duration-200 group-hover:bg-info/20">
             <FileSearch className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">Query Console</p>
-            <p className="text-xs text-muted-foreground">Live ES queries & sankey</p>
+            <p className="font-display text-[15px] font-semibold tracking-tight">Query Console</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Live Elasticsearch queries & access-flow sankey</p>
           </div>
           <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-info" />
         </button>
 
-        <button
-          type="button"
-          onClick={() => onNavigate("graph")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-warning/40 hover:bg-warning/[0.04] hover:shadow-md hover:shadow-warning/[0.04]"
-        >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-warning/15 text-warning transition-colors duration-200 group-hover:bg-warning/25">
-            <Link2 className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">Traffic Flow</p>
-            <p className="text-xs text-muted-foreground">Client → server → URL graph</p>
-          </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-warning" />
-        </button>
+        <div className="grid grid-cols-1 gap-3 lg:col-span-2">
+          <button
+            type="button"
+            onClick={() => onNavigate("graph")}
+            className="spotlight-card group flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-warning/30 hover:shadow-tinted"
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning/12 text-warning ring-1 ring-warning/15 transition-colors duration-200 group-hover:bg-warning/20">
+              <Link2 className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold tracking-tight">Traffic Flow</p>
+              <p className="text-xs text-muted-foreground">Client → server → URL graph</p>
+            </div>
+            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-warning" />
+          </button>
 
-        <button
-          type="button"
-          onClick={() => onNavigate("patterns")}
-          className="group flex items-center gap-3 rounded-lg border border-border bg-card p-4 text-left shadow-sm transition-all duration-200 hover:border-success/40 hover:bg-success/[0.04] hover:shadow-md hover:shadow-success/[0.04]"
-        >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/15 text-success transition-colors duration-200 group-hover:bg-success/25">
-            <Ban className="h-5 w-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">Patterns</p>
-            <p className="text-xs text-muted-foreground">Manage block & whitelist rules</p>
-          </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-success" />
-        </button>
+          <button
+            type="button"
+            onClick={() => onNavigate("patterns")}
+            className="spotlight-card group flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-success/30 hover:shadow-tinted"
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/12 text-success ring-1 ring-success/15 transition-colors duration-200 group-hover:bg-success/20">
+              <Ban className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold tracking-tight">Patterns</p>
+              <p className="text-xs text-muted-foreground">Manage block & whitelist rules</p>
+            </div>
+            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-success" />
+          </button>
+        </div>
       </div>
     </div>
   )

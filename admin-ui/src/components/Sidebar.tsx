@@ -197,8 +197,8 @@ function SidebarContent({
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold tracking-tight">uNetWatch</p>
-            <p className="truncate text-[11px] text-sidebar-muted">Pattern console</p>
+            <p className="font-display truncate text-sm font-bold tracking-tight">uNetWatch</p>
+            <p className="truncate text-[11px] tracking-wide text-sidebar-muted">Pattern console</p>
           </div>
         )}
       </div>

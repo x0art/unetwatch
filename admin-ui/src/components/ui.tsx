@@ -305,7 +305,7 @@ export function Card({ className, children }: { className?: string; children: Re
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/80 bg-card text-card-foreground shadow-sm shadow-black/[0.04]",
+        "spotlight-card rounded-xl border border-border/60 bg-card text-card-foreground shadow-tinted transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-tinted",
         className,
       )}
     >
@@ -928,11 +928,11 @@ export function PageHeader({
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-3", className)}>
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+    <div className={cn("flex flex-wrap items-center justify-between gap-5", className)}>
+      <div className="min-w-0">
+        <h2 className="font-display text-[28px] font-bold leading-none tracking-tight sm:text-[32px]">{title}</h2>
         {description && (
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+          <p className="mt-2 max-w-[52ch] text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         )}
       </div>
       {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
@@ -972,12 +972,12 @@ export function Panel({
   return (
     <div
       className={cn(
-        "rounded-lg border border-border/60 bg-card/60 p-4 shadow-sm shadow-black/[0.03] sm:p-6",
+        "spotlight-card rounded-xl border border-border/50 bg-card/70 p-4 shadow-tinted backdrop-blur-[2px] sm:p-6",
         className,
       )}
     >
       {(title || action) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/50 pb-3">
+        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
           {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
           {title && <h3 className="text-sm font-semibold tracking-tight">{title}</h3>}
           {description && (
