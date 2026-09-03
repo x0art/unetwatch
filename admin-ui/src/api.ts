@@ -1,3 +1,4 @@
+import type { SankeyNode, SankeyLink } from "./types/sankey"
 export interface Pattern {
   id: number
   pattern: string
@@ -563,32 +564,31 @@ export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
 
 /* ── Live Sankey (Task 4 — 4-column Sources → Patterns → Domains → Destinations) ─ */
 
-// Local Sankey shapes — mirrors SankeyDiagram.tsx without creating a circular
-// import (api.ts must stay free of component imports).
-export interface LiveSankeyNode {
-  id: string
-  name: string
-  layer: number
-  detail?: string
-  action?: string
-  isHighRisk?: boolean
-}
-
-export interface LiveSankeyLink {
-  source: string
-  target: string
-  value: number
-  name?: string
-  action?: string
-  isHighRisk?: boolean
-}
-
+export type { SankeyNode, SankeyLink } from "./types/sankey"
+// Back-compat aliases for any caller still importing LiveSankey* names.
+export type LiveSankeyNode = SankeyNode
+export type LiveSankeyLink = SankeyLink
 export interface LiveSankeyGraph {
-  nodes: LiveSankeyNode[]
-  links: LiveSankeyLink[]
+  nodes: SankeyNode[]
+  links: SankeyLink[]
+}
+export const MAX_LIVE_SANKEY_MINUTES = 1440
+
+export function isLiveSankeyTruncated(timeRange: string): boolean {
+  return timeRangeToMinutesLive(timeRange) > MAX_LIVE_SANKEY_MINUTES
+}
+export function clampLiveSankeyMinutes(minutes: number): number {
+  return Math.min(minutes, MAX_LIVE_SANKEY_MINUTES)
+}
+export function liveSankeyTruncationNote(timeRange: string): string | null {
+  if (!isLiveSankeyTruncated(timeRange)) return null
+  const requested = timeRangeToMinutesLive(timeRange)
+  const cap = MAX_LIVE_SANKEY_MINUTES
+  const fmt = (m: number) => (m >= 1440 ? `${Math.round(m / 1440)}d` : m >= 60 ? `${Math.round(m / 60)}h` : `${m}m`)
+  return `Showing last ${fmt(cap)} of ${timeRange} window — backend limit ${cap}m (requested ${fmt(requested)})`
 }
 
-function timeRangeToMinutesLive(tr: string): number {
+export function timeRangeToMinutesLive(tr: string): number {
   switch (tr) {
     case "1h":
       return 60
@@ -621,7 +621,10 @@ function timeRangeToMinutesLive(tr: string): number {
  */
 export async function getLiveSankey(timeRange: string): Promise<LiveSankeyGraph> {
   const minutes = timeRangeToMinutesLive(timeRange)
-  const clamped = Math.min(minutes, 1440)
+  // Backend /api/query/run caps at 1440; longer windows silently clamp — caller
+  // should surface liveSankeyTruncationNote(timeRange) so the user sees "7d"
+  // isn't fully rendered (see SankeySection banner).
+  const clamped = clampLiveSankeyMinutes(minutes)
 
   // Prefer live ES data (rich: blocked_by, action, blacklisted).
   try {
@@ -777,8 +780,9 @@ function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
 }
 
 function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {
+  // Findings store no per-hit pattern, so the Patterns layer is always one
+  // node ("Unmatched"); no per-pattern cap is needed — one bucket only.
   const MAX_SRC = 20
-  const MAX_PAT = 1 // findings have no pattern — single "Unmatched" bucket
   const MAX_DOM = 20
   const MAX_DST = 20
 
@@ -795,7 +799,6 @@ function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {
   const topDom = new Set([...domCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_DOM).map(([k]) => k))
   const topDst = new Set([...dstCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_DST).map(([k]) => k))
 
-  void MAX_PAT
   const idSrc = (s: string) => `src:${s}`
   const idPat = "pat:Unmatched"
   const idDom = (d: string) => `dom:${d}`

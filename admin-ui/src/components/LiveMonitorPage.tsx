@@ -7,22 +7,17 @@ import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram
 import {
   getLiveSankey,
   getLiveMetrics,
+  liveSankeyTruncationNote,
   runQuery,
+  timeRangeToMinutesLive,
   type LiveMetrics,
   type QueryDoc,
 } from "../api"
 import { useAutoRefresh } from "../lib/utils"
 
+/** Delegates to api.timeRangeToMinutesLive (single source; also handles numeric strings). */
 function timeRangeToMinutes(tr: string): number {
-  switch (tr) {
-    case "1h":
-      return 60
-    case "7d":
-      return 10080
-    case "24h":
-    default:
-      return 1440
-  }
+  return timeRangeToMinutesLive(tr)
 }
 
 const STUB_NODES: SankeyNode[] = [
@@ -69,8 +64,8 @@ function SankeySection({
       try {
         const graph = await getLiveSankey(timeRange)
         if (graph.nodes.length > 0 && graph.links.length > 0) {
-          setNodes(graph.nodes as unknown as SankeyNode[])
-          setLinks(graph.links as unknown as SankeyLink[])
+          setNodes(graph.nodes)
+          setLinks(graph.links)
           return
         }
       } catch {
@@ -85,10 +80,16 @@ function SankeySection({
     fetchFlow()
   }, [fetchFlow])
 
+  const truncationNote = liveSankeyTruncationNote(timeRange)
+
   return (
     <Panel
       title="Traffic Flow"
-      description={filter ? `filtered: ${filter}` : "all sources → destinations"}
+      description={
+        truncationNote
+          ? `${truncationNote} — ${filter ? `filtered: ${filter}` : "all sources → destinations"}`
+          : filter ? `filtered: ${filter}` : "all sources → destinations"
+      }
       icon={Activity}
       action={
         <Button variant="outline" size="sm" onClick={fetchFlow} disabled={loading}>
@@ -100,6 +101,11 @@ function SankeySection({
         <Skeleton className="h-64 w-full" />
       ) : (
         <div className="space-y-3">
+          {truncationNote && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              {truncationNote}
+            </p>
+          )}
           <SankeyDiagram
             nodes={nodes}
             links={links}

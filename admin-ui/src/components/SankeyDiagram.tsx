@@ -10,33 +10,12 @@ import type {
   TooltipComponentFormatterCallbackParams,
 } from "echarts"
 import { useTheme } from "./Sidebar"
+import type { SankeyNode, SankeyLink } from "../types/sankey"
 
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 
-export interface SankeyNode {
-  id: string
-  name: string
-  /** Layer index 0=Sources, 1=Patterns, 2=Domains, 3=Destinations. */
-  layer?: number
-  /** Optional full detail shown in the tooltip (e.g. the full URL behind a host-only label). */
-  detail?: string
-  /** Domain verdict — drives layer-2 color: ALLOW/DENY/FLAG. */
-  action?: string
-  /** Destinations layer — true paints high-risk orange. */
-  isHighRisk?: boolean
-}
-
-export interface SankeyLink {
-  source: string
-  target: string
-  value: number
-  /** Optional edge label shown in the tooltip (e.g. "302 →"). */
-  name?: string
-  /** Link-level action for domain coloring fallback. */
-  action?: string
-  /** Link-level high-risk flag for dest coloring fallback. */
-  isHighRisk?: boolean
-}
+// Re-export shared types so existing `from "./SankeyDiagram"` imports keep working.
+export type { SankeyNode, SankeyLink } from "../types/sankey"
 
 /** Spec palette §4.1 + §6 — verbatim values. */
 export const LAYER_COLORS: Record<number, string> = {
@@ -54,6 +33,15 @@ function domainColor(action?: string): string {
 
 function destColor(isHighRisk?: boolean): string {
   return isHighRisk ? "#F97316" : "#8B5CF6"
+}
+
+function stripSankeyPrefix(id: string): string {
+  return id.replace(/^(stub:)?(src|pat|dom|dst|ip|base):/, "")
+}
+
+function displayNameForId(id: string, lookup?: Map<string, string>): string {
+  if (lookup?.has(id)) return lookup.get(id)!
+  return stripSankeyPrefix(id)
 }
 
 // Fallbacks used only when the live token can't be read or parsed (e.g. a
@@ -387,9 +375,14 @@ function buildOption(
           if (p.name) return `${p.name} ${src} → ${tgt}`
           return src ? `${src} → ${tgt}` : p.name
         }
-        // Node: prefer the full detail (e.g. the URL behind a host-only label).
-        const nodeDetail = (p.data as SankeyNode | undefined)?.detail
-        return nodeDetail ?? p.name
+        // Node: surface domain action / high-risk in tooltip so the badge isn't color-only.
+        const nd = p.data as SankeyNode | undefined
+        const nodeDetail = nd?.detail
+        const badge =
+          nd?.layer === 2 && nd?.action ? ` [${nd.action}]` :
+          nd?.layer === 3 && nd?.isHighRisk ? " [high-risk]" : ""
+        const base = nodeDetail ?? p.name
+        return badge ? `${base}${badge}` : base
       },
     },
     series: [
@@ -423,7 +416,12 @@ function buildOption(
           fontFamily: "ui-monospace, SFMono-Regular, monospace",
           fontSize: 11,
           position: "right",
-          formatter: (p: { name: string }) => formatLabel(p.name),
+          formatter: (p: { name: string; data?: unknown }) => {
+            const base = formatLabel(p.name)
+            const d = p.data as SankeyNode | undefined
+            if (d?.layer === 2 && d.action) return `${base} [${d.action}]`
+            return base
+          },
         },
         itemStyle: {
           borderColor: palette.border,
@@ -501,6 +499,8 @@ export function SankeyDiagram({
   layoutIterRef.current = layoutIterations
   const onNodeClickRef = useRef(onNodeClick)
   onNodeClickRef.current = onNodeClick
+  const nodeNameByIdRef = useRef<Map<string, string>>(new Map(nodes.map((n) => [n.id, n.name])) )
+  nodeNameByIdRef.current = new Map(nodes.map((n) => [n.id, n.name]))
 
   useEffect(() => {
     const el = ref.current
@@ -605,19 +605,34 @@ export function SankeyDiagram({
     }
   }, [])
 
-  // Click-to-filter wiring — forwards node name or "source target" to FilterContext.
+  // Click-to-filter wiring — forwards display names to FilterContext so ES `q` matches.
+  // Node click pushes n.name; edge click maps prefixed source/target ids → names
+  // via node-name lookup (fallback: strip src:/pat:/dom:/dst: prefixes) — prefixed
+  // ids would otherwise never match an ES document.
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
     const onClick = (params: ECElementEvent) => {
       const cb = onNodeClickRef.current
       if (!cb) return
-      if (params.dataType === "node") cb((params as unknown as { name: string }).name)
+      if (params.dataType === "node") {
+        const d = params.data as { name?: string } | undefined
+        const nm =
+          d?.name ??
+          (params as unknown as { name?: string }).name ??
+          ""
+        if (nm) cb(nm)
+        return
+      }
       if (params.dataType === "edge") {
         const d = params.data as { source?: string; target?: string } | undefined
-        const src = d?.source ?? (params as unknown as { source?: string }).source ?? ""
-        const tgt = d?.target ?? (params as unknown as { target?: string }).target ?? ""
-        cb(`${src} ${tgt}`.trim())
+        const rawSrc = d?.source ?? (params as unknown as { source?: string }).source ?? ""
+        const rawTgt = d?.target ?? (params as unknown as { target?: string }).target ?? ""
+        const map = nodeNameByIdRef.current
+        const src = displayNameForId(rawSrc, map)
+        const tgt = displayNameForId(rawTgt, map)
+        const q = `${src} ${tgt}`.trim()
+        if (q) cb(q)
       }
     }
     chart.on("click", onClick)
