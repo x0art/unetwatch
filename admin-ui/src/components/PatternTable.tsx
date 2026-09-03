@@ -26,12 +26,14 @@ import { useDebounce } from "../lib/utils"
 import { actionVariant } from "../lib/logRow"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
 import { PatternSummaryCards } from "./PatternSummaryCards"
+import { PatternSimulationDrawer } from "./PatternSimulationDrawer"
 import {
   Upload,
   Pencil,
   Trash2,
   Loader2,
   ListFilter,
+  FlaskConical,
 } from "lucide-react"
 
 const DEFAULT_PAGE_SIZE = 50
@@ -201,6 +203,9 @@ export function PatternTable() {
 
   // ── Create dialog (shared AddPatternDialog) ──
   const [createOpen, setCreateOpen] = useState(false)
+
+  // ── Live Kibana simulation drawer (Task 9 — spec §3.3) ──
+  const [simulateOpen, setSimulateOpen] = useState(false)
 
   // ── Bulk import dialog ──
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -452,6 +457,10 @@ export function PatternTable() {
         description="Block and whitelist patterns used for URL matching — summary cards, filters and the pattern registry (spec §3.3)"
       >
         <AddPatternButton onOpen={() => setCreateOpen(true)} />
+        <Button variant="outline" onClick={() => setSimulateOpen(true)}>
+          <FlaskConical className="h-4 w-4 mr-1.5" />
+          Run Simulation
+        </Button>
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk Import
@@ -599,6 +608,13 @@ export function PatternTable() {
       <AddPatternDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        onCreated={fetchPatterns}
+      />
+
+      {/* ── Live Kibana simulation drawer (Task 9 — spec §3.3) ── */}
+      <PatternSimulationDrawer
+        open={simulateOpen}
+        onClose={() => setSimulateOpen(false)}
         onCreated={fetchPatterns}
       />
 

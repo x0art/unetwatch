@@ -50,6 +50,19 @@ class PatternBulkImport(BaseModel):
     pattern_type: str = Field(default="block", pattern="^(block|whitelist)$")
 
 
+class PatternSimulateRequest(BaseModel):
+    """Body for the Live Kibana pattern simulation (spec §3.3).
+
+    ``pattern`` may contain wildcards (``*``/``?`` — matched via
+    ``fnmatch``) or full regex syntax (fallback ``re.search``).
+    ``timeRange`` is a UI label such as ``"24h"`` / ``"7d"``; it is
+    translated to minutes server-side (defaults to 1440 = 24h).
+    """
+
+    pattern: str = Field(..., min_length=1, max_length=500)
+    timeRange: str = Field(default="24h", max_length=32)  # noqa: N815 — interface uses camelCase
+
+
 class BlacklistEntryCreate(BaseModel):
     value: str = Field(..., min_length=1, max_length=500)
     source: str = Field(default="manual", pattern="^(manual|finding)$")

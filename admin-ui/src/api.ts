@@ -440,6 +440,10 @@ export async function listPatterns(params?: {
 export async function createPattern(data: {
   pattern: string
   pattern_type: string
+  /** Rule Definition metadata (spec §3.3). Accepted by the registry POST body
+   * (extra fields are ignored server-side until the Task 10 editor persists them). */
+  category?: string
+  notes?: string
 }): Promise<Pattern> {
   return request("/patterns/", { method: "POST", body: JSON.stringify(data) })
 }
@@ -464,6 +468,42 @@ export async function bulkImport(data: {
 
 export async function getPatternCounts(): Promise<PatternCounts> {
   return request("/patterns/stats/counts")
+}
+
+/* ── Live Kibana pattern simulation (Task 9 — spec §3.3) ─────────── */
+
+export interface SimulatedLogRow {
+  /** ISO-8601 timestamp of the matching log. */
+  "@timestamp"?: string
+  timestamp?: string
+  client_ip?: string
+  server_ip?: string
+  url?: string
+  base_url?: string
+  duration_seconds?: number | null
+  action?: string
+}
+
+export interface PatternSimulationResult {
+  matchCount: number
+  preview: SimulatedLogRow[]
+}
+
+/**
+ * Run a pattern against recent logs (spec §3.3 Live Kibana Simulation).
+ *
+ * `timeRange` is a UI label ("1h" / "24h" / "7d" / "30d") translated to
+ * minutes server-side; the backend caps the fetch at 1000 rows and returns
+ * at most 10 preview matches.
+ */
+export async function simulatePattern(data: {
+  pattern: string
+  timeRange?: string
+}): Promise<PatternSimulationResult> {
+  return request("/patterns/simulate", {
+    method: "POST",
+    body: JSON.stringify({ pattern: data.pattern, timeRange: data.timeRange ?? "24h" }),
+  })
 }
 
 /**
