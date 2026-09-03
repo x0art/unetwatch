@@ -249,7 +249,7 @@ function AppRoutes() {
       <Suspense fallback={<PageFallback />}>
         <AnimatePresence mode="wait">
           <MotionPage key={view}>
-            {view === "live" && <LiveMonitorPage />}
+            {view === "live" && <LiveMonitorPage onNavigate={handleNavigate} />}
             {view === "host" && <HostInspectorPage />}
             {view === "patterns" && <PatternTable />}
             {view === "analytics" && <AnalyticsPage />}

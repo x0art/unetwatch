@@ -60,11 +60,10 @@ export interface LogInspectorProps {
 
 export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogInspectorProps) {
   const { toast } = useToast()
-  const { setGlobalFilter } = useFilter()
+  const { setGlobalFilter, actionFilter, setActionFilter } = useFilter()
   const [rows, setRows] = useState<LogRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [actionFilter, setActionFilter] = useState<string>("All")
   const [page, setPage] = useState(0)
   const pageSize = 50
 
@@ -199,7 +198,7 @@ export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogI
       icon={SearchX}
       action={
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={actionFilter} onChange={setActionFilter} options={ACTION_OPTIONS} className="w-36" aria-label="Filter by action" />
+          <Select value={actionFilter} onChange={(v) => setActionFilter(v as typeof actionFilter)} options={ACTION_OPTIONS} className="w-36" aria-label="Filter by action" />
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" />
             Export

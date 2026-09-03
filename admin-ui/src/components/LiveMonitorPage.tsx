@@ -134,7 +134,7 @@ function SankeySection({
   )
 }
 
-export function LiveMonitorPage() {
+export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "settings" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void } = {}) {
   const { globalFilter, setGlobalFilter, timeRange } = useFilter()
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
   const [loading, setLoading] = useState(true)
@@ -199,7 +199,19 @@ export function LiveMonitorPage() {
 
       <LogInspector filter={globalFilter} timeRange={timeRange} onInspect={setDrawerRow} />
 
-      {drawerRow && <InspectionDrawer row={drawerRow} onClose={() => setDrawerRow(null)} />}
+      {drawerRow && (
+        <InspectionDrawer
+          row={drawerRow}
+          onClose={() => setDrawerRow(null)}
+          onNavigate={(v) => {
+            // LiveMonitorPage sits inside AppRoutes — delegate to the app-level
+            // view switcher so the sidebar highlights the target view too.
+            window.localStorage.setItem("unetwatch_view", v)
+            onNavigate?.(v)
+            setDrawerRow(null)
+          }}
+        />
+      )}
     </div>
   )
 }

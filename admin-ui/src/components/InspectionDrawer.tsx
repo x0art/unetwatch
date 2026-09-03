@@ -15,7 +15,14 @@ import {
   type LogRow,
 } from "../lib/logRow"
 
-export function InspectionDrawer({ row, onClose }: { row: LogRow; onClose: () => void }) {
+export interface InspectionDrawerProps {
+  row: LogRow
+  onClose: () => void
+  /** Optional navigation callback — when provided, drawer actions navigate directly to the target view. */
+  onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "settings" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void
+}
+
+export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerProps) {
   const { setGlobalFilter } = useFilter()
   const { toast } = useToast()
 
@@ -29,40 +36,61 @@ export function InspectionDrawer({ row, onClose }: { row: LogRow; onClose: () =>
   const handleAddToAllowList = () => {
     const host = hostOfUrl(row.url ?? "")
     const pattern = host ? `*.${host}/*` : row.url
-    // Placeholder for Pattern Simulation Drawer (Task 9). Until then, stash
-    // the candidate in the global filter + URL so Pattern Manager can pre-fill.
+    // Persist the wildcard draft so Pattern Manager can auto-open the simulation
+    // drawer pre-filled (brief §7 workflow: Inspect → Rule Generation prefill).
     try {
       const url = new URL(window.location.href)
       url.searchParams.set("pattern", pattern)
       window.history.replaceState(null, "", url.toString())
+      window.localStorage.setItem("unetwatch_pattern_draft", pattern)
     } catch {
       /* ignore */
     }
+    if (onNavigate) {
+      try {
+        window.localStorage.setItem("unetwatch_view", "patterns")
+      } catch {
+        /* ignore */
+      }
+      onNavigate("patterns")
+      onClose()
+    }
     toast({
       title: "Pattern draft",
-      description: `Allow-list candidate: ${pattern} — open Pattern Manager to simulate & deploy.`,
+      description: `Allow-list candidate: ${pattern} — simulating in Pattern Manager.`,
       variant: "info",
     })
   }
 
   const handleViewHostHistory = () => {
+    // setGlobalFilter drives the global workspace filter and debounces ?q=
+    // into the URL — no need for a second synchronous replaceState that
+    // would race with the 250ms debounce in the context. The view persists
+    // separately so the next navigation lands on Host Inspector.
     if (srcIp) setGlobalFilter(srcIp)
-    // Cross-page consistency: Host Inspector reads globalFilter (?q=) on mount.
-    // Persist desired view so a subsequent navigation lands on "host".
     try {
       window.localStorage.setItem("unetwatch_view", "host")
-      const url = new URL(window.location.href)
-      url.searchParams.set("q", srcIp)
-      window.history.replaceState(null, "", url.toString())
+      // Only synchronously stamp ?q= when there's no onNavigate (standalone
+      // page) so the URL is immediately shareable; the delegated path relies
+      // on the context debounce instead to avoid competing history writes.
+      if (!onNavigate) {
+        const url = new URL(window.location.href)
+        url.searchParams.set("q", srcIp)
+        window.history.replaceState(null, "", url.toString())
+      }
     } catch {
       /* ignore */
+    }
+    if (onNavigate) {
+      onNavigate("host")
+      onClose()
     }
     toast({
       title: `Host filter: ${srcIp}`,
       description: "Global filter updated — open Host Inspector to see history.",
       variant: "info",
     })
-    onClose()
+    if (!onNavigate) onClose()
   }
 
   return (

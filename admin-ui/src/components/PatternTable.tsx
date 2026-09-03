@@ -205,7 +205,33 @@ export function PatternTable() {
   const [createOpen, setCreateOpen] = useState(false)
 
   // ── Live Kibana simulation drawer (Task 9 — spec §3.3) ──
-  const [simulateOpen, setSimulateOpen] = useState(false)
+  // Pattern draft handed off from InspectionDrawer (Task 13 click-to-filter):
+  // read ?pattern= (or the stored draft) on mount and auto-open the drawer
+  // pre-filled so Rule Generation continues the spec §7 workflow seamlessly.
+  const [simulateOpen, setSimulateOpen] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.has("pattern")) return true
+      return !!window.localStorage.getItem("unetwatch_pattern_draft")
+    } catch {
+      return false
+    }
+  })
+  const [initialPattern, setInitialPattern] = useState<string | undefined>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const p = params.get("pattern")
+      if (p) {
+        // Consume the one-shot ?pattern= draft so it doesn't re-trigger on refresh.
+        params.delete("pattern")
+        window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`)
+        return p
+      }
+      return window.localStorage.getItem("unetwatch_pattern_draft") ?? undefined
+    } catch {
+      return undefined
+    }
+  })
 
   // ── Bulk import dialog ──
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -614,8 +640,18 @@ export function PatternTable() {
       {/* ── Live Kibana simulation drawer (Task 9 — spec §3.3) ── */}
       <PatternSimulationDrawer
         open={simulateOpen}
-        onClose={() => setSimulateOpen(false)}
+        onClose={() => {
+          setSimulateOpen(false)
+          // Draft consumed — clear both the stored and in-flight handoff.
+          try {
+            window.localStorage.removeItem("unetwatch_pattern_draft")
+          } catch {
+            /* ignore */
+          }
+          setInitialPattern(undefined)
+        }}
         onCreated={fetchPatterns}
+        initialUrl={initialPattern}
       />
 
       {/* ── Bulk Import Dialog ── */}

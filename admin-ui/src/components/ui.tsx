@@ -679,13 +679,25 @@ const statToneBar: Record<StatTone, string> = {
 }
 
 export function StatCard({
-  icon: Icon, label, value, tone = "default", hint, className, action,
+  icon: Icon, label, value, tone = "default", hint, className, action, onClick,
 }: {
-  icon: LucideIcon; label: string; value: ReactNode; tone?: StatTone; hint?: string; className?: string; action?: ReactNode
+  icon: LucideIcon; label: string; value: ReactNode; tone?: StatTone; hint?: string; className?: string; action?: ReactNode; onClick?: () => void
 }) {
   const animated = typeof value === "number"
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-card shadow-sm", className)}>
+    <div
+      className={cn("overflow-hidden rounded-lg border border-border bg-card shadow-sm", onClick && "cursor-pointer transition-colors hover:bg-muted/40", className)}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-label={onClick ? `${label} — apply filter` : undefined}
+      onKeyDown={onClick ? (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onClick()
+        }
+      } : undefined}
+    >
       <div className={cn("h-1 w-full", statToneBar[tone])} aria-hidden="true" />
       <div className="p-4">
         <div className="flex items-start justify-between gap-3">
