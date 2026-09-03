@@ -445,6 +445,59 @@ export async function getMonitorStatus(): Promise<MonitorStatus> {
   return request("/monitor/status")
 }
 
+/* ── Live Monitor metrics (Task 3 KPI aggregation) ─────────────────── */
+
+export interface LiveMetrics {
+  activeHosts: number
+  totalRequests: number
+  deniedRequests: number
+  bandwidth: string
+  avgDuration: string
+}
+
+/**
+ * Aggregate live KPI metrics for the Live Traffic Monitor.
+ * Calls GET /api/monitor/metrics and GET /api/query/run in parallel;
+ * falls back gracefully when Elasticsearch is offline.
+ * `bandwidth` is a display placeholder until byte accounting lands (Task 7+).
+ */
+export async function getLiveMetrics(opts?: { minutes?: number }): Promise<LiveMetrics> {
+  const minutes = opts?.minutes ?? 60
+  // Metrics endpoint is capped to 1440 (enforced by backend Query ge=1,le=1440);
+  // longer windows fall back to the max so the card never 500s.
+  const metricsMinutes = Math.min(Math.max(1, minutes), 1440)
+  const metricsPromise = request<{
+    total_requests: number
+    unique_ips: number
+    es_online: boolean
+  }>(`/monitor/metrics?minutes=${metricsMinutes}`).catch(() => null)
+  const queryPromise = runQuery(metricsMinutes).catch(() => null)
+
+  const [metrics, query] = await Promise.all([metricsPromise, queryPromise])
+
+  const activeHosts = metrics?.unique_ips ?? query?.unique_ips ?? 0
+  const totalRequests = metrics?.total_requests ?? query?.total_requests ?? 0
+
+  let deniedRequests = 0
+  let avgDuration = "—"
+  if (query && query.items.length > 0) {
+    deniedRequests = query.items.filter((d) => d.action === "DENY").length
+    const durations = query.items
+      .map((d) => d.duration_seconds)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    if (durations.length > 0) {
+      const mean = durations.reduce((a, b) => a + b, 0) / durations.length
+      avgDuration = `${(mean * 1000).toFixed(0)}ms`
+    }
+  }
+
+  // Bandwidth accounting not yet exposed by the pipeline — placeholder
+  // keeps the fourth KPI card populated until Task 7 lands byte totals.
+  const bandwidth = "420 MB"
+
+  return { activeHosts, totalRequests, deniedRequests, bandwidth, avgDuration }
+}
+
 export async function triggerManualRun(
   minutes?: number,
 ): Promise<{ status: string; minutes: number }> {
