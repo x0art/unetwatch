@@ -614,8 +614,8 @@ export function RedirectsPage() {
 
       {/* Visualization: redirect flow — cv-auto skips the panel's paint
           until it's scrolled into view. */}
-      <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card brutal-shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Redirect flow</h3>
             <p className="text-xs text-muted-foreground">
@@ -632,7 +632,7 @@ export function RedirectsPage() {
 
         {graphLoading ? (
           <div className="space-y-3 p-4" aria-busy="true">
-            <Skeleton className="h-64 w-full rounded-lg" />
+            <Skeleton className="h-64 w-full" />
           </div>
         ) : graphEmpty ? (
           <EmptyState
@@ -659,7 +659,7 @@ export function RedirectsPage() {
 
             {/* Direct / unresolved URLs */}
             {direct.length > 0 && (
-              <div className="mt-5 border-t border-border pt-4">
+              <div className="mt-5 border-t-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] pt-4">
                 <p className="mb-2 text-xs font-medium text-muted-foreground">
                   Direct &amp; unresolved ({direct.length})
                 </p>
@@ -671,13 +671,13 @@ export function RedirectsPage() {
                       onClick={() => focusTable(n.label)}
                       title={`${n.label} — ${STATUS_META[n.status].label}`}
                       className={cn(
-                        "inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border border-border/60 bg-muted/30 px-2.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors",
+                        "inline-flex max-w-full cursor-pointer items-center gap-1.5 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-2.5 py-1 font-mono text-[11px] text-muted-foreground transition-colors",
                         "hover:border-info/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       )}
                     >
                       <span
                         className={cn(
-                          "h-1.5 w-1.5 shrink-0 rounded-full",
+                          "h-1.5 w-1.5 shrink-0",
                           n.status === "ok" && "bg-success",
                           n.status === "error" && "bg-danger",
                           n.status === "unknown" && "bg-muted-foreground/50",
@@ -805,7 +805,7 @@ export function RedirectsPage() {
       >
         {historyLoading ? (
           <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-40 w-full rounded-lg" />
+            <Skeleton className="h-40 w-full" />
           </div>
         ) : history && history.edges.length > 0 ? (
           <div className="space-y-2">
@@ -813,8 +813,8 @@ export function RedirectsPage() {
               <div
                 key={i}
                 className={cn(
-                  "rounded-md border px-3 py-2.5",
-                  edge.active ? "border-success/40 bg-success/5" : "border-border/60 bg-muted/30 opacity-70",
+                  "border-[2.5px] px-3 py-2.5",
+                  edge.active ? "border-success/40 bg-success/5" : "border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 opacity-70",
                 )}
               >
                 <div className="flex flex-wrap items-center gap-2">

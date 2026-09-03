@@ -143,7 +143,7 @@ function RowActionsMenu({
   return createPortal(
     <div
       ref={menuRef}
-      className="pointer-events-auto w-52 rounded-md border border-border bg-popover p-1 shadow-lg"
+      className="pointer-events-auto w-52 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-popover p-1 brutal-shadow"
       style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 100 }}
     >
       {actions.map((action) => {
@@ -156,10 +156,10 @@ function RowActionsMenu({
               : "text-muted-foreground"
         return (
           <div key={action.key}>
-            {action.separator && <div className="my-1 border-t border-border" />}
+            {action.separator && <div className="my-1 border-t-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8]" />}
             <button
               type="button"
-              className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-muted ${
+              className={`flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-secondary hover:text-[#0A0A0A] ${
                 action.variant === "destructive" ? "hover:text-destructive" : ""
               }`}
               onClick={() => {

@@ -379,7 +379,7 @@ export function NetworkGraphDiagram({
           type="button"
           onClick={handleZoomIn}
           aria-label="Zoom in"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 w-8 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-card text-muted-foreground brutal-shadow-sm transition-colors hover:bg-secondary hover:text-[#0A0A0A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-[#F6F2E8]"
         >
           <ZoomIn className="h-4 w-4" />
         </button>
@@ -387,7 +387,7 @@ export function NetworkGraphDiagram({
           type="button"
           onClick={handleZoomOut}
           aria-label="Zoom out"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 w-8 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-card text-muted-foreground brutal-shadow-sm transition-colors hover:bg-secondary hover:text-[#0A0A0A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-[#F6F2E8]"
         >
           <ZoomOut className="h-4 w-4" />
         </button>
@@ -395,7 +395,7 @@ export function NetworkGraphDiagram({
           type="button"
           onClick={handleFitView}
           aria-label="Reset zoom"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="inline-flex h-8 w-8 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-card text-muted-foreground brutal-shadow-sm transition-colors hover:bg-secondary hover:text-[#0A0A0A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-[#F6F2E8]"
         >
           <Maximize2 className="h-4 w-4" />
         </button>

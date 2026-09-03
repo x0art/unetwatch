@@ -1,13 +1,5 @@
 import { useState } from "react"
-import {
-  AlertTriangle,
-  Eye,
-  EyeOff,
-  Loader2,
-  Lock,
-  ShieldCheck,
-  User,
-} from "lucide-react"
+import { AlertTriangle, Eye, EyeOff, Loader2, Lock, ShieldCheck, User } from "lucide-react"
 import { login, setToken } from "../api"
 import { Button, Input, Label } from "./ui"
 
@@ -34,54 +26,32 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="relative flex min-h-dvh items-center justify-center px-4 py-10 sm:py-16">
-      {/* Atmospheric background: layered glows + subtle dot grid */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-        {/* Primary glow — top center */}
-        <div className="absolute -top-32 left-1/2 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-primary/[0.07] blur-[100px]" />
-        {/* Info glow — bottom right */}
-        <div className="absolute -bottom-24 -right-20 h-80 w-80 rounded-full bg-info/[0.06] blur-[80px]" />
-        {/* Warm accent — bottom left */}
-        <div className="absolute -bottom-16 -left-16 h-64 w-64 rounded-full bg-warning/[0.04] blur-[70px]" />
-        {/* Subtle dot grid for texture */}
-        <div
-          className="absolute inset-0 opacity-[0.035]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle, currentColor 1px, transparent 1px)",
-            backgroundSize: "24px 24px",
-          }}
-        />
-      </div>
+    <div className="relative flex min-h-dvh items-center justify-center bg-background px-4 py-10 sm:py-16">
+      {/* grid paper */}
+      <div className="grid-paper pointer-events-none absolute inset-0 opacity-30" aria-hidden="true" />
+      <div className="halftone pointer-events-none absolute inset-0" aria-hidden="true" />
 
-      {/* m-auto centers both axes and scrolls cleanly when the card is
-          taller than the viewport (short laptop windows / mobile landscape). */}
       <div className="fade-in relative m-auto w-full max-w-sm">
-        <div className="overflow-hidden rounded-xl border border-border/80 bg-card/95 shadow-2xl shadow-black/25 backdrop-blur-sm">
-          {/* Brand accent bar — gradient sweep */}
-          <div
-            className="h-[3px] bg-gradient-to-r from-primary/60 via-info/50 to-primary/60"
-            aria-hidden="true"
-          />
+        {/* Brutal slab */}
+        <div className="overflow-hidden border-[3px] border-[#0A0A0A] bg-card brutal-shadow-lg dark:border-[#F6F2E8]">
+          <div className="hazard-bar" aria-hidden="true" />
 
-          <div className="p-8 sm:p-9">
-            {/* Brand header */}
-            <div className="mb-8 text-center">
-              <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/[0.05] text-primary ring-1 ring-primary/20 shadow-sm shadow-primary/10">
+          <div className="p-8 sm:p-8">
+            {/* Brand — stamp + display */}
+            <div className="mb-6 text-center">
+              <span className="inline-flex h-14 w-14 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#FFD60A] text-[#0A0A0A] brutal-shadow-sm">
                 <ShieldCheck className="h-7 w-7" aria-hidden="true" />
               </span>
-              <h1 className="font-display mt-4 text-[22px] font-bold tracking-tight">uNetWatch</h1>
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">Sign in to the admin console</p>
+              <h1 className="font-display mt-4 text-[22px]">UNETWATCH</h1>
+              <p className="mono-label mt-1">[ ADMIN CONSOLE // SIGN IN ]</p>
+              <div className="mx-auto mt-3 h-1 w-12 bg-[#0A0A0A] dark:bg-[#F6F2E8]" aria-hidden="true" />
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="login-username">Username</Label>
+                <Label htmlFor="login-username">USERNAME</Label>
                 <div className="relative">
-                  <User
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden="true"
-                  />
+                  <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <Input
                     id="login-username"
                     name="username"
@@ -92,19 +62,16 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                       if (error) setError("")
                     }}
                     placeholder="admin"
-                    className="pl-9"
+                    className="pl-9 font-mono text-sm"
                     autoFocus
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="login-password">Password</Label>
+                <Label htmlFor="login-password">PASSWORD</Label>
                 <div className="relative">
-                  <Lock
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden="true"
-                  />
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <Input
                     id="login-password"
                     name="password"
@@ -115,8 +82,8 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                       setPassword(e.target.value)
                       if (error) setError("")
                     }}
-                    placeholder="Enter your password"
-                    className="pl-9 pr-10"
+                    placeholder="••••••••"
+                    className="pl-9 pr-10 font-mono text-sm"
                   />
                   <button
                     type="button"
@@ -124,47 +91,40 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                     aria-label={showPassword ? "Hide password" : "Show password"}
                     aria-controls="login-password"
                     aria-pressed={showPassword}
-                    className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center border-[2px] border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <Eye className="h-4 w-4" aria-hidden="true" />
-                    )}
+                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                   </button>
                 </div>
               </div>
 
               {error && (
-                <div
-                  className="flex items-start gap-2.5 rounded-md border border-danger/30 bg-danger/10 px-3 py-2.5 text-sm text-danger"
-                  role="alert"
-                >
+                <div className="flex items-start gap-2 border-[2.5px] border-[#0A0A0A] bg-danger px-3 py-2.5 font-mono text-xs font-bold uppercase tracking-widest text-white" role="alert">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="min-w-0 break-words">{error}</span>
                 </div>
               )}
 
-              <Button
-                type="submit"
-                disabled={loading}
-                className="h-11 w-full text-sm font-semibold"
-              >
+              <Button type="submit" disabled={loading} className="h-11 w-full text-xs">
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Signing in…
+                    SIGNING IN...
                   </>
                 ) : (
-                  "Sign In"
+                  "SIGN IN — ENTER"
                 )}
               </Button>
             </form>
           </div>
+
+          <div className="border-t-[3px] border-[#0A0A0A] bg-secondary px-4 py-2 text-center font-mono text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#0A0A0A] dark:border-[#F6F2E8]">
+            RESTRICTED AREA — ADMINISTRATORS ONLY
+          </div>
         </div>
 
-        <p className="mt-5 text-center text-xs text-muted-foreground">
-          Restricted area · only administrators can sign in
+        <p className="mt-4 text-center font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          [ SECURE // ENCRYPTED // AUDITED ]
         </p>
       </div>
     </div>

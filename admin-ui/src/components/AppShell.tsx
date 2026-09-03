@@ -1,23 +1,6 @@
-import { useState, type ReactNode, useEffect, useRef } from "react"
+import { useState, type ReactNode, useRef } from "react"
 import { MobileSidebar, MobileMenuButton, Sidebar, useTheme, type View } from "./Sidebar"
 import { cn } from "../lib/utils"
-
-function useSpotlight(ref: React.RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const onMove = (e: MouseEvent) => {
-      const cards = el.querySelectorAll<HTMLElement>(".spotlight-card")
-      for (const card of cards) {
-        const rect = card.getBoundingClientRect()
-        card.style.setProperty("--mx", `${e.clientX - rect.left}px`)
-        card.style.setProperty("--my", `${e.clientY - rect.top}px`)
-      }
-    }
-    el.addEventListener("mousemove", onMove)
-    return () => el.removeEventListener("mousemove", onMove)
-  }, [ref])
-}
 
 export function AppShell({
   currentView,
@@ -43,7 +26,6 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false)
   const { theme, toggle } = useTheme()
   const mainRef = useRef<HTMLElement>(null)
-  useSpotlight(mainRef)
 
   const handleNavigate = (view: View) => {
     onNavigate(view)
@@ -52,18 +34,16 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
-      {/* Grain texture — fixed, behind content */}
-      <div className="grain-overlay" aria-hidden="true" />
+      {/* grid paper under main — blueprint */}
+      <div className="grid-paper pointer-events-none fixed inset-0 opacity-[0.45] dark:opacity-[0.15]" aria-hidden="true" />
 
-      {/* Skip link for keyboard users — first focusable element */}
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:rounded-md focus:bg-popover focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-popover-foreground focus:shadow-lg"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:border-[2.5px] focus:border-[#0A0A0A] focus:bg-secondary focus:px-4 focus:py-2 focus:font-mono focus:text-xs focus:font-extrabold focus:uppercase focus:tracking-widest focus:text-[#0A0A0A]"
       >
-        Skip to content
+        SKIP TO CONTENT
       </a>
 
-      {/* Desktop sidebar */}
       <Sidebar
         current={currentView}
         onNavigate={handleNavigate}
@@ -73,7 +53,6 @@ export function AppShell({
         userName={userName}
       />
 
-      {/* Mobile drawer */}
       <MobileSidebar
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
@@ -85,16 +64,14 @@ export function AppShell({
         userName={userName}
       />
 
-      {/* Main column */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:px-6">
+        <header className="sticky top-0 z-40 flex h-[64px] items-center gap-3 border-b-[3px] border-[#0A0A0A] bg-card px-4 sm:px-6 dark:border-[#F6F2E8] dark:bg-[#0A0A0A]">
+          <div className="hazard-bar absolute inset-x-0 top-0" aria-hidden="true" />
           <MobileMenuButton onClick={() => setMobileOpen(true)} />
           <div className="min-w-0 flex-1">
-            <h1 className="font-display truncate text-base font-bold tracking-tight sm:text-lg">
-              {title}
-            </h1>
+            <h1 className="font-display truncate text-[15px] sm:text-[16px]">{title}</h1>
             {description && (
-              <p className="truncate text-xs text-muted-foreground sm:text-sm">{description}</p>
+              <p className="truncate font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{description}</p>
             )}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
@@ -105,11 +82,7 @@ export function AppShell({
           ref={mainRef as React.RefObject<HTMLElement>}
           className={cn("relative flex-1 px-4 py-6 sm:px-6 lg:px-8", className)}
         >
-          {/* Contained width — prevents stretch on ultrawide */}
           <div className="mx-auto w-full max-w-[1440px]">
-            {/* cv-auto: skip layout/paint for the below-the-fold part of every
-                page until scrolled into view (intrinsic size reserved, so no
-                scroll jump). */}
             <div className="w-full fade-in cv-auto">{children}</div>
           </div>
         </main>

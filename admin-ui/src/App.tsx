@@ -53,9 +53,9 @@ const PatternTable = lazy(() =>
 function PageFallback() {
   return (
     <div className="space-y-4" aria-busy="true">
-      <Skeleton className="h-10 w-64 rounded-lg" />
-      <Skeleton className="h-56 w-full rounded-lg" />
-      <Skeleton className="h-56 w-full rounded-lg" />
+      <Skeleton className="h-10 w-64" />
+      <Skeleton className="h-56 w-full" />
+      <Skeleton className="h-56 w-full" />
     </div>
   )
 }

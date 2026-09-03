@@ -657,9 +657,9 @@ export function GraphPage() {
         /* ── Focused drill-down mode ─────────────────────────────── */
         <>
           {/* Drill-down bar */}
-          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card p-4 brutal-shadow-sm">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5">
+              <span className="flex items-center gap-2 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-1.5">
                 <span className="font-mono text-sm font-semibold">{selectedClient}</span>
                 {breakdown && (
                   <span className="text-xs text-muted-foreground">
@@ -670,7 +670,7 @@ export function GraphPage() {
                   type="button"
                   onClick={clearClient}
                   aria-label="Clear client drill-down"
-                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -721,13 +721,13 @@ export function GraphPage() {
             {urlFilter && (
               <div className="mt-3 flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Filtered to:</span>
-                <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+                <span className="flex items-center gap-1 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/40 px-2 py-1 font-mono text-xs">
                   {urlFilter}
                   <button
                     type="button"
                     onClick={() => setUrlFilter(null)}
                     aria-label="Clear URL filter"
-                    className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -737,8 +737,8 @@ export function GraphPage() {
           </div>
 
           {/* Radial visualization */}
-          <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="border-b border-border px-4 py-3">
+          <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card brutal-shadow-sm">
+            <div className="border-b-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] px-4 py-3">
               <h3 className="text-sm font-semibold tracking-tight">URL access radial</h3>
               <p className="text-xs text-muted-foreground">
                 Hover a URL to highlight its connection; click to filter the table.
@@ -746,10 +746,10 @@ export function GraphPage() {
             </div>
             {breakdownLoading && !breakdown ? (
               <div className="space-y-3 p-4" aria-busy="true">
-                <Skeleton className="h-[540px] w-full rounded-lg" />
+                <Skeleton className="h-[540px] w-full" />
               </div>
             ) : breakdownError ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+              <div className="flex flex-col items-center gap-2 border-[2.5px] border-dashed border-[#0A0A0A] dark:border-[#F6F2E8] py-16 text-center">
                 <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
                 <p className="text-sm font-medium text-destructive">{breakdownError}</p>
                 <Button variant="outline" size="sm" onClick={fetchBreakdown}>
@@ -812,7 +812,7 @@ export function GraphPage() {
             </div>
             {breakdownLoading && !breakdown ? (
               <div className="space-y-3" aria-busy="true">
-                <Skeleton className="h-48 w-full rounded-lg" />
+                <Skeleton className="h-48 w-full" />
               </div>
             ) : breakdown && breakdown.urls.length > 0 ? (
               <DataTable
@@ -841,9 +841,9 @@ export function GraphPage() {
         /* ── URL drill-down mode ────────────────────────────────── */
         <>
           {/* URL drill-down bar */}
-          <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
+          <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card p-4 brutal-shadow-sm">
             <div className="flex flex-wrap items-center gap-3">
-              <span className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5">
+              <span className="flex items-center gap-2 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-1.5">
                 <Link2 className="h-4 w-4 text-muted-foreground" />
                 <span className="max-w-[400px] truncate font-mono text-sm font-semibold" title={selectedUrl}>
                   {selectedUrl}
@@ -857,7 +857,7 @@ export function GraphPage() {
                   type="button"
                   onClick={clearUrl}
                   aria-label="Clear URL drill-down"
-                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -889,8 +889,8 @@ export function GraphPage() {
           </div>
 
           {/* URL access network */}
-          <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="border-b border-border px-4 py-3">
+          <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card brutal-shadow-sm">
+            <div className="border-b-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] px-4 py-3">
               <h3 className="text-sm font-semibold tracking-tight">Client access network</h3>
               <p className="text-xs text-muted-foreground">
                 Client IPs that accessed this URL. Hover a node to highlight connections.
@@ -898,10 +898,10 @@ export function GraphPage() {
             </div>
             {urlBreakdownLoading && !urlBreakdown ? (
               <div className="space-y-3 p-4" aria-busy="true">
-                <Skeleton className="h-[540px] w-full rounded-lg" />
+                <Skeleton className="h-[540px] w-full" />
               </div>
             ) : urlBreakdownError ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+              <div className="flex flex-col items-center gap-2 border-[2.5px] border-dashed border-[#0A0A0A] dark:border-[#F6F2E8] py-16 text-center">
                 <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
                 <p className="text-sm font-medium text-destructive">{urlBreakdownError}</p>
                 <Button variant="outline" size="sm" onClick={fetchUrlBreakdown}>
@@ -958,7 +958,7 @@ export function GraphPage() {
             </div>
             {urlBreakdownLoading && !urlBreakdown ? (
               <div className="space-y-3" aria-busy="true">
-                <Skeleton className="h-48 w-full rounded-lg" />
+                <Skeleton className="h-48 w-full" />
               </div>
             ) : urlBreakdown && urlBreakdown.clients.length > 0 ? (
               <DataTable
@@ -1027,13 +1027,13 @@ export function GraphPage() {
           aria-label="Search client IP"
         />
         {pickerQuery.trim() && topClients.length > 0 && (
-          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto rounded-md border border-border bg-popover">
+          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-popover">
             {topClients.slice(0, 8).map((t) => (
               <li key={t.client_ip}>
                 <button
                   type="button"
                   onClick={() => selectClient(t.client_ip)}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span className="font-mono">{t.client_ip}</span>
                   <span className="tabular-nums text-muted-foreground">
@@ -1059,7 +1059,7 @@ export function GraphPage() {
           aria-label="Search URL"
         />
         {urlPickerQuery.trim() && topRanked.urls.length > 0 && (
-          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto rounded-md border border-border bg-popover">
+          <ul className="mt-2 max-h-56 divide-y divide-border overflow-auto border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-popover">
             {topRanked.urls
               .filter((u) =>
                 u.label.toLowerCase().includes(urlPickerQuery.toLowerCase()),
@@ -1070,7 +1070,7 @@ export function GraphPage() {
                   <button
                     type="button"
                     onClick={() => selectUrl(u.label)}
-                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-secondary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <span className="min-w-0 truncate font-mono" title={u.label}>
                       {hostOf(u.label)}
@@ -1087,8 +1087,8 @@ export function GraphPage() {
 
       {/* Visualization: alluvial flow — cv-auto skips the (potentially
           large) sankey panel's paint until it's scrolled into view. */}
-      <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-card brutal-shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold tracking-tight">Traffic flow</h3>
             <p className="text-xs text-muted-foreground">
@@ -1104,10 +1104,10 @@ export function GraphPage() {
 
         {loading ? (
           <div className="space-y-3 p-4" aria-busy="true">
-            <Skeleton className="h-64 w-full rounded-lg" />
+            <Skeleton className="h-64 w-full" />
           </div>
         ) : error ? (
-          <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-16 text-center">
+          <div className="flex flex-col items-center gap-2 border-[2.5px] border-dashed border-[#0A0A0A] dark:border-[#F6F2E8] py-16 text-center">
             <SearchX className="h-7 w-7 text-muted-foreground/50" aria-hidden="true" />
             <p className="text-sm font-medium text-destructive">{error}</p>
             <Button variant="outline" size="sm" onClick={fetchGraph}>
@@ -1164,26 +1164,26 @@ export function GraphPage() {
           <div className="mb-3 flex items-center gap-2">
             <span className="text-xs text-muted-foreground">Filtered:</span>
             {ipFilter && (
-              <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+              <span className="flex items-center gap-1 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/40 px-2 py-1 font-mono text-xs">
                 IP: {ipFilter}
                 <button
                   type="button"
                   onClick={() => setIpFilter(null)}
                   aria-label="Clear IP filter"
-                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="h-3 w-3" />
                 </button>
               </span>
             )}
             {graphUrlFilter && (
-              <span className="flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
+              <span className="flex items-center gap-1 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/40 px-2 py-1 font-mono text-xs">
                 URL: {graphUrlFilter}
                 <button
                   type="button"
                   onClick={() => setGraphUrlFilter(null)}
                   aria-label="Clear URL filter"
-                  className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -1193,7 +1193,7 @@ export function GraphPage() {
         )}
         {loading ? (
           <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-48 w-full rounded-lg" />
+            <Skeleton className="h-48 w-full" />
           </div>
         ) : graph && graph.flows.length > 0 ? (
           <DataTable

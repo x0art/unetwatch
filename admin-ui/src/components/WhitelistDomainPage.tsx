@@ -99,17 +99,17 @@ export function WhitelistDomainPage() {
       <div className="flex min-h-dvh items-center justify-center bg-background px-4">
         <Card className="w-full max-w-md text-center">
           <CardContent className="space-y-4 py-12">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center bg-muted border-[2.5px] border-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]">
               <ShieldCheck className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
             </div>
             <div>
               <h1 className="text-lg font-semibold tracking-tight">No entries provided</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Append a <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">url</code> query
+                Append a <code className="border-[2px] border-[#0A0A0A] bg-muted px-1.5 py-0.5 text-xs font-mono">url</code> query
                 parameter with comma-separated domains or patterns.
               </p>
             </div>
-            <code className="block rounded-lg bg-muted px-4 py-3 text-left text-xs font-mono text-muted-foreground">
+            <code className="block border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted px-4 py-3 text-left text-xs font-mono text-muted-foreground">
               /whitelistDomain?url=example.com,*safe.example*
             </code>
           </CardContent>
@@ -125,7 +125,7 @@ export function WhitelistDomainPage() {
       <div className="flex min-h-dvh items-center justify-center bg-background px-4">
         <Card className="w-full max-w-md text-center">
           <CardContent className="space-y-6 py-12">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-success/15">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center bg-success/15 border-[2.5px] border-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]">
               <CheckCircle2 className="h-7 w-7 text-success" aria-hidden="true" />
             </div>
             <div>
@@ -161,7 +161,7 @@ export function WhitelistDomainPage() {
       <div className="w-full max-w-2xl space-y-6">
         {/* Header */}
         <div className="space-y-1 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-success/15">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center bg-success/15 border-[2.5px] border-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]">
             <ShieldCheck className="h-7 w-7 text-success" aria-hidden="true" />
           </div>
           <h1 className="text-xl font-bold tracking-tight">Confirm Whitelist Add</h1>
@@ -173,10 +173,10 @@ export function WhitelistDomainPage() {
         {/* Table */}
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-hidden rounded-lg border border-border">
+            <div className="overflow-hidden border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] brutal-shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
+                  <tr className="border-b-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 text-left text-muted-foreground">
                     <th className="w-12 px-4 py-3 text-center text-xs font-medium">#</th>
                     <th className="px-4 py-3 text-xs font-medium">Pattern</th>
                     <th className="w-24 px-4 py-3 text-right text-xs font-medium">Actions</th>
@@ -188,7 +188,7 @@ export function WhitelistDomainPage() {
                     return (
                       <tr
                         key={`${idx}-${item}`}
-                        className="transition-colors hover:bg-muted/20"
+                        className="transition-colors hover:bg-secondary/30"
                       >
                         <td className="px-4 py-2.5 text-center text-xs tabular-nums text-muted-foreground">
                           {idx + 1}
@@ -234,7 +234,7 @@ export function WhitelistDomainPage() {
                                 type="button"
                                 onClick={() => startEdit(idx)}
                                 aria-label={`Edit ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-secondary hover:text-[#0A0A0A]"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
@@ -242,7 +242,7 @@ export function WhitelistDomainPage() {
                                 type="button"
                                 onClick={() => removeItem(idx)}
                                 aria-label={`Remove ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive"
+                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>

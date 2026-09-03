@@ -80,12 +80,12 @@ function FeedCard({
           <div className="flex items-center gap-2">
             <CardTitle>{title}</CardTitle>
             {typeof totalEntries === "number" && (
-              <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+              <span className="border-[2.5px] border-[#0A0A0A] bg-secondary px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest tabular-nums text-[#0A0A0A] dark:border-[#F6F2E8]">
                 {searchActive ? `${entries.length}/${totalEntries}` : totalEntries}
               </span>
             )}
           </div>
-          <code className="mt-1.5 inline-block rounded bg-muted px-1.5 py-0.5 text-xs font-mono text-muted-foreground">
+          <code className="mt-1.5 inline-block border-[2.5px] border-[#0A0A0A] bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-muted-foreground dark:border-[#F6F2E8]">
             {path}
           </code>
         </div>
@@ -115,7 +115,7 @@ function FeedCard({
       <CardContent className="space-y-3">
         {/* Bulk-select toolbar */}
         {selectMode ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 border-[2.5px] border-[#0A0A0A] bg-muted px-3 py-2 brutal-shadow-sm dark:border-[#F6F2E8]">
             <span className="text-xs font-medium tabular-nums text-muted-foreground">
               {selected.size} selected
             </span>
@@ -139,7 +139,7 @@ function FeedCard({
         {loading ? (
           <Skeleton className="h-40 w-full" />
         ) : entries.length > 0 ? (
-          <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border bg-muted/30">
+          <ul className="max-h-80 divide-y divide-border overflow-y-auto border-[2.5px] border-[#0A0A0A] bg-muted/30 brutal-shadow-sm dark:border-[#F6F2E8]">
             {entries.map((value) => {
               const isSelected = selected.has(value)
               return (
@@ -155,7 +155,7 @@ function FeedCard({
                       checked={isSelected}
                       onChange={() => onToggleSelect(value)}
                       aria-label={`Select ${value}`}
-                      className="h-4 w-4 shrink-0 rounded border-border accent-primary"
+                      className="h-4 w-4 shrink-0 border-[2.5px] border-[#0A0A0A] accent-primary dark:border-[#F6F2E8]"
                     />
                   )}
                   <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
@@ -169,7 +169,7 @@ function FeedCard({
                         onClick={() => onDelete(kind, value)}
                         disabled={disabled}
                         aria-label={`Remove ${value} from blacklist`}
-                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center border-[2px] border-transparent text-muted-foreground transition-colors hover:border-[#0A0A0A] hover:bg-danger hover:text-white hover:brutal-shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 dark:hover:border-[#F6F2E8]"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -376,13 +376,12 @@ export function BlacklistPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Blacklist</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Concrete URLs and IPs blacklisted from findings. Entries are stored as bare hosts (no protocol or path).
-          </p>
-        </div>
+      <div className="border-b-[3px] border-[#0A0A0A] pb-4 dark:border-[#F6F2E8]">
+        <p className="mono-label">[ BLACKLIST ]</p>
+        <h2 className="font-display mt-1 text-[26px] sm:text-[30px]">Blacklist</h2>
+        <p className="mt-1.5 max-w-[60ch] font-mono text-xs font-medium leading-relaxed text-muted-foreground">
+          Concrete URLs and IPs blacklisted from findings. Entries are stored as bare hosts (no protocol or path).
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -499,7 +498,7 @@ export function BlacklistPage() {
           <div>
             <Label>Values (one per line)</Label>
             <textarea
-              className="flex min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex min-h-[140px] w-full border-[2.5px] border-[#0A0A0A] bg-background px-3 py-2 font-mono text-sm font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-[#F6F2E8]"
               value={bulkValue}
               onChange={(e) => setBulkValue(e.target.value)}
               placeholder={"http://example.com/foo\n1.2.3.4"}

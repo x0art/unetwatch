@@ -28,33 +28,29 @@ import {
 import { cn, copyText } from "../lib/utils"
 import { AnimatedNumber, Stagger, StaggerItem } from "./motion"
 
-/* ════════════════════════════════════════════════════════════════
- * Button
- * ════════════════════════════════════════════════════════════════ */
+/* ────────────────────────────────────────────────────────────────
+ * Button — brutal: 2.5px ink border, hard offset shadow, 0 radius,
+ * mono caps, press slams 2px. No soft shadows, no blur.
+ * ──────────────────────────────────────────────────────────────── */
 
 type ButtonVariant = "default" | "destructive" | "outline" | "secondary" | "ghost"
 type ButtonSize = "default" | "sm" | "lg" | "icon"
 
-// `transition` (not transition-colors) so the active:scale press feedback
-// animates too; duration/easing come from the global motion tokens.
-// Press-down uses a faster 100ms so it feels snappy; release eases back
-// at the global 200ms.
 const buttonBase =
-  "inline-flex items-center justify-center gap-2 rounded-md font-medium transition active:duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap active:scale-[0.98]"
+  "inline-flex items-center justify-center gap-2 border-[2.5px] border-border font-mono text-xs font-extrabold uppercase tracking-widest brutal-shadow-sm brutal-press transition-[transform,box-shadow,background,color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap [&_svg]:shrink-0"
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
-  destructive: "bg-danger text-danger-foreground hover:bg-danger/90 shadow-sm",
-  outline:
-    "border border-input bg-background hover:bg-accent/10 hover:text-foreground",
-  secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-  ghost: "hover:bg-secondary hover:text-secondary-foreground",
+  default: "bg-primary text-white hover:brightness-[1.06] border-[#0A0A0A] dark:border-[#F6F2E8]",
+  destructive: "bg-danger text-white hover:brightness-[1.06] border-[#0A0A0A] dark:border-[#F6F2E8]",
+  outline: "bg-card text-foreground hover:bg-muted border-border shadow-none",
+  secondary: "bg-secondary text-[#0A0A0A] hover:brightness-[0.97] border-[#0A0A0A] dark:border-[#F6F2E8]",
+  ghost: "bg-transparent border-transparent shadow-none hover:bg-muted hover:border-border hover:brutal-shadow-sm",
 }
 
 const buttonSizes: Record<ButtonSize, string> = {
-  default: "h-10 px-4 py-2 text-sm",
-  sm: "h-9 rounded-md px-3 text-xs",
-  lg: "h-11 rounded-md px-8 text-base",
+  default: "h-10 px-4 py-2 text-xs",
+  sm: "h-8 px-3 text-[11px]",
+  lg: "h-11 px-6 text-xs",
   icon: "h-10 w-10",
 }
 
@@ -90,10 +86,6 @@ export function Button({
   )
 }
 
-/**
- * Small ghost "copy" button for table cells showing a (possibly truncated)
- * URL. Copies the exact value and shows a "Copied" toast.
- */
 export function CopyUrlButton({
   value,
   label,
@@ -101,7 +93,6 @@ export function CopyUrlButton({
   size = "sm",
 }: {
   value: string
-  /** Accessible label prefix, e.g. the column name. Defaults to "Copy". */
   label?: string
   className?: string
   size?: "sm" | "icon"
@@ -109,18 +100,15 @@ export function CopyUrlButton({
   const { toast } = useToast()
   const handleCopy = async () => {
     const ok = await copyText(value)
-    if (ok) {
-      toast({ title: "Copied", description: value, variant: "success" })
-    } else {
-      toast({ title: "Copy failed", variant: "error" })
-    }
+    if (ok) toast({ title: "COPIED", description: value, variant: "success" })
+    else toast({ title: "COPY FAILED", variant: "error" })
   }
   return (
     <Button
       variant="ghost"
       size={size}
       onClick={handleCopy}
-      className={cn("h-6 w-6 px-0 shrink-0 text-muted-foreground hover:text-foreground", className)}
+      className={cn("h-6 w-6 px-0 text-muted-foreground hover:text-foreground", className)}
       aria-label={label ? `Copy ${label}` : "Copy"}
     >
       <Copy className="h-3.5 w-3.5" />
@@ -128,9 +116,7 @@ export function CopyUrlButton({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Input
- * ════════════════════════════════════════════════════════════════ */
+/* ── Input — ink frame, 0 radius, mono when needed ─────────── */
 
 export function Input({
   className,
@@ -166,11 +152,10 @@ export function Input({
       autoComplete={autoComplete}
       aria-label={ariaLabel}
       className={cn(
-        "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
-        "placeholder:text-muted-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        "transition-colors",
+        "flex h-10 w-full border-[2.5px] border-border bg-card px-3 py-2 text-sm font-medium",
+        "placeholder:text-muted-foreground placeholder:font-normal",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "disabled:opacity-50",
         className,
       )}
       value={value}
@@ -180,10 +165,6 @@ export function Input({
     />
   )
 }
-
-/* ════════════════════════════════════════════════════════════════
- * Textarea (used by bulk import)
- * ════════════════════════════════════════════════════════════════ */
 
 export function Textarea({
   className,
@@ -205,11 +186,10 @@ export function Textarea({
       id={id}
       aria-label={ariaLabel}
       className={cn(
-        "flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-mono",
+        "flex min-h-[120px] w-full border-[2.5px] border-border bg-card px-3 py-2 text-sm font-mono",
         "placeholder:text-muted-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        "transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "disabled:opacity-50",
         className,
       )}
       value={value}
@@ -219,19 +199,17 @@ export function Textarea({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Badge
- * ════════════════════════════════════════════════════════════════ */
+/* ── Badge — STAMP pill, ink border, flat color ─────────────── */
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning"
 
 const badgeVariants: Record<BadgeVariant, string> = {
-  default: "bg-primary/12 text-primary border border-primary/25",
-  secondary: "bg-secondary/80 text-secondary-foreground",
-  destructive: "bg-danger/12 text-danger border border-danger/25",
-  outline: "border border-input/80 text-foreground",
-  success: "bg-success/12 text-success border border-success/25",
-  warning: "bg-warning/12 text-warning border border-warning/25",
+  default: "bg-[#0A0A0A] text-white border-[#0A0A0A] dark:bg-[#F6F2E8] dark:text-[#0A0A0A] dark:border-[#F6F2E8]",
+  secondary: "bg-secondary text-[#0A0A0A] border-[#0A0A0A]",
+  destructive: "bg-danger text-white border-[#0A0A0A]",
+  outline: "bg-card text-foreground border-border",
+  success: "bg-[#0A0A0A] text-[#FFD60A] border-[#0A0A0A] dark:bg-[#FFD60A] dark:text-[#0A0A0A] dark:border-[#FFD60A]",
+  warning: "bg-secondary text-[#0A0A0A] border-[#0A0A0A]",
 }
 
 export function Badge({
@@ -246,7 +224,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors",
+        "inline-flex items-center border-[2px] px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest",
         badgeVariants[variant],
         className,
       )}
@@ -255,18 +233,6 @@ export function Badge({
     </span>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════
- * ListBadge — compact icon pill (Query + Traffic pages)
- *
- * Small uppercase pill with a leading icon used for list-coverage
- * badges (block / whitelist / blacklist) across the Query and
- * Traffic pages.
- *
- *   <ListBadge tone="danger" icon={CheckCircle2} title="In blacklist">
- *     blacklist
- *   </ListBadge>
- * ════════════════════════════════════════════════════════════════ */
 
 export type ListBadgeTone = "warning" | "success" | "danger"
 
@@ -285,10 +251,10 @@ export function ListBadge({
     <span
       title={title}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-        tone === "warning" && "border-warning/30 bg-warning/10 text-warning",
-        tone === "success" && "border-success/30 bg-success/10 text-success",
-        tone === "danger" && "border-danger/30 bg-danger/10 text-danger",
+        "inline-flex shrink-0 items-center gap-1 border-[2px] border-[#0A0A0A] px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest dark:border-[#F6F2E8]",
+        tone === "warning" && "bg-secondary text-[#0A0A0A]",
+        tone === "success" && "bg-[#0A0A0A] text-[#FFD60A] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]",
+        tone === "danger" && "bg-danger text-white",
       )}
     >
       <Icon className="h-3 w-3" aria-hidden="true" />
@@ -297,105 +263,45 @@ export function ListBadge({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Card
- * ════════════════════════════════════════════════════════════════ */
+/* ── Card — brutal slab ─────────────────────────────────────── */
 
 export function Card({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("brutal-card", className)}>{children}</div>
+}
+
+export function CardHeader({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("flex flex-col gap-1.5 p-5 border-b-[2.5px] border-border", className)}>{children}</div>
+}
+
+export function CardTitle({ children, className }: { children: ReactNode; className?: string }) {
+  return <h3 className={cn("font-display text-sm tracking-tight", className)}>{children}</h3>
+}
+
+export function CardContent({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cn("p-5", className)}>{children}</div>
+}
+
+/* ── Label — mono caps ──────────────────────────────────────── */
+
+export function Label({ children, className, htmlFor }: { children: ReactNode; className?: string; htmlFor?: string }) {
   return (
-    <div
-      className={cn(
-        "spotlight-card rounded-xl border border-border/60 bg-card text-card-foreground shadow-tinted transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-tinted",
-        className,
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
-export function CardHeader({
-  className,
-  children,
-}: {
-  className?: string
-  children: ReactNode
-}) {
-  return <div className={cn("flex flex-col space-y-1.5 p-6", className)}>{children}</div>
-}
-
-export function CardTitle({
-  children,
-  className,
-}: {
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <h3 className={cn("text-lg font-semibold leading-none tracking-tight", className)}>
-      {children}
-    </h3>
-  )
-}
-
-export function CardContent({
-  className,
-  children,
-}: {
-  className?: string
-  children: ReactNode
-}) {
-  return <div className={cn("p-6 pt-0", className)}>{children}</div>
-}
-
-/* ════════════════════════════════════════════════════════════════
- * Label
- * ════════════════════════════════════════════════════════════════ */
-
-export function Label({
-  children,
-  className,
-  htmlFor,
-}: {
-  children: ReactNode
-  className?: string
-  htmlFor?: string
-}) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className={cn("text-sm font-medium leading-none mb-2 block", className)}
-    >
+    <label htmlFor={htmlFor} className={cn("mono-label mb-2 block", className)}>
       {children}
     </label>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Skeleton
- * ════════════════════════════════════════════════════════════════ */
+/* ── Skeleton — hatched ─────────────────────────────────────── */
 
 export function Skeleton({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-md bg-muted/60",
-        className,
-      )}
-      aria-hidden="true"
-    >
+    <div className={cn("relative overflow-hidden border-[2px] border-border bg-muted", className)} aria-hidden="true">
       <div className="skeleton-shimmer absolute inset-0" />
     </div>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Dialog  (Radix-backed, a11y: focus trap, escape, restore)
- *
- *   <Dialog open={open} onClose={close} title="Edit" description="...">
- *     {body}
- *   </Dialog>
- * ════════════════════════════════════════════════════════════════ */
+/* ── Dialog — brutal slab + hazard bar ──────────────────────── */
 
 export function Dialog({
   open,
@@ -415,39 +321,23 @@ export function Dialog({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
-          className={cn(
-            "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
-          )}
-        />
+        <DialogPrimitive.Overlay className={cn("fixed inset-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-[1px]", "data-[state=open]:animate-in data-[state=closed]:animate-out")} />
         <DialogPrimitive.Content
           className={cn(
-            // Constrain to the viewport and scroll internally so tall content
-            // (e.g. the logs run-details dialog) never overflows the screen.
-            "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col",
-            "overflow-hidden rounded-lg border border-border bg-popover p-6 text-popover-foreground shadow-xl",
+            "fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden border-[3px] border-[#0A0A0A] bg-card text-card-foreground brutal-shadow-lg dark:border-[#F6F2E8]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
             className,
           )}
         >
-          <DialogPrimitive.Title className="text-lg font-semibold tracking-tight">
-            {title}
-          </DialogPrimitive.Title>
-          {description && (
-            <DialogPrimitive.Description className="mt-1.5 text-sm text-muted-foreground">
-              {description}
-            </DialogPrimitive.Description>
-          )}
-          {/* Scrollable body: only this scrolls, title stays pinned. */}
-          <div className="mt-4 min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <div className="hazard-bar shrink-0" aria-hidden="true" />
+          <div className="p-6">
+            <DialogPrimitive.Title className="font-display text-base">{title}</DialogPrimitive.Title>
+            {description && <DialogPrimitive.Description className="mt-1 text-sm text-muted-foreground">{description}</DialogPrimitive.Description>}
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto">{children}</div>
+          </div>
           <DialogPrimitive.Close
             aria-label="Close dialog"
-            className={cn(
-              "absolute right-4 top-4 rounded-sm opacity-70 transition-opacity",
-              "hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "inline-flex h-7 w-7 items-center justify-center",
-            )}
+            className="absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center border-[2px] border-transparent hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X className="h-4 w-4" />
           </DialogPrimitive.Close>
@@ -457,28 +347,9 @@ export function Dialog({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Select  (Radix-backed custom dropdown — NOT native <select>)
- *
- *   <Select
- *     value={filterType}
- *     onChange={(v) => setFilterType(v)}
- *     placeholder="All types"
- *     options={[
- *       { value: "", label: "All types" },
- *       { value: "block", label: "Block" },
- *     ]}
- *   />
- *
- * NOTE: onChange now receives the string value directly (not an event),
- * per the agreed foundation API. Callers using the old event-based
- * signature must update to `onChange={(v) => ...}`.
- * ════════════════════════════════════════════════════════════════ */
+/* ── Select — brutal trigger + popover ──────────────────────── */
 
-export interface SelectOption {
-  value: string
-  label: string
-}
+export interface SelectOption { value: string; label: string }
 
 export function Select({
   value,
@@ -504,28 +375,25 @@ export function Select({
         id={id}
         aria-label={ariaLabel}
         className={cn(
-          "flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm",
-          "placeholder:text-muted-foreground",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-          "disabled:cursor-not-allowed disabled:opacity-50 transition-colors",
-          "[&>span]:line-clamp-1",
+          "flex h-10 w-full items-center justify-between gap-2 border-[2.5px] border-border bg-card px-3 py-2 text-sm font-medium brutal-shadow-sm",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "disabled:opacity-50 [&>span]:line-clamp-1",
           className,
         )}
       >
-        <SelectPrimitive.Value placeholder={placeholder ?? "Select…"}>
+        <SelectPrimitive.Value placeholder={placeholder ?? "Select..."}>
           {current?.label ?? placeholder}
         </SelectPrimitive.Value>
         <SelectPrimitive.Icon asChild>
-          <ChevronDown className="h-4 w-4 opacity-60" aria-hidden="true" />
+          <ChevronDown className="h-4 w-4 opacity-70" aria-hidden="true" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content
           position="popper"
-          sideOffset={4}
+          sideOffset={6}
           className={cn(
-            "relative z-[60] max-h-[var(--radix-select-content-available-height)] min-w-[8rem]",
-            "w-[var(--radix-select-trigger-width)] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg",
+            "relative z-[60] max-h-[var(--radix-select-content-available-height)] min-w-[8rem] w-[var(--radix-select-trigger-width)] overflow-hidden border-[2.5px] border-[#0A0A0A] bg-card text-card-foreground brutal-shadow dark:border-[#F6F2E8]",
             "data-[state=open]:animate-in data-[state=closed]:animate-out",
           )}
         >
@@ -537,11 +405,7 @@ export function Select({
               <SelectPrimitive.Item
                 key={o.value}
                 value={o.value}
-                className={cn(
-                  "relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none",
-                  "focus:bg-accent/15 focus:text-foreground",
-                  "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-                )}
+                className="relative flex w-full cursor-pointer select-none items-center py-2 pl-8 pr-2 text-sm font-medium outline-none hover:bg-secondary hover:text-[#0A0A0A] data-[state=checked]:bg-[#0A0A0A] data-[state=checked]:text-white dark:data-[state=checked]:bg-[#F6F2E8] dark:data-[state=checked]:text-[#0A0A0A]"
               >
                 <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
                   <SelectPrimitive.ItemIndicator>
@@ -561,51 +425,18 @@ export function Select({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * RefreshIntervalSelect
- *
- * Auto-refresh interval picker for live pages. Pairs with the
- * `useAutoRefresh` hook in lib/utils.
- *
- *   <RefreshIntervalSelect value={seconds} onChange={setSeconds} />
- * ════════════════════════════════════════════════════════════════ */
-
 const REFRESH_INTERVAL_OPTIONS: SelectOption[] = [
-  { value: "0", label: "Auto-refresh: off" },
-  { value: "30", label: "Auto-refresh: 30s" },
-  { value: "60", label: "Auto-refresh: 1m" },
-  { value: "300", label: "Auto-refresh: 5m" },
+  { value: "0", label: "AUTO: OFF" },
+  { value: "30", label: "AUTO: 30S" },
+  { value: "60", label: "AUTO: 1M" },
+  { value: "300", label: "AUTO: 5M" },
 ]
 
-export function RefreshIntervalSelect({
-  value,
-  onChange,
-  className,
-}: {
-  value: number
-  onChange: (seconds: number) => void
-  className?: string
-}) {
-  return (
-    <Select
-      value={String(value)}
-      onChange={(v) => onChange(Number(v))}
-      options={REFRESH_INTERVAL_OPTIONS}
-      className={cn("w-40", className)}
-      aria-label="Auto-refresh interval"
-    />
-  )
+export function RefreshIntervalSelect({ value, onChange, className }: { value: number; onChange: (seconds: number) => void; className?: string }) {
+  return <Select value={String(value)} onChange={(v) => onChange(Number(v))} options={REFRESH_INTERVAL_OPTIONS} className={cn("w-40", className)} aria-label="Auto-refresh interval" />
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Toast system  (Radix Toast + context)
- *
- * Wrap app once:  <ToastProvider> ... </ToastProvider>
- * Render region:  <Toaster />   (place inside provider)
- * Fire a toast:   const { toast } = useToast()
- *                 toast({ title: "Saved", description: "...", variant: "success" })
- *                 // or shorthand: toast("Saved")
- * ════════════════════════════════════════════════════════════════ */
+/* ── Toast — brutal slab + stamp color ──────────────────────── */
 
 export type ToastVariant = "default" | "success" | "error" | "info"
 
@@ -613,7 +444,6 @@ export interface ToastInput {
   title?: string
   description?: string
   variant?: ToastVariant
-  /** Override auto-dismiss (ms). Default 4000. */
   duration?: number
 }
 
@@ -624,77 +454,37 @@ interface ToastRecord extends Required<Omit<ToastInput, "description" | "title">
 }
 
 interface ToastContextValue {
-  /** Fire a toast. Accepts a full object or a plain string title. */
   toast: (input: ToastInput | string) => void
-  /** Dismiss a specific toast by id. */
   dismiss: (id: string) => void
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null)
 
 const toastVariantStyles: Record<ToastVariant, { icon: LucideIcon; className: string }> = {
-  default: { icon: Info, className: "border-border bg-card text-card-foreground shadow-lg" },
-  success: {
-    icon: CheckCircle2,
-    className: "border-success bg-success/15 text-foreground shadow-lg",
-  },
-  error: { icon: AlertTriangle, className: "border-danger bg-danger/15 text-foreground shadow-lg" },
-  info: { icon: Info, className: "border-info bg-info/15 text-foreground shadow-lg" },
+  default: { icon: Info, className: "bg-card text-foreground border-[#0A0A0A] brutal-shadow dark:border-[#F6F2E8]" },
+  success: { icon: CheckCircle2, className: "bg-secondary text-[#0A0A0A] border-[#0A0A0A] brutal-shadow" },
+  error: { icon: AlertTriangle, className: "bg-danger text-white border-[#0A0A0A] brutal-shadow" },
+  info: { icon: Info, className: "bg-info text-white border-[#0A0A0A] brutal-shadow" },
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastRecord[]>([])
   const timersRef = useRef<Map<string, number>>(new Map())
-
   const clearTimer = useCallback((id: string) => {
     const t = timersRef.current.get(id)
-    if (t !== undefined) {
-      window.clearTimeout(t)
-      timersRef.current.delete(id)
-    }
+    if (t !== undefined) { window.clearTimeout(t); timersRef.current.delete(id) }
   }, [])
-
-  const dismiss = useCallback(
-    (id: string) => {
-      clearTimer(id)
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    },
-    [clearTimer],
-  )
-
+  const dismiss = useCallback((id: string) => { clearTimer(id); setToasts((prev) => prev.filter((t) => t.id !== id)) }, [clearTimer])
   const toast = useCallback((input: ToastInput | string) => {
     const rec: ToastRecord =
       typeof input === "string"
-        ? {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            title: input,
-            variant: "default",
-            duration: 4000,
-          }
-        : {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            title: input.title ?? input.description ?? "Notification",
-            description: input.description,
-            variant: input.variant ?? "default",
-            duration: input.duration ?? 4000,
-          }
-    clearTimer(rec.id) // remove any stale timer for a reused id (idempotent)
-    timersRef.current.set(
-      rec.id,
-      window.setTimeout(() => dismiss(rec.id), rec.duration),
-    )
+        ? { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: input, variant: "default", duration: 4000 }
+        : { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, title: input.title ?? input.description ?? "NOTICE", description: input.description, variant: input.variant ?? "default", duration: input.duration ?? 4000 }
+    clearTimer(rec.id)
+    timersRef.current.set(rec.id, window.setTimeout(() => dismiss(rec.id), rec.duration))
     setToasts((prev) => [...prev, rec])
   }, [clearTimer, dismiss])
-
-  // Clean up any pending timers on unmount.
-  useEffect(() => {
-    const timers = timersRef.current
-    return () => {
-      timers.forEach((t) => window.clearTimeout(t))
-      timers.clear()
-    }
-  }, [])
-
+  useEffect(() => { const timers = timersRef.current; return () => { timers.forEach((t) => window.clearTimeout(t)); timers.clear() } }, [])
   return (
     <ToastContext.Provider value={{ toast, dismiss }}>
       <ToastPrimitive.Provider swipeDirection="right" duration={4000}>
@@ -706,36 +496,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={t.id}
               duration={t.duration}
               onOpenChange={(open) => !open && dismiss(t.id)}
-              className={cn(
-                "group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-md border p-4 shadow-lg",
-                "data-[state=open]:slide-in-from-bottom data-[state=closed]:animate-out",
-                "data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)]",
-                "data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)]",
-                "transition-transform",
-                className,
-              )}
+              className={cn("group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden border-[2.5px] p-4", "data-[state=open]:slide-in-from-bottom data-[state=closed]:animate-out", className)}
             >
               <Icon className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <div className="flex-1 space-y-0.5">
-                <ToastPrimitive.Title className="text-sm font-semibold">
-                  {t.title}
-                </ToastPrimitive.Title>
-                {t.description && (
-                  <ToastPrimitive.Description className="text-xs text-muted-foreground">
-                    {t.description}
-                  </ToastPrimitive.Description>
-                )}
+                <ToastPrimitive.Title className="font-mono text-xs font-extrabold uppercase tracking-widest">{t.title}</ToastPrimitive.Title>
+                {t.description && <ToastPrimitive.Description className="text-xs opacity-80">{t.description}</ToastPrimitive.Description>}
               </div>
-              <ToastPrimitive.Close
-                aria-label="Dismiss"
-                className="rounded-sm opacity-60 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <ToastPrimitive.Close aria-label="Dismiss" className="opacity-60 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                 <X className="h-4 w-4" />
               </ToastPrimitive.Close>
             </ToastPrimitive.Root>
           )
         })}
-        <ToastPrimitive.Viewport className="fixed top-0 right-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-2 p-4 sm:max-w-sm" />
+        <ToastPrimitive.Viewport className="fixed top-0 right-0 z-[100] flex max-h-screen w-full flex-col-reverse gap-3 p-4 sm:max-w-sm" />
       </ToastPrimitive.Provider>
     </ToastContext.Provider>
   )
@@ -743,159 +517,60 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext)
-  if (!ctx) {
-    throw new Error("useToast must be used within a <ToastProvider>")
-  }
+  if (!ctx) throw new Error("useToast must be used within <ToastProvider>")
   return ctx
 }
 
-/**
- * Toaster is a no-op component kept for API compatibility.
- * ToastProvider renders the viewport and toast items internally.
- * Mounting <Toaster /> anywhere inside the provider is harmless.
- */
 export function Toaster(_props: { toasts?: ToastRecord[]; onDismiss?: (id: string) => void }) {
   return null
 }
 
-/* ════════════════════════════════════════════════════════════════
- * ConfirmDialog  (built on Dialog; replaces native confirm())
- *
- *   <ConfirmDialog
- *     open={open}
- *     title="Delete pattern?"
- *     description="This cannot be undone."
- *     confirmLabel="Delete"
- *     variant="destructive"
- *     onConfirm={handleDelete}
- *     onCancel={() => setOpen(false)}
- *   />
- * ════════════════════════════════════════════════════════════════ */
+/* ── ConfirmDialog ──────────────────────────────────────────── */
 
 export function ConfirmDialog({
-  open,
-  title,
-  description,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
-  variant = "default",
-  onConfirm,
-  onCancel,
+  open, title, description, confirmLabel = "CONFIRM", cancelLabel = "CANCEL", variant = "default", onConfirm, onCancel,
 }: {
-  open: boolean
-  title: string
-  description?: string
-  confirmLabel?: string
-  cancelLabel?: string
-  variant?: "default" | "destructive"
-  onConfirm: () => void
-  onCancel: () => void
+  open: boolean; title: string; description?: string; confirmLabel?: string; cancelLabel?: string; variant?: "default" | "destructive"; onConfirm: () => void; onCancel: () => void
 }) {
   return (
     <Dialog open={open} onClose={onCancel} title={title} description={description}>
       <div className="mt-6 flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>
-          {cancelLabel}
-        </Button>
-        <Button variant={variant === "destructive" ? "destructive" : "default"} onClick={onConfirm}>
-          {confirmLabel}
-        </Button>
+        <Button variant="outline" onClick={onCancel}>{cancelLabel}</Button>
+        <Button variant={variant === "destructive" ? "destructive" : "default"} onClick={onConfirm}>{confirmLabel}</Button>
       </div>
     </Dialog>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * EmptyState
- *
- *   <EmptyState
- *     icon={SearchX}
- *     title="No findings yet"
- *     description="Findings appear here when…"
- *     action={<Button onClick={…}>Refresh</Button>}
- *   />
- * ════════════════════════════════════════════════════════════════ */
+/* ── EmptyState — brutal dashed slab + halftone ─────────────── */
 
-export function EmptyState({
-  icon: Icon,
-  title,
-  description,
-  action,
-  className,
-}: {
-  icon: LucideIcon
-  title: string
-  description?: string
-  action?: ReactNode
-  className?: string
-}) {
+export function EmptyState({ icon: Icon, title, description, action, className }: { icon: LucideIcon; title: string; description?: string; action?: ReactNode; className?: string }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-16 text-center",
-        className,
-      )}
-    >
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-secondary/80 text-muted-foreground/70">
-        <Icon className="h-7 w-7" aria-hidden="true" />
+    <div className={cn("relative flex flex-col items-center justify-center border-[2.5px] border-dashed border-border bg-card px-6 py-14 text-center overflow-hidden", className)}>
+      <div className="halftone absolute inset-0 pointer-events-none" aria-hidden="true" />
+      <div className="relative flex h-12 w-12 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-secondary text-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]">
+        <Icon className="h-6 w-6" aria-hidden="true" />
       </div>
-      <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-      {description && (
-        <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>
-      )}
-      {action && <div className="mt-5">{action}</div>}
+      <h3 className="relative mt-4 font-display text-sm">{title}</h3>
+      {description && <p className="relative mt-1.5 max-w-sm text-sm text-muted-foreground">{description}</p>}
+      {action && <div className="relative mt-5">{action}</div>}
     </div>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * SearchInput
- *
- * Text input with a search icon on the left and a clear (×) button when
- * non-empty. Used consistently across every page's filter/search field.
- *
- *   <SearchInput value={search} onChange={setSearch} placeholder="Search…" />
- * ════════════════════════════════════════════════════════════════ */
+/* ── SearchInput ────────────────────────────────────────────── */
 
 export function SearchInput({
-  value,
-  onChange,
-  placeholder,
-  className,
-  id,
-  "aria-label": ariaLabel,
-  autoFocus,
+  value, onChange, placeholder, className, id, "aria-label": ariaLabel, autoFocus,
 }: {
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-  className?: string
-  id?: string
-  "aria-label"?: string
-  autoFocus?: boolean
+  value: string; onChange: (value: string) => void; placeholder?: string; className?: string; id?: string; "aria-label"?: string; autoFocus?: boolean
 }) {
   return (
     <div className={cn("relative", className)}>
-      <Search
-        className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden="true"
-      />
-      <Input
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        aria-label={ariaLabel}
-        autoFocus={autoFocus}
-        className="pl-8 pr-8"
-      />
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={ariaLabel} autoFocus={autoFocus} className="pl-9 pr-8" />
       {value && (
-        <button
-          type="button"
-          onClick={() => onChange("")}
-          aria-label="Clear search"
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
+        <button type="button" onClick={() => onChange("")} aria-label="Clear search" className="absolute right-2 top-1/2 -translate-y-1/2 border border-transparent p-1 text-muted-foreground hover:text-foreground hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <X className="h-4 w-4" />
         </button>
       )}
@@ -903,127 +578,61 @@ export function SearchInput({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * PageHeader
- *
- * Standard page heading block: title + description on the left, an
- * optional actions row on the right. Every page uses the same layout so
- * the heading hierarchy and spacing stay consistent app-wide.
- *
- *   <PageHeader title="Findings" description="…">
- *     <Button>Refresh</Button>
- *   </PageHeader>
- * ════════════════════════════════════════════════════════════════ */
+/* ── PageHeader — brutal display + mono rule ────────────────── */
 
-export function PageHeader({
-  title,
-  description,
-  children,
-  className,
-}: {
-  title: string
-  description?: string
-  /** Optional actions rendered on the right of the header. */
-  children?: ReactNode
-  className?: string
-}) {
+export function PageHeader({ title, description, children, className }: { title: string; description?: string; children?: ReactNode; className?: string }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-5", className)}>
-      <div className="min-w-0">
-        <h2 className="font-display text-[28px] font-bold leading-none tracking-tight sm:text-[32px]">{title}</h2>
-        {description && (
-          <p className="mt-2 max-w-[52ch] text-[13px] leading-relaxed text-muted-foreground">{description}</p>
-        )}
+    <div className={cn("border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow p-4 sm:p-5 dark:border-[#F6F2E8]", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 shrink-0 bg-danger border border-[#0A0A0A]" aria-hidden="true" />
+            <span className="mono-label">[ {title.toUpperCase()} ]</span>
+          </div>
+          <h2 className="font-display mt-1 text-[26px] sm:text-[30px]">{title}</h2>
+          {description && <p className="mt-1.5 max-w-[52ch] text-sm leading-relaxed text-muted-foreground">{description}</p>}
+        </div>
+        {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
       </div>
-      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </div>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * Panel
- *
- * Consistent content container used for cards/sections across pages
- * (dashboard summaries, query charts, graph visualizations). Provides
- * the same border + surface + shadow treatment everywhere.
- *
- *   <Panel title="Requests over time" description="Hover for details">
- *     {children}
- *   </Panel>
- * ════════════════════════════════════════════════════════════════ */
+/* ── Panel — brutal slab with mono header + thick rule ──────── */
 
 export function Panel({
-  title,
-  description,
-  icon: Icon,
-  className,
-  children,
-  action,
+  title, description, icon: Icon, className, children, action,
 }: {
-  title?: string
-  description?: string
-  /** Optional leading icon next to the title. */
-  icon?: LucideIcon
-  className?: string
-  children: ReactNode
-  /** Optional element rendered on the right of the header row. */
-  action?: ReactNode
+  title?: string; description?: string; icon?: LucideIcon; className?: string; children: ReactNode; action?: ReactNode
 }) {
   return (
-    <div
-      className={cn(
-        "spotlight-card rounded-xl border border-border/50 bg-card/70 p-4 shadow-tinted backdrop-blur-[2px] sm:p-6",
-        className,
-      )}
-    >
+    <div className={cn("brutal-card overflow-hidden", className)}>
       {(title || action) && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border/40 pb-3">
-          {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
-          {title && <h3 className="text-sm font-semibold tracking-tight">{title}</h3>}
-          {description && (
-            <span className="ml-auto text-xs text-muted-foreground">{description}</span>
-          )}
+        <div className="flex flex-wrap items-center gap-2 border-b-[2.5px] border-border bg-muted/40 px-4 py-3">
+          {Icon && <Icon className="h-4 w-4" aria-hidden="true" />}
+          {title && <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">{title}</h3>}
+          {description && <span className="ml-auto font-mono text-[11px] text-muted-foreground">{description}</span>}
           {action && <div className="ml-auto">{action}</div>}
         </div>
       )}
-      {children}
+      <div className="p-4 sm:p-5">{children}</div>
     </div>
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * RankedTable — ranked list with inline bars
- *
- * Compact table (rank, label + proportional bar, count) used by the
- * Query and Traffic pages for "Top URLs" / "Top client IPs".
- *
- *   <RankedTable rows={[{ label: "example.com", count: 42 }]} />
- * ════════════════════════════════════════════════════════════════ */
+/* ── RankedTable — brutal grid, mono, hazard bar on top row ── */
 
-export function RankedTable({
-  rows,
-  className,
-  onRowClick,
-}: {
-  rows: { label: string; count: number }[]
-  className?: string
-  /** Optional row-click handler (e.g. drill into a client). Adds a11y keyboard support. */
-  onRowClick?: (label: string) => void
-}) {
+export function RankedTable({ rows, className, onRowClick }: { rows: { label: string; count: number }[]; className?: string; onRowClick?: (label: string) => void }) {
   const max = Math.max(1, ...rows.map((r) => r.count))
-  if (rows.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">No data in window</p>
-    )
-  }
+  if (rows.length === 0) return <p className="py-8 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">NO DATA IN WINDOW</p>
   return (
-    <div className={cn("overflow-hidden rounded-md border border-border", className)}>
+    <div className={cn("overflow-hidden border-[2.5px] border-border bg-card", className)}>
       <table className="w-full text-xs">
         <thead>
-          <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
-            <th className="w-9 px-3 py-2 font-medium">#</th>
-            <th className="px-3 py-2 font-medium">Label</th>
-            <th className="w-20 px-3 py-2 text-right font-medium">Count</th>
+          <tr className="border-b-[2.5px] border-border bg-[#0A0A0A] text-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
+            <th className="w-9 px-3 py-2 font-mono text-[11px] font-extrabold uppercase tracking-widest">#</th>
+            <th className="px-3 py-2 font-mono text-[11px] font-extrabold uppercase tracking-widest">Label</th>
+            <th className="w-20 px-3 py-2 text-right font-mono text-[11px] font-extrabold uppercase tracking-widest">Count</th>
           </tr>
         </thead>
         <Stagger as="tbody" className="divide-y divide-border">
@@ -1031,50 +640,23 @@ export function RankedTable({
             <StaggerItem
               as="tr"
               key={r.label}
-              className={cn(
-                "transition-colors",
-                onRowClick ? "cursor-pointer hover:bg-muted/40" : "hover:bg-muted/30",
-              )}
+              className={cn("transition-colors", onRowClick ? "cursor-pointer hover:bg-secondary/30" : "hover:bg-muted/40")}
               title={`${r.label} — ${r.count.toLocaleString()}`}
               onClick={onRowClick ? () => onRowClick(r.label) : undefined}
-              onKeyDown={
-                onRowClick
-                  ? (e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault()
-                        onRowClick(r.label)
-                      }
-                    }
-                  : undefined
-              }
+              onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(r.label) } } : undefined}
               tabIndex={onRowClick ? 0 : undefined}
               role={onRowClick ? "button" : undefined}
             >
-              <td
-                className={cn(
-                  "px-3 py-2 tabular-nums",
-                  i < 3 ? "font-semibold text-foreground" : "text-muted-foreground",
-                )}
-              >
-                {i + 1}
-              </td>
+              <td className={cn("px-3 py-2 font-mono font-extrabold", i < 3 ? "text-foreground" : "text-muted-foreground")}>{String(i + 1).padStart(2, "0")}</td>
               <td className="px-3 py-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="block max-w-[240px] truncate font-mono">{r.label}</span>
-                  <div
-                    className="h-1.5 min-w-[32px] flex-1 overflow-hidden rounded-full bg-muted"
-                    aria-hidden="true"
-                  >
-                    <div
-                      className="h-full rounded-full bg-primary/70 transition-[width] duration-500"
-                      style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }}
-                    />
+                  <span className="block max-w-[240px] truncate font-mono text-xs font-bold">{r.label}</span>
+                  <div className="h-2 min-w-[32px] flex-1 overflow-hidden border border-border bg-muted" aria-hidden="true">
+                    <div className="h-full bg-[#0A0A0A] dark:bg-[#FFD60A]" style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }} />
                   </div>
                 </div>
               </td>
-              <td className="px-3 py-2 text-right font-medium tabular-nums">
-                {r.count.toLocaleString()}
-              </td>
+              <td className="px-3 py-2 text-right font-mono font-extrabold tabular-nums">{r.count.toLocaleString()}</td>
             </StaggerItem>
           ))}
         </Stagger>
@@ -1083,295 +665,97 @@ export function RankedTable({
   )
 }
 
-/* ════════════════════════════════════════════════════════════════
- * StatCard
- *
- *   <StatCard
- *     icon={Ban}
- *     label="Block Patterns"
- *     value={counts.block}
- *     tone="danger"
- *     hint="URL patterns to flag"
- *   />
- * ════════════════════════════════════════════════════════════════ */
+/* ── StatCard — brutal slab, top hazard/ink bar, mono label ─── */
 
 export type StatTone = "default" | "success" | "warning" | "danger" | "info"
 
-const statToneStyles: Record<StatTone, { iconWrap: string; icon: string }> = {
-  default: {
-    iconWrap: "bg-secondary text-muted-foreground",
-    icon: "text-muted-foreground",
-  },
-  success: {
-    iconWrap: "bg-success/15",
-    icon: "text-success",
-  },
-  warning: {
-    iconWrap: "bg-warning/15",
-    icon: "text-warning",
-  },
-  danger: {
-    iconWrap: "bg-danger/15",
-    icon: "text-danger",
-  },
-  info: {
-    iconWrap: "bg-info/15",
-    icon: "text-info",
-  },
-}
-
-const statToneAccent: Record<StatTone, string> = {
-  default: "",
-  success: "from-success/60 to-success/0",
-  warning: "from-warning/60 to-warning/0",
-  danger: "from-danger/60 to-danger/0",
-  info: "from-info/60 to-info/0",
+const statToneBar: Record<StatTone, string> = {
+  default: "bg-[#0A0A0A] dark:bg-[#F6F2E8]",
+  success: "bg-[#0A0A0A] dark:bg-[#F6F2E8]",
+  warning: "bg-secondary",
+  danger: "bg-danger",
+  info: "bg-info",
 }
 
 export function StatCard({
-  icon: Icon,
-  label,
-  value,
-  tone = "default",
-  hint,
-  className,
-  action,
+  icon: Icon, label, value, tone = "default", hint, className, action,
 }: {
-  icon: LucideIcon
-  label: string
-  value: ReactNode
-  tone?: StatTone
-  hint?: string
-  className?: string
-  action?: ReactNode
+  icon: LucideIcon; label: string; value: ReactNode; tone?: StatTone; hint?: string; className?: string; action?: ReactNode
 }) {
-  const styles = statToneStyles[tone]
-  const accent = statToneAccent[tone]
-  // Numeric values count up (expo-out, reduced-motion-safe via MotionGate);
-  // strings like "—" / "Online" render as-is.
   const animated = typeof value === "number"
   return (
-    <Card className={cn("relative overflow-hidden", className)}>
-      {/* Subtle top-edge accent line */}
-      {accent && (
-        <div
-          className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r",
-            accent,
-          )}
-          aria-hidden="true"
-        />
-      )}
-      <CardContent className="p-5">
+    <div className={cn("brutal-card overflow-hidden", className)}>
+      <div className={cn("h-1.5 w-full border-b-[2.5px] border-border", statToneBar[tone])} aria-hidden="true" />
+      <div className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-muted-foreground">{label}</p>
-            <div className="mt-2 text-3xl font-bold tabular-nums tracking-tight">
-              {animated ? <AnimatedNumber value={value} /> : value}
-            </div>
-            {hint && <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>}
+            <p className="mono-label truncate">[ {label.toUpperCase()} ]</p>
+            <div className="mt-2 font-display text-[30px] leading-none">{animated ? <AnimatedNumber value={value} /> : value}</div>
+            {hint && <p className="mt-1 font-mono text-[11px] text-muted-foreground">{hint}</p>}
           </div>
-          <div
-            className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
-              styles.iconWrap,
-            )}
-          >
-            <Icon className={cn("h-5 w-5", styles.icon)} aria-hidden="true" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">
+            <Icon className="h-5 w-5" aria-hidden="true" />
           </div>
         </div>
-        {action && <div className="mt-4">{action}</div>}
-      </CardContent>
-    </Card>
-  )
-}
-
-/* ════════════════════════════════════════════════════════════════
- * Pagination
- *
- * Full total known:
- *   <Pagination page={0} pageSize={50} total={320} onPageChange={setPage} />
- *
- * Unknown total (graceful degradation — hides page numbers, shows
- * prev/next + range only):
- *   <Pagination page={0} pageSize={50} onPageChange={setPage} hasNext={hasMore} />
- *
- * `page` and `pageSize` are 0-indexed page index and items-per-page.
- * `total` (optional) enables numbered page buttons + jump controls.
- * `hasNext` (optional) enables Next when total is unknown.
- * ════════════════════════════════════════════════════════════════ */
-
-export function Pagination({
-  page,
-  pageSize,
-  total,
-  onPageChange,
-  hasNext,
-  className,
-  onPageSizeChange,
-  pageSizeOptions,
-}: {
-  /** 0-indexed current page */
-  page: number
-  /** items per page */
-  pageSize: number
-  /** optional total item count; when omitted, numbered buttons are hidden */
-  total?: number
-  onPageChange: (page: number) => void
-  /** when total is unknown, Next is enabled iff hasNext is true */
-  hasNext?: boolean
-  className?: string
-  /** When provided, a page-size selector is rendered next to the summary. */
-  onPageSizeChange?: (size: number) => void
-  /** Dropdown options for the page-size selector (default: [25, 50, 100, 200]). */
-  pageSizeOptions?: number[]
-}) {
-  const hasTotal = typeof total === "number"
-  const totalPages = hasTotal ? Math.max(1, Math.ceil(total! / pageSize)) : 0
-  const rangeStart = page * pageSize + 1
-  const rangeEnd = page * pageSize + pageSize // caller may cap to actual count
-
-  const pageButtons = computePageList(page, totalPages, 5)
-
-  const canPrev = page > 0
-  const canNext = hasTotal ? page < totalPages - 1 : !!hasNext
-
-  const go = (p: number) => {
-    if (p < 0) return
-    if (hasTotal && p > totalPages - 1) return
-    onPageChange(p)
-  }
-
-  return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground",
-        className,
-      )}
-      role="navigation"
-      aria-label="Pagination"
-    >
-      <p>
-        {hasTotal ? (
-          <>
-            Showing <span className="font-medium text-foreground">{rangeStart}</span>–
-            <span className="font-medium text-foreground">
-              {Math.min(rangeEnd, total!)}
-            </span>{" "}
-            of <span className="font-medium text-foreground">{total}</span>
-          </>
-        ) : (
-          <>
-            Showing <span className="font-medium text-foreground">{rangeStart}</span>–
-            <span className="font-medium text-foreground">{rangeEnd}</span>
-          </>
-        )}
-        {onPageSizeChange && (
-          <span className="ml-3">
-            <select
-              className="h-7 rounded border border-border bg-background px-1.5 text-xs text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={pageSize}
-              onChange={(e) => onPageSizeChange(Number(e.target.value))}
-              aria-label="Items per page"
-            >
-              {(pageSizeOptions ?? [25, 50, 100, 200]).map((n) => (
-                <option key={n} value={n}>
-                  {n} / page
-                </option>
-              ))}
-            </select>
-          </span>
-        )}
-      </p>
-
-      <div className="flex items-center gap-1">
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canPrev}
-          onClick={() => go(0)}
-          aria-label="First page"
-        >
-          <ChevronsLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canPrev}
-          onClick={() => go(page - 1)}
-          aria-label="Previous page"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-
-        {hasTotal &&
-          pageButtons.map((p, i) =>
-            p === "…" ? (
-              <span key={`ellipsis-${i}`} className="px-2 text-muted-foreground" aria-hidden>
-                …
-              </span>
-            ) : (
-              <Button
-                key={p}
-                variant={p === page ? "default" : "outline"}
-                size="icon"
-                className="h-8 w-8 text-xs"
-                onClick={() => go(p)}
-                aria-label={`Page ${p + 1}`}
-                aria-current={p === page ? "page" : undefined}
-              >
-                {p + 1}
-              </Button>
-            ),
-          )}
-
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canNext}
-          onClick={() => go(page + 1)}
-          aria-label="Next page"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canNext}
-          onClick={() => go(totalPages - 1)}
-          aria-label="Last page"
-        >
-          <ChevronsRight className="h-4 w-4" />
-        </Button>
+        {action && <div className="mt-3 border-t-[2px] border-border pt-3">{action}</div>}
       </div>
     </div>
   )
 }
 
-function computePageList(
-  current: number,
-  total: number,
-  window: number,
-): (number | "…")[] {
+/* ── Pagination — brutal prev/next + page stamps ────────────── */
+
+export function Pagination({
+  page, pageSize, total, onPageChange, hasNext, className, onPageSizeChange, pageSizeOptions,
+}: {
+  page: number; pageSize: number; total?: number; onPageChange: (page: number) => void; hasNext?: boolean; className?: string; onPageSizeChange?: (size: number) => void; pageSizeOptions?: number[]
+}) {
+  const hasTotal = typeof total === "number"
+  const totalPages = hasTotal ? Math.max(1, Math.ceil(total! / pageSize)) : 0
+  const rangeStart = page * pageSize + 1
+  const rangeEnd = page * pageSize + pageSize
+  const pageButtons = computePageList(page, totalPages, 5)
+  const canPrev = page > 0
+  const canNext = hasTotal ? page < totalPages - 1 : !!hasNext
+  const go = (p: number) => { if (p < 0) return; if (hasTotal && p > totalPages - 1) return; onPageChange(p) }
+  return (
+    <div className={cn("flex flex-wrap items-center justify-between gap-3 border-t-[2.5px] border-border bg-card px-3 py-3", className)} role="navigation" aria-label="Pagination">
+      <p className="font-mono text-xs font-bold uppercase tracking-widest">
+        {hasTotal ? (
+          <>SHOWING <span className="bg-[#0A0A0A] px-1.5 py-0.5 text-white dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">{rangeStart}</span>–<span className="bg-[#0A0A0A] px-1.5 py-0.5 text-white dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">{Math.min(rangeEnd, total!)}</span> OF <span className="bg-secondary px-1.5 py-0.5 text-[#0A0A0A] border border-[#0A0A0A]">{total}</span></>
+        ) : (
+          <>SHOWING <span className="bg-[#0A0A0A] px-1.5 py-0.5 text-white dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">{rangeStart}</span>–<span className="bg-[#0A0A0A] px-1.5 py-0.5 text-white dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">{rangeEnd}</span></>
+        )}
+        {onPageSizeChange && (
+          <span className="ml-3">
+            <select className="h-7 border-[2px] border-border bg-card px-1.5 font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={pageSize} onChange={(e) => onPageSizeChange(Number(e.target.value))} aria-label="Items per page">
+              {(pageSizeOptions ?? [25, 50, 100, 200]).map((n) => <option key={n} value={n}>{n} / PAGE</option>)}
+            </select>
+          </span>
+        )}
+      </p>
+      <div className="flex items-center gap-1">
+        <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canPrev} onClick={() => go(0)} aria-label="First page"><ChevronsLeft className="h-4 w-4" /></Button>
+        <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canPrev} onClick={() => go(page - 1)} aria-label="Previous page"><ChevronLeft className="h-4 w-4" /></Button>
+        {hasTotal && pageButtons.map((p, i) => p === "…" ? <span key={`ellipsis-${i}`} className="px-2 font-mono text-xs" aria-hidden>…</span> : (
+          <Button key={p} variant={p === page ? "default" : "outline"} size="icon" className="h-8 w-8 font-mono text-xs" onClick={() => go(p)} aria-label={`Page ${p + 1}`} aria-current={p === page ? "page" : undefined}>{p + 1}</Button>
+        ))}
+        <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canNext} onClick={() => go(page + 1)} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
+        <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canNext} onClick={() => go(totalPages - 1)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+      </div>
+    </div>
+  )
+}
+
+function computePageList(current: number, total: number, window: number): (number | "…")[] {
   if (total <= 1) return total === 1 ? [0] : []
   const pages: (number | "…")[] = []
   const half = Math.floor(window / 2)
   let start = Math.max(0, current - half)
   const end = Math.min(total - 1, start + window - 1)
   start = Math.max(0, end - window + 1)
-
-  if (start > 0) {
-    pages.push(0)
-    if (start > 1) pages.push("…")
-  }
+  if (start > 0) { pages.push(0); if (start > 1) pages.push("…") }
   for (let i = start; i <= end; i++) pages.push(i)
-  if (end < total - 1) {
-    if (end < total - 2) pages.push("…")
-    pages.push(total - 1)
-  }
+  if (end < total - 1) { if (end < total - 2) pages.push("…"); pages.push(total - 1) }
   return pages
 }

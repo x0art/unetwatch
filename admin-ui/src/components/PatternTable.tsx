@@ -63,7 +63,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     accessor: (p) => p.pattern,
     defaultSortDir: "asc",
     cell: (p) => (
-      <span className="block max-w-[260px] truncate font-mono text-sm" title={p.pattern}>
+      <span className="block max-w-[260px] truncate font-mono text-sm font-bold uppercase" title={p.pattern}>
         {p.pattern}
       </span>
     ),
@@ -330,7 +330,7 @@ export function PatternTable() {
 
       {/* ── Error banner ── */}
       {error && (
-        <div className="flex items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-danger px-4 py-3 font-mono text-xs font-bold uppercase tracking-widest text-white">
           <span className="flex-1">{error}</span>
           <Button variant="outline" size="sm" onClick={fetchPatterns}>
             Retry
@@ -441,7 +441,7 @@ export function PatternTable() {
           <div>
             <Label>Patterns (one per line)</Label>
             <textarea
-              className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-mono"
+              className="flex min-h-[120px] w-full border-[2.5px] border-[#0A0A0A] bg-card px-3 py-2 font-mono text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={bulkValue}
               onChange={(e) => setBulkValue(e.target.value)}
               placeholder={`*pattern1*\n*pattern2*`}

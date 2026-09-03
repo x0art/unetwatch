@@ -140,7 +140,7 @@ function Checkbox({
       onChange={onChange}
       disabled={disabled}
       aria-label={label}
-      className="h-4 w-4 cursor-pointer rounded border-border text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+      className="h-4 w-4 cursor-pointer border-[2px] border-[#0A0A0A] bg-card text-[#0A0A0A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#F6F2E8] dark:text-[#F6F2E8]"
     />
   )
 }
@@ -283,12 +283,12 @@ export function DataTable<T>({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.18, ease: EASE }}
-            className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm"
+            className="mb-3 flex flex-wrap items-center gap-2 border-[2.5px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-xs font-extrabold uppercase tracking-widest text-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]"
             role="toolbar"
             aria-label="Bulk actions"
           >
-            <span className="font-medium tabular-nums">{selected.size} selected</span>
-            <span className="h-4 w-px bg-border" aria-hidden="true" />
+            <span className="tabular-nums">[ {selected.size} SELECTED ]</span>
+            <span className="h-4 w-px bg-[#0A0A0A]/20" aria-hidden="true" />
             {bulkActions.map((action) => {
               const Icon = action.icon
               return (
@@ -318,10 +318,10 @@ export function DataTable<T>({
         )}
       </AnimatePresence>
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b border-border bg-muted/50">
+            <tr className="border-b-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#F6F2E8] dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
               {selectable && (
                 <th className="w-12 px-4 py-3 text-left font-medium text-muted-foreground">
                   <Checkbox

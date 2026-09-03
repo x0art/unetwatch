@@ -41,18 +41,18 @@ interface DashboardPageProps {
 
 const RUN_RANGE_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
   value: String(i + 1),
-  label: `${i + 1} minute${i + 1 > 1 ? "s" : ""}`,
+  label: `${i + 1} MIN`,
 }))
 
 function formatLastUpdated(timestamp: number) {
   const diff = Date.now() - timestamp
   const seconds = Math.floor(diff / 1000)
-  if (seconds < 10) return "just now"
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 10) return "JUST NOW"
+  if (seconds < 60) return `${seconds}S AGO`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return `${minutes}M AGO`
   const hours = Math.floor(minutes / 60)
-  return `${hours}h ago`
+  return `${hours}H AGO`
 }
 
 function formatDetected(ts: string) {
@@ -73,37 +73,31 @@ export function DashboardPage({
   onNavigate,
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
-  const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
-
-  // Ping animation only runs while the tab is visible (data-paused already
-  // freezes it in the background; this skips mounting the animation entirely).
+  const statusLabel = status ? (isOnline ? "ONLINE" : "IDLE") : "UNKNOWN"
   const pageVisible = usePageVisible()
 
-  // Setup guidance banner: shown until block patterns exist or ES is back.
   const banner =
     counts !== null && counts.block === 0
       ? {
           kind: "setup" as const,
-          title: "No block patterns yet",
+          title: "NO BLOCK PATTERNS YET",
           description:
-            "Add block patterns to start flagging matching traffic, then trigger a manual run to seed findings.",
-          actionLabel: "Add block patterns",
+            "ADD BLOCK PATTERNS TO START FLAGGING TRAFFIC, THEN TRIGGER A MANUAL RUN TO SEED FINDINGS.",
+          actionLabel: "ADD PATTERNS",
           action: () => onNavigate("patterns"),
         }
       : status !== null && !status.es_online
         ? {
             kind: "offline" as const,
-            title: "Elasticsearch unreachable",
+            title: "ELASTICSEARCH UNREACHABLE",
             description:
-              "uNetWatch can't reach Elasticsearch, so monitoring is paused. Check the cluster, then retry.",
-            actionLabel: "Retry",
+              "UNETWATCH CANT REACH ELASTICSEARCH. MONITORING IS PAUSED. CHECK THE CLUSTER, THEN RETRY.",
+            actionLabel: "RETRY",
             action: onRefresh,
           }
         : null
 
   const [runMinutes, setRunMinutes] = useState("1")
-
-  // ── Extra stats ────────────────────────────────────────────────
   const [blacklistCount, setBlacklistCount] = useState<number | null>(null)
   const [trackedCount, setTrackedCount] = useState<number | null>(null)
   const [recentFindings, setRecentFindings] = useState<Finding[]>([])
@@ -146,7 +140,6 @@ export function DashboardPage({
 
   useEffect(() => fetchRecent(), [fetchRecent])
 
-  // Live updates: refresh the stats AND recent findings on an interval.
   const refreshAll = useCallback(() => {
     onRefresh()
     fetchRecent()
@@ -154,64 +147,58 @@ export function DashboardPage({
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
 
   return (
-    <div className="space-y-8">
-      {/* ── Header — display type, mesh wash, tighter tracking ── */}
-      <div className="relative overflow-hidden rounded-2xl border border-border/50 bg-card/60 px-5 py-6 shadow-tinted sm:px-7 sm:py-7">
-        <div className="mesh-ambient" aria-hidden="true" />
-        <div className="relative flex flex-wrap items-start justify-between gap-4">
+    <div className="space-y-5">
+      {/* ── Header — brutal slab + hazard bar ── */}
+      <div className="brutal-card overflow-hidden">
+        <div className="hazard-bar" aria-hidden="true" />
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
           <div>
-            <h2 className="font-display text-[32px] font-bold leading-none tracking-tight sm:text-[38px]">
-              Dashboard
-            </h2>
-            <p className="mt-2 max-w-[52ch] text-[13px] leading-relaxed text-muted-foreground">
-              uNetWatch monitoring — live poll health, findings, and redirect watch.
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 bg-danger border border-[#0A0A0A] shrink-0" aria-hidden="true" />
+              <span className="mono-label">[ DASHBOARD // UNETWATCH ]</span>
+            </div>
+            <h2 className="font-display mt-1 text-[30px] sm:text-[36px]">DASHBOARD</h2>
+            <p className="mt-1 max-w-[52ch] font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              LIVE POLL HEALTH — FINDINGS — REDIRECT WATCH
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/60 px-2.5 py-1 text-xs font-medium backdrop-blur">
-              <span className="relative flex h-2 w-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 border-[2.5px] border-[#0A0A0A] bg-card px-3 py-1.5 font-mono text-xs font-extrabold uppercase tracking-widest brutal-shadow-sm dark:border-[#F6F2E8]">
+              <span className="relative flex h-2.5 w-2.5 border border-[#0A0A0A] dark:border-[#F6F2E8]">
                 {pageVisible && isOnline && (
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success" />
+                  <span className="absolute inset-0 animate-ping bg-[#0A0A0A] dark:bg-[#F6F2E8]" />
                 )}
-                <span
-                  className={`relative inline-flex h-2 w-2 rounded-full ${
-                    isOnline ? "bg-success" : "bg-warning"
-                  }`}
-                />
+                <span className={`absolute inset-0 ${isOnline ? "bg-[#0A0A0A] dark:bg-[#FFD60A]" : "bg-danger"}`} />
               </span>
               {statusLabel}
             </span>
-            <span className="text-xs tabular-nums">Updated {formatLastUpdated(lastUpdated)}</span>
+            <span className="border-[2px] border-border bg-muted px-2 py-1 font-mono text-xs font-bold tabular-nums">{formatLastUpdated(lastUpdated)}</span>
             <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
             <Button variant="outline" size="sm" onClick={onRefresh}>
               <RefreshCcw className="h-4 w-4" />
-              Refresh
+              REFRESH
             </Button>
           </div>
         </div>
       </div>
 
-      {/* ── Setup / status banner ── */}
+      {/* ── Banner — stamp style ── */}
       {banner && (
-        <div className="flex flex-wrap items-center gap-4 rounded-lg border border-info/30 bg-info/10 p-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info">
-            {banner.kind === "setup" ? (
-              <ShieldAlert className="h-5 w-5" aria-hidden="true" />
-            ) : (
-              <RefreshCcw className="h-5 w-5" aria-hidden="true" />
-            )}
+        <div className="flex flex-wrap items-center gap-4 border-[2.5px] border-[#0A0A0A] bg-secondary p-4 brutal-shadow-sm dark:border-[#F6F2E8]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#FFD60A]">
+            {banner.kind === "setup" ? <ShieldAlert className="h-5 w-5" aria-hidden="true" /> : <RefreshCcw className="h-5 w-5" aria-hidden="true" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold">{banner.title}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{banner.description}</p>
+            <p className="font-mono text-xs font-extrabold uppercase tracking-widest">{banner.title}</p>
+            <p className="mt-0.5 font-mono text-xs text-[#0A0A0A]/70">{banner.description}</p>
           </div>
-          <Button size="sm" variant="outline" onClick={banner.action}>
+          <Button size="sm" variant="outline" onClick={banner.action} className="bg-card">
             {banner.actionLabel}
           </Button>
         </div>
       )}
 
-      {/* ── Primary stats — bento: featured findings, offset for depth ── */}
+      {/* ── Primary stats — bento with hard slabs ── */}
       <div className="grid gap-3 lg:grid-cols-12">
         <div className="lg:col-span-3">
           <StatCard
@@ -219,219 +206,161 @@ export function DashboardPage({
             label="Next Poll"
             value={<CountdownRing remaining={remaining} total={intervalSec} />}
             tone="default"
-            hint="Until next ES query"
+            hint="UNTIL NEXT ES QUERY"
           />
         </div>
-        <div className="lg:col-span-5 lg:-mt-1">
+        <div className="lg:col-span-5">
           <StatCard
             icon={SearchX}
             label="Findings"
             value={status ? status.findings_count.toLocaleString() : "—"}
             tone="info"
-            hint="Persisted by ES poll"
-            className="lg:py-1"
+            hint="PERSISTED BY ES POLL"
             action={
-              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("findings")}>
-                View all <ArrowRight className="h-3 w-3" />
+              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("findings")}>
+                VIEW ALL <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
         </div>
-        <div className="lg:col-span-2 lg:mt-1">
+        <div className="lg:col-span-2">
           <StatCard
             icon={ShieldAlert}
             label="Blacklist"
             value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
             tone="danger"
-            hint="Hosts & IPs blocked"
+            hint="HOSTS & IPS BLOCKED"
             action={
-              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("blacklist")}>
-                Manage <ArrowRight className="h-3 w-3" />
+              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("blacklist")}>
+                MANAGE <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
         </div>
-        <div className="lg:col-span-2 lg:mt-1">
+        <div className="lg:col-span-2">
           <StatCard
             icon={Globe}
             label="Tracked URLs"
             value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
             tone="warning"
-            hint="Monitored for redirects"
+            hint="MONITORED FOR REDIRECTS"
             action={
-              <Button variant="ghost" size="sm" className="mt-1 h-7 text-xs" onClick={() => onNavigate("redirects")}>
-                View all <ArrowRight className="h-3 w-3" />
+              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("redirects")}>
+                VIEW ALL <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
         </div>
       </div>
 
-      {/* ── Secondary stats — 4-up but with staggered offset to break rigid grid ── */}
+      {/* ── Secondary stats ── */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          icon={Ban}
-          label="Block Patterns"
-          value={counts?.block ?? "—"}
-          tone="danger"
-          hint="URL patterns to flag"
-        />
-        <div className="lg:translate-y-1">
-          <StatCard
-            icon={CheckCircle2}
-            label="Whitelist Patterns"
-            value={counts?.whitelist ?? "—"}
-            tone="success"
-            hint="URL patterns to allow"
-          />
-        </div>
-        <StatCard
-          icon={Zap}
-          label="ES Status"
-          value={isOnline ? "Online" : "Offline"}
-          tone={isOnline ? "success" : "danger"}
-          hint="Elasticsearch connectivity"
-        />
-        <div className="lg:translate-y-1">
-          <StatCard
-            icon={History}
-            label="Poll Interval"
-            value={status ? `${status.poll_interval_minutes}m` : "—"}
-            tone="default"
-            hint="Automatic check frequency"
-          />
-        </div>
+        <StatCard icon={Ban} label="Block Patterns" value={counts?.block ?? "—"} tone="danger" hint="URL PATTERNS TO FLAG" />
+        <StatCard icon={CheckCircle2} label="Whitelist" value={counts?.whitelist ?? "—"} tone="default" hint="PATTERNS TO ALLOW" />
+        <StatCard icon={Zap} label="ES Status" value={isOnline ? "ONLINE" : "OFFLINE"} tone={isOnline ? "default" : "danger"} hint="ES CONNECTIVITY" />
+        <StatCard icon={History} label="Poll Interval" value={status ? `${status.poll_interval_minutes}M` : "—"} tone="default" hint="AUTO CHECK FREQUENCY" />
       </div>
 
-      {/* ── Manual run + Recent findings side by side ── */}
+      {/* ── Manual run + Recent findings ── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Manual run */}
         <Panel>
           <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-info/15 text-info">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-info text-white brutal-shadow-sm">
                 <Play className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-sm font-semibold">Manual Run</p>
-                <p className="text-xs text-muted-foreground">Trigger a one-shot ES poll</p>
+                <p className="font-mono text-xs font-extrabold uppercase tracking-widest">MANUAL RUN</p>
+                <p className="font-mono text-[11px] text-muted-foreground">ONE-SHOT ES POLL</p>
               </div>
             </div>
-            <Select
-              value={runMinutes}
-              onChange={setRunMinutes}
-              options={RUN_RANGE_OPTIONS}
-              aria-label="Log range for manual run"
-            />
-            <Button
-              onClick={() => onManualRun(Number(runMinutes))}
-              disabled={loadingRun}
-              className="w-full"
-            >
-              {loadingRun ? "Running…" : "Run now"}
+            <Select value={runMinutes} onChange={setRunMinutes} options={RUN_RANGE_OPTIONS} aria-label="Log range for manual run" />
+            <Button onClick={() => onManualRun(Number(runMinutes))} disabled={loadingRun} className="w-full">
+              {loadingRun ? "RUNNING..." : "RUN NOW"}
             </Button>
           </div>
         </Panel>
 
-        {/* Recent findings */}
-        <Panel
-          className="lg:col-span-2"
-          title="Recent Findings"
-          icon={SearchX}
-          action={
-            <Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>
-              View all <ArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          }
-        >
+        <Panel className="lg:col-span-2" title="RECENT FINDINGS" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>VIEW ALL <ArrowRight className="h-3.5 w-3.5" /></Button>}>
           <div className="space-y-2">
             {recentLoading ? (
-              <Skeleton className="h-32 w-full rounded-md" />
+              <Skeleton className="h-32 w-full" />
             ) : recentFindings.length > 0 ? (
-              <div className="overflow-hidden rounded-md border border-border">
+              <div className="overflow-hidden border-[2.5px] border-[#0A0A0A] bg-card dark:border-[#F6F2E8]">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">Client IP</th>
-                      <th className="px-3 py-2 font-medium">Base URL</th>
-                      <th className="px-3 py-2 font-medium">Detected</th>
+                    <tr className="border-b-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
+                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">CLIENT IP</th>
+                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">BASE URL</th>
+                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">DETECTED</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {recentFindings.map((f) => (
-                      <tr
-                        key={f.id}
-                        className="cursor-pointer hover:bg-muted/40"
-                        onClick={() => onNavigate("findings", f.base_url)}
-                      >
-                        <td className="px-3 py-2 font-mono">{f.client_ip}</td>
-                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground">
-                          {f.base_url}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                          {formatDetected(f.log_timestamp)}
-                        </td>
+                      <tr key={f.id} className="cursor-pointer hover:bg-secondary/30" onClick={() => onNavigate("findings", f.base_url)}>
+                        <td className="px-3 py-2 font-mono font-bold">{f.client_ip}</td>
+                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground">{f.base_url}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <p className="py-6 text-center text-xs text-muted-foreground">
-                No findings yet — they appear after the ES poll detects matches.
+              <p className="py-6 text-center font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                NO FINDINGS YET — THEY APPEAR AFTER THE ES POLL DETECTS MATCHES.
               </p>
             )}
           </div>
         </Panel>
       </div>
 
-      {/* ── Quick links — asymmetric: featured Query + stacked pair — breaks 3-equal cliche ── */}
+      {/* ── Quick links — brutal slabs ── */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
         <button
           type="button"
           onClick={() => onNavigate("query")}
-          className="spotlight-card group relative flex items-center gap-4 overflow-hidden rounded-xl border border-border/60 bg-card p-5 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-info/35 hover:shadow-tinted lg:col-span-3 lg:p-6"
+          className="group relative flex items-center gap-4 border-[2.5px] border-[#0A0A0A] bg-card p-5 text-left brutal-shadow brutal-press dark:border-[#F6F2E8] lg:col-span-3 lg:p-6"
         >
-          <div className="pointer-events-none absolute -right-8 -top-8 h-32 w-32 rounded-full bg-info/10 blur-2xl" aria-hidden="true" />
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-info/12 text-info ring-1 ring-info/15 transition-colors duration-200 group-hover:bg-info/20">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-info text-white">
             <FileSearch className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-display text-[15px] font-semibold tracking-tight">Query Console</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Live Elasticsearch queries & access-flow sankey</p>
+            <p className="font-display text-sm">QUERY CONSOLE</p>
+            <p className="mt-0.5 font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">LIVE ES QUERIES & ACCESS-FLOW</p>
           </div>
-          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-info" />
+          <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
         </button>
 
         <div className="grid grid-cols-1 gap-3 lg:col-span-2">
           <button
             type="button"
             onClick={() => onNavigate("graph")}
-            className="spotlight-card group flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-warning/30 hover:shadow-tinted"
+            className="group flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-card p-4 text-left brutal-shadow-sm brutal-press dark:border-[#F6F2E8]"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-warning/12 text-warning ring-1 ring-warning/15 transition-colors duration-200 group-hover:bg-warning/20">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-secondary text-[#0A0A0A]">
               <Link2 className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold tracking-tight">Traffic Flow</p>
-              <p className="text-xs text-muted-foreground">Client → server → URL graph</p>
+              <p className="font-display text-xs">TRAFFIC FLOW</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">CLIENT → SERVER → URL</p>
             </div>
-            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-warning" />
+            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>
 
           <button
             type="button"
             onClick={() => onNavigate("patterns")}
-            className="spotlight-card group flex items-center gap-3 rounded-xl border border-border/60 bg-card p-4 text-left shadow-tinted transition-all duration-200 hover:-translate-y-0.5 hover:border-success/30 hover:shadow-tinted"
+            className="group flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-card p-4 text-left brutal-shadow-sm brutal-press dark:border-[#F6F2E8]"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-success/12 text-success ring-1 ring-success/15 transition-colors duration-200 group-hover:bg-success/20">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#FFD60A] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
               <Ban className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold tracking-tight">Patterns</p>
-              <p className="text-xs text-muted-foreground">Manage block & whitelist rules</p>
+              <p className="font-display text-xs">PATTERNS</p>
+              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">BLOCK & WHITELIST RULES</p>
             </div>
-            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground/40 transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-success" />
+            <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>
         </div>
       </div>

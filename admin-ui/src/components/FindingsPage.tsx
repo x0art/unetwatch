@@ -137,21 +137,21 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
         <CopyUrlButton value={f.base_url} label="Base URL" />
         {FINDINGS_UI.whitelistIndex[f.base_url] ? (
           <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success"
+            className="inline-flex shrink-0 items-center gap-1 border-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-[#FFD60A] dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]"
             title="Already in whitelist"
             aria-label="Already in whitelist"
           >
             <CheckCircle2 className="h-3 w-3" />
-            whitelist
+            WHITELIST
           </span>
         ) : FINDINGS_UI.blacklistIndex[f.base_url] ? (
           <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-danger"
+            className="inline-flex shrink-0 items-center gap-1 border-[2.5px] border-[#0A0A0A] bg-danger px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-white"
             title="In blacklist"
             aria-label="In blacklist"
           >
             <CheckCircle2 className="h-3 w-3" />
-            In blacklist
+            BLACKLIST
           </span>
         ) : null}
       </div>

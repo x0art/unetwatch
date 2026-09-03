@@ -96,12 +96,12 @@ function QuerySection({
   children: React.ReactNode
 }) {
   return (
-    <section className="border-t border-border pt-4">
+    <section className="border-t-[3px] border-[#0A0A0A] pt-4 dark:border-[#F6F2E8]">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
-        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+        <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">{title}</h3>
         {description && (
-          <span className="ml-auto text-xs text-muted-foreground">{description}</span>
+          <span className="ml-auto font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{description}</span>
         )}
       </div>
       {children}
@@ -405,7 +405,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 
       {hoverPoint && hover !== null && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs shadow-lg"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 border-[2.5px] border-[#0A0A0A] bg-popover px-2.5 py-1.5 font-mono text-xs font-bold brutal-shadow-sm dark:border-[#F6F2E8]"
           style={{ left: `${(chart.x(hover) / CHART_W) * 100}%`, top: 0 }}
         >
           <p className="font-semibold tabular-nums">{hoverPoint.count.toLocaleString()} req</p>
@@ -643,11 +643,11 @@ export function QueryPage() {
 
       {loading ? (
         <div className="space-y-3" aria-busy="true">
-          <Skeleton className="h-40 w-full rounded-lg" />
+          <Skeleton className="h-40 w-full" />
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Skeleton className="h-56 w-full rounded-lg" />
-            <Skeleton className="h-56 w-full rounded-lg" />
-            <Skeleton className="h-56 w-full rounded-lg" />
+            <Skeleton className="h-56 w-full" />
+            <Skeleton className="h-56 w-full" />
+            <Skeleton className="h-56 w-full" />
           </div>
         </div>
       ) : error ? (
@@ -686,16 +686,16 @@ export function QueryPage() {
 
           {/* Flow visualization — cv-auto skips the sankey panel's paint
               until it's scrolled into view. */}
-          <div className="cv-auto overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b-[2.5px] border-[#0A0A0A] bg-muted/40 px-4 py-3 dark:border-[#F6F2E8]">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Access flow</h3>
-                <p className="text-xs text-muted-foreground">
+                <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Access flow</h3>
+                <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                   Client IPs clustered by destination host
                 </p>
               </div>
               {flowSankey && flowSankey.links.length > 0 && (
-                <span className="text-xs text-muted-foreground">
+                <span className="border-[2px] border-[#0A0A0A] bg-secondary px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
                   {flowSankey.links.length.toLocaleString()} flow{flowSankey.links.length === 1 ? "" : "s"}
                 </span>
               )}
@@ -725,10 +725,10 @@ export function QueryPage() {
 
           {/* Documents table */}
           <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b-[2.5px] border-[#0A0A0A] pb-3 dark:border-[#F6F2E8]">
               <div>
-                <h3 className="text-sm font-semibold tracking-tight">Matching documents</h3>
-                <p className="text-xs text-muted-foreground">
+                <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Matching documents</h3>
+                <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
                   {actionFilteredItems.length.toLocaleString()}
                   {q ? ` of ${result.items.length.toLocaleString()}` : ""} matching doc
                   {actionFilteredItems.length === 1 ? "" : "s"} ·{" "}
@@ -755,7 +755,7 @@ export function QueryPage() {
             </div>
 
             {/* Badge legend */}
-            <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-[2.5px] border-[#0A0A0A] bg-muted px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground brutal-shadow-sm dark:border-[#F6F2E8]">
               <span className="inline-flex items-center gap-1.5">
                 <ListBadge tone="warning" icon={AlertTriangle}>
                   block
