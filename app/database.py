@@ -245,6 +245,15 @@ async def init_db():
         ")"
     )
 
+    # Generic key/value settings store for System Settings (kibana,
+    # field-map, alerts). Task 11+ — single TEXT JSON column.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    """)
+
     await db.commit()
     await db.close()
 

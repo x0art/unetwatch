@@ -1529,3 +1529,67 @@ export async function getAnalyticsTopDenied(params: {
   if (params.limit) qs.set("limit", String(params.limit))
   return request(`/analytics/top-denied?${qs}`)
 }
+
+/* ── System & Kibana Settings (Task 11 — spec §3.5) ─────────────────── */
+
+export interface KibanaSettings {
+  host_url: string
+  index_pattern: string
+  auth_type: "apiKey" | "basic" | "oauth2"
+  api_key: string | null
+}
+
+export interface FieldMap {
+  src_ip: string
+  dest_ip: string
+  url: string
+  domain: string
+  timestamp: string
+  action: string
+  duration: string
+}
+
+export interface AlertSettings {
+  deny_ratio_pct: number
+  window_minutes: number
+  webhook_type: "none" | "slack" | "msteams"
+  webhook_url: string
+}
+
+export type TestConnectionResult = {
+  ok: boolean
+  latencyMs: number
+  status?: number
+  error?: string
+}
+
+export async function getKibanaSettings(): Promise<KibanaSettings> {
+  return request("/settings/kibana")
+}
+
+export async function putKibanaSettings(data: KibanaSettings): Promise<KibanaSettings> {
+  return request("/settings/kibana", { method: "PUT", body: JSON.stringify(data) })
+}
+
+export async function testKibanaConnection(data: KibanaSettings): Promise<TestConnectionResult> {
+  return request("/settings/test-connection", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getFieldMap(): Promise<FieldMap> {
+  return request("/settings/field-map")
+}
+
+export async function putFieldMap(data: FieldMap): Promise<FieldMap> {
+  return request("/settings/field-map", { method: "PUT", body: JSON.stringify(data) })
+}
+
+export async function getAlerts(): Promise<AlertSettings> {
+  return request("/settings/alerts")
+}
+
+export async function putAlerts(data: AlertSettings): Promise<AlertSettings> {
+  return request("/settings/alerts", { method: "PUT", body: JSON.stringify(data) })
+}
