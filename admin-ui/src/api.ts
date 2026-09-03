@@ -561,6 +561,278 @@ export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
   return request(`/findings/graph?limit=${limit}`)
 }
 
+/* ── Live Sankey (Task 4 — 4-column Sources → Patterns → Domains → Destinations) ─ */
+
+// Local Sankey shapes — mirrors SankeyDiagram.tsx without creating a circular
+// import (api.ts must stay free of component imports).
+export interface LiveSankeyNode {
+  id: string
+  name: string
+  layer: number
+  detail?: string
+  action?: string
+  isHighRisk?: boolean
+}
+
+export interface LiveSankeyLink {
+  source: string
+  target: string
+  value: number
+  name?: string
+  action?: string
+  isHighRisk?: boolean
+}
+
+export interface LiveSankeyGraph {
+  nodes: LiveSankeyNode[]
+  links: LiveSankeyLink[]
+}
+
+function timeRangeToMinutesLive(tr: string): number {
+  switch (tr) {
+    case "1h":
+      return 60
+    case "7d":
+      return 10080
+    case "24h":
+      return 1440
+    default: {
+      const n = Number(tr)
+      if (Number.isFinite(n) && n > 0) return Math.min(n, 43200)
+      return 1440
+    }
+  }
+}
+
+/**
+ * Build a 4-layer Sankey graph for the Live Monitor.
+ *
+ * Implementation choice: reuses the existing `runQuery` (+ `getFindingsGraph`
+ * fallback) and reshapes on the client. No dedicated `GET /api/graph` endpoint
+ * is required — the comment documents the alternative the brief allowed.
+ *
+ * Layers (spec §4.1):
+ *  0 Sources — client IPs / hosts (blue #3B82F6)
+ *  1 Patterns — matched block patterns + "Unmatched" (slate #64748B)
+ *  2 Domains — base_url/domain, colored by action: ALLOW #10B981 / DENY #EF4444 / FLAG #F59E0B
+ *  3 Destinations — dest IPs, high-risk orange #F97316 vs standard purple #8B5CF6
+ *
+ * Ribbon thickness ∝ value (aggregated counts).
+ */
+export async function getLiveSankey(timeRange: string): Promise<LiveSankeyGraph> {
+  const minutes = timeRangeToMinutesLive(timeRange)
+  const clamped = Math.min(minutes, 1440)
+
+  // Prefer live ES data (rich: blocked_by, action, blacklisted).
+  try {
+    const res = await runQuery(clamped)
+    if (res.items.length > 0) {
+      return buildLiveSankeyFromQuery(res.items)
+    }
+    // If ES returned no items but flow exists (older backend), try shaping flow as 2-col fallback
+    if (res.flow.nodes.length > 0) {
+      // No pattern/action data — degrade to 2 layers mapped into 0 and 3
+      const nodes: LiveSankeyNode[] = res.flow.nodes.map((n) => ({
+        id: n.id,
+        name: n.label,
+        layer: n.kind === "ip" ? 0 : 3,
+        // Destinations without action stay standard purple; SankeyDiagram will use LAYER_COLORS[3]
+      }))
+      const links: LiveSankeyLink[] = res.flow.links.map((l) => ({
+        source: l.source,
+        target: l.target,
+        value: l.count,
+      }))
+      return { nodes, links }
+    }
+  } catch {
+    /* fall through to findings graph */
+  }
+
+  try {
+    const graph = await getFindingsGraph(30)
+    if (graph.flows.length > 0) {
+      return buildLiveSankeyFromFindings(graph)
+    }
+  } catch {
+    /* return empty */
+  }
+
+  return { nodes: [], links: [] }
+}
+
+function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
+  // Cap per-layer breadth so the diagram stays readable.
+  const MAX_SRC = 20
+  const MAX_PAT = 12
+  const MAX_DOM = 20
+  const MAX_DST = 20
+
+  // Frequency maps for capping
+  const srcCount = new Map<string, number>()
+  const patCount = new Map<string, number>()
+  const domCount = new Map<string, number>()
+  const dstCount = new Map<string, number>()
+  const domAction = new Map<string, string>()
+  const domActionCounts = new Map<string, Map<string, number>>()
+  const dstRisk = new Map<string, boolean>()
+
+  for (const it of items) {
+    const src = it.client_ip || "unknown"
+    srcCount.set(src, (srcCount.get(src) ?? 0) + 1)
+    const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
+    for (const p of pats) patCount.set(p, (patCount.get(p) ?? 0) + 1)
+    const dom = it.base_url || it.url || "unknown"
+    domCount.set(dom, (domCount.get(dom) ?? 0) + 1)
+    const act = it.action || "ALLOW"
+    if (!domActionCounts.has(dom)) domActionCounts.set(dom, new Map())
+    domActionCounts.get(dom)!.set(act, (domActionCounts.get(dom)!.get(act) ?? 0) + 1)
+    const dst = it.server_ip || "unknown"
+    dstCount.set(dst, (dstCount.get(dst) ?? 0) + 1)
+    const risky = it.action === "DENY" || it.blacklisted === true
+    if (risky) dstRisk.set(dst, true)
+    else if (!dstRisk.has(dst)) dstRisk.set(dst, false)
+  }
+
+  const topSrc = new Set(
+    [...srcCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_SRC).map(([k]) => k),
+  )
+  const topPat = new Set(
+    [...patCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_PAT).map(([k]) => k),
+  )
+  const topDom = new Set(
+    [...domCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DOM).map(([k]) => k),
+  )
+  const topDst = new Set(
+    [...dstCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DST).map(([k]) => k),
+  )
+
+  for (const [dom, counts] of domActionCounts) {
+    if (!topDom.has(dom)) continue
+    let best = "ALLOW"
+    let bestN = -1
+    for (const [act, n] of counts) {
+      if (n > bestN) { best = act; bestN = n }
+    }
+    domAction.set(dom, best)
+  }
+
+  const idSrc = (ip: string) => `src:${ip}`
+  const idPat = (p: string) => `pat:${p}`
+  const idDom = (d: string) => `dom:${d}`
+  const idDst = (ip: string) => `dst:${ip}`
+
+  const nodes: LiveSankeyNode[] = []
+  for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 0 })
+  for (const p of topPat) nodes.push({ id: idPat(p), name: p, layer: 1 })
+  for (const d of topDom) nodes.push({ id: idDom(d), name: d, layer: 2, action: domAction.get(d) ?? "ALLOW" })
+  for (const d of topDst) nodes.push({ id: idDst(d), name: d, layer: 3, isHighRisk: dstRisk.get(d) ?? false })
+
+  const linkKey = (a: string, b: string) => `${a}\0${b}`
+  const srcPat = new Map<string, number>()
+  const patDom = new Map<string, number>()
+  const domDst = new Map<string, number>()
+  const domDstMeta = new Map<string, { action: string; isHighRisk: boolean }>()
+
+  for (const it of items) {
+    const src = it.client_ip || "unknown"
+    if (!topSrc.has(src)) continue
+    const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
+    const dom = it.base_url || it.url || "unknown"
+    if (!topDom.has(dom)) continue
+    const dst = it.server_ip || "unknown"
+    if (!topDst.has(dst)) continue
+    const act = it.action || "ALLOW"
+    const risky = it.action === "DENY" || it.blacklisted === true
+    for (const pat of pats) {
+      if (!topPat.has(pat)) continue
+      const k1 = linkKey(idSrc(src), idPat(pat))
+      srcPat.set(k1, (srcPat.get(k1) ?? 0) + 1)
+      const k2 = linkKey(idPat(pat), idDom(dom))
+      patDom.set(k2, (patDom.get(k2) ?? 0) + 1)
+    }
+    const k3 = linkKey(idDom(dom), idDst(dst))
+    domDst.set(k3, (domDst.get(k3) ?? 0) + 1)
+    const prev = domDstMeta.get(k3)
+    if (!prev) domDstMeta.set(k3, { action: act, isHighRisk: risky })
+    else if (risky) prev.isHighRisk = true
+  }
+
+  const links: LiveSankeyLink[] = []
+  for (const [k, v] of srcPat) {
+    const [source, target] = k.split("\0")
+    links.push({ source, target, value: v })
+  }
+  for (const [k, v] of patDom) {
+    const [source, target] = k.split("\0")
+    links.push({ source, target, value: v })
+  }
+  for (const [k, v] of domDst) {
+    const [source, target] = k.split("\0")
+    const meta = domDstMeta.get(k)
+    links.push({ source, target, value: v, action: meta?.action, isHighRisk: meta?.isHighRisk })
+  }
+
+  return { nodes, links }
+}
+
+function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {
+  const MAX_SRC = 20
+  const MAX_PAT = 1 // findings have no pattern — single "Unmatched" bucket
+  const MAX_DOM = 20
+  const MAX_DST = 20
+
+  const srcCount = new Map<string, number>()
+  const domCount = new Map<string, number>()
+  const dstCount = new Map<string, number>()
+  for (const f of graph.flows) {
+    srcCount.set(f.client_ip, (srcCount.get(f.client_ip) ?? 0) + f.count)
+    domCount.set(f.base_url, (domCount.get(f.base_url) ?? 0) + f.count)
+    const dst = f.server_ip || f.base_url
+    dstCount.set(dst, (dstCount.get(dst) ?? 0) + f.count)
+  }
+  const topSrc = new Set([...srcCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_SRC).map(([k]) => k))
+  const topDom = new Set([...domCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_DOM).map(([k]) => k))
+  const topDst = new Set([...dstCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_DST).map(([k]) => k))
+
+  void MAX_PAT
+  const idSrc = (s: string) => `src:${s}`
+  const idPat = "pat:Unmatched"
+  const idDom = (d: string) => `dom:${d}`
+  const idDst = (d: string) => `dst:${d}`
+
+  const nodes: LiveSankeyNode[] = []
+  for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 0 })
+  nodes.push({ id: idPat, name: "Unmatched", layer: 1 })
+  for (const d of topDom) nodes.push({ id: idDom(d), name: d, layer: 2, action: "ALLOW" })
+  for (const d of topDst) nodes.push({ id: idDst(d), name: d, layer: 3, isHighRisk: false })
+
+  const srcPat = new Map<string, number>()
+  const patDom = new Map<string, number>()
+  const domDst = new Map<string, number>()
+  for (const f of graph.flows) {
+    if (!topSrc.has(f.client_ip) || !topDom.has(f.base_url)) continue
+    const dst = f.server_ip || f.base_url
+    if (!topDst.has(dst)) continue
+    const sId = idSrc(f.client_ip)
+    const dId = idDom(f.base_url)
+    const tId = idDst(dst)
+    const k1 = `${sId}\0${idPat}`
+    srcPat.set(k1, (srcPat.get(k1) ?? 0) + f.count)
+    const k2 = `${idPat}\0${dId}`
+    patDom.set(k2, (patDom.get(k2) ?? 0) + f.count)
+    const k3 = `${dId}\0${tId}`
+    domDst.set(k3, (domDst.get(k3) ?? 0) + f.count)
+  }
+
+  const links: LiveSankeyLink[] = []
+  for (const [k, v] of srcPat) { const [a, b] = k.split("\0"); links.push({ source: a, target: b, value: v }) }
+  for (const [k, v] of patDom) { const [a, b] = k.split("\0"); links.push({ source: a, target: b, value: v }) }
+  for (const [k, v] of domDst) { const [a, b] = k.split("\0"); links.push({ source: a, target: b, value: v }) }
+
+  return { nodes, links }
+}
+
 /* ── Per-client URL drill-down (Traffic page) ─────────────────── */
 
 export interface TopClient {

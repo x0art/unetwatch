@@ -5,7 +5,7 @@ import { Badge, Button, Dialog, PageHeader, Panel, Skeleton } from "./ui"
 import { MetricCards } from "./MetricCards"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import {
-  getFindingsGraph,
+  getLiveSankey,
   getLiveMetrics,
   runQuery,
   type LiveMetrics,
@@ -26,16 +26,24 @@ function timeRangeToMinutes(tr: string): number {
 }
 
 const STUB_NODES: SankeyNode[] = [
-  { id: "stub:ip:10.0.0.12", name: "10.0.0.12", layer: 0 },
-  { id: "stub:ip:10.0.0.44", name: "10.0.0.44", layer: 0 },
-  { id: "stub:base:example.com", name: "example.com", layer: 1 },
-  { id: "stub:base:api.example.com", name: "api.example.com", layer: 1 },
+  { id: "stub:src:10.0.0.12", name: "10.0.0.12", layer: 0 },
+  { id: "stub:src:10.0.0.44", name: "10.0.0.44", layer: 0 },
+  { id: "stub:pat:*.stream", name: "*.stream", layer: 1 },
+  { id: "stub:pat:Unmatched", name: "Unmatched", layer: 1 },
+  { id: "stub:dom:example.com", name: "example.com", layer: 2, action: "DENY" },
+  { id: "stub:dom:api.example.com", name: "api.example.com", layer: 2, action: "ALLOW" },
+  { id: "stub:dst:93.184.216.34", name: "93.184.216.34", layer: 3 },
+  { id: "stub:dst:10.0.0.1", name: "10.0.0.1", layer: 3, isHighRisk: true },
 ]
 
 const STUB_LINKS: SankeyLink[] = [
-  { source: "stub:ip:10.0.0.12", target: "stub:base:example.com", value: 42 },
-  { source: "stub:ip:10.0.0.44", target: "stub:base:example.com", value: 18 },
-  { source: "stub:ip:10.0.0.12", target: "stub:base:api.example.com", value: 9 },
+  { source: "stub:src:10.0.0.12", target: "stub:pat:*.stream", value: 42 },
+  { source: "stub:src:10.0.0.44", target: "stub:pat:Unmatched", value: 18 },
+  { source: "stub:pat:*.stream", target: "stub:dom:example.com", value: 42 },
+  { source: "stub:pat:Unmatched", target: "stub:dom:api.example.com", value: 18 },
+  { source: "stub:dom:example.com", target: "stub:dst:93.184.216.34", value: 30 },
+  { source: "stub:dom:example.com", target: "stub:dst:10.0.0.1", value: 12, isHighRisk: true },
+  { source: "stub:dom:api.example.com", target: "stub:dst:93.184.216.34", value: 18 },
 ]
 
 function SankeySection({
@@ -54,53 +62,16 @@ function SankeySection({
   const fetchFlow = useCallback(async () => {
     setLoading(true)
     try {
-      const minutes = timeRangeToMinutes(timeRange)
-      const q = filter.trim() || undefined
+      // Task 4: 4-column flow via getLiveSankey (Sources → Patterns → Domains → Destinations).
+      // Filter is intentionally NOT forwarded to the Sankey query — the global filter
+      // drives LogInspector; the Sankey always shows the full time window so its
+      // structure stays stable while the user refines the table.
       try {
-        const res = await runQuery(Math.min(minutes, 1440), q ? { q } : undefined)
-        if (res.flow && res.flow.links.length > 0) {
-          const sankeyNodes: SankeyNode[] = res.flow.nodes.map((n) => ({
-            id: n.id,
-            name: n.label,
-            layer: n.kind === "ip" ? 0 : 1,
-          }))
-          const sankeyLinks: SankeyLink[] = res.flow.links.map((l) => ({
-            source: l.source,
-            target: l.target,
-            value: l.count,
-          }))
-          setNodes(sankeyNodes)
-          setLinks(sankeyLinks)
+        const graph = await getLiveSankey(timeRange)
+        if (graph.nodes.length > 0 && graph.links.length > 0) {
+          setNodes(graph.nodes as unknown as SankeyNode[])
+          setLinks(graph.links as unknown as SankeyLink[])
           return
-        }
-      } catch {
-        /* fall through to findings graph */
-      }
-      try {
-        const graph = await getFindingsGraph(30)
-        if (graph.flows.length > 0) {
-          const byIp = new Map<string, SankeyNode>()
-          const byBase = new Map<string, SankeyNode>()
-          const sankeyLinks: SankeyLink[] = []
-          for (const f of graph.flows) {
-            if (!byIp.has(f.client_ip)) {
-              byIp.set(f.client_ip, { id: `ip:${f.client_ip}`, name: f.client_ip, layer: 0 })
-            }
-            if (!byBase.has(f.base_url)) {
-              byBase.set(f.base_url, { id: `base:${f.base_url}`, name: f.base_url, layer: 1 })
-            }
-            sankeyLinks.push({
-              source: `ip:${f.client_ip}`,
-              target: `base:${f.base_url}`,
-              value: f.count,
-            })
-          }
-          const sankeyNodes = [...byIp.values(), ...byBase.values()]
-          if (sankeyNodes.length > 0 && sankeyLinks.length > 0) {
-            setNodes(sankeyNodes)
-            setLinks(sankeyLinks)
-            return
-          }
         }
       } catch {
         /* keep stub */
@@ -108,7 +79,7 @@ function SankeySection({
     } finally {
       setLoading(false)
     }
-  }, [filter, timeRange])
+  }, [timeRange])
 
   useEffect(() => {
     fetchFlow()
@@ -132,13 +103,12 @@ function SankeySection({
           <SankeyDiagram
             nodes={nodes}
             links={links}
-            layerColors={{ 0: "var(--color-info)", 1: "var(--color-danger)" }}
-            ariaLabel="Live traffic flow — client IPs to destination hosts"
+            onNodeClick={onNodeClick}
+            ariaLabel="Live traffic flow — Sources → Patterns → Domains → Destinations"
           />
           <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-            Click a node to filter the Log Inspector below — wired via{" "}
-            <code className="rounded bg-muted px-1 py-0.5">setGlobalFilter</code>. Task 4 upgrades this to
-            a 4-column Sankey.
+            4-column flow — Sources → Patterns → Domains → Destinations. Click a node or ribbon to filter
+            the Log Inspector below via <code className="rounded bg-muted px-1 py-0.5">setGlobalFilter</code>.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {nodes.slice(0, 6).map((n) => (

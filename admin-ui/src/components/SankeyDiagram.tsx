@@ -16,10 +16,14 @@ echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 export interface SankeyNode {
   id: string
   name: string
-  /** Optional layer index (0,1,2…). Grouped left→right. */
+  /** Layer index 0=Sources, 1=Patterns, 2=Domains, 3=Destinations. */
   layer?: number
   /** Optional full detail shown in the tooltip (e.g. the full URL behind a host-only label). */
   detail?: string
+  /** Domain verdict — drives layer-2 color: ALLOW/DENY/FLAG. */
+  action?: string
+  /** Destinations layer — true paints high-risk orange. */
+  isHighRisk?: boolean
 }
 
 export interface SankeyLink {
@@ -28,6 +32,28 @@ export interface SankeyLink {
   value: number
   /** Optional edge label shown in the tooltip (e.g. "302 →"). */
   name?: string
+  /** Link-level action for domain coloring fallback. */
+  action?: string
+  /** Link-level high-risk flag for dest coloring fallback. */
+  isHighRisk?: boolean
+}
+
+/** Spec palette §4.1 + §6 — verbatim values. */
+export const LAYER_COLORS: Record<number, string> = {
+  0: "#3B82F6", // Sources — desaturated blue
+  1: "#64748B", // Patterns — neutral slate
+  2: "#10B981", // Domains — overridden per action: ALLOW #10B981, DENY #EF4444, FLAG #F59E0B
+  3: "#8B5CF6", // Destinations — standard purple; high-risk override #F97316
+}
+
+function domainColor(action?: string): string {
+  if (action === "DENY") return "#EF4444"
+  if (action === "FLAG") return "#F59E0B"
+  return "#10B981"
+}
+
+function destColor(isHighRisk?: boolean): string {
+  return isHighRisk ? "#F97316" : "#8B5CF6"
 }
 
 // Fallbacks used only when the live token can't be read or parsed (e.g. a
@@ -144,6 +170,8 @@ function sameNodes(a: SankeyNode[], b: SankeyNode[]): boolean {
     const y = b[i]
     if (x.id !== y.id || x.name !== y.name || x.layer !== y.layer) return false
     if (x.detail !== y.detail) return false
+    if (x.action !== y.action) return false
+    if (x.isHighRisk !== y.isHighRisk) return false
   }
   return true
 }
@@ -154,6 +182,8 @@ function sameLinks(a: SankeyLink[], b: SankeyLink[]): boolean {
     const x = a[i]
     const y = b[i]
     if (x.source !== y.source || x.target !== y.target || x.value !== y.value) return false
+    if (x.action !== y.action) return false
+    if (x.isHighRisk !== y.isHighRisk) return false
   }
   return true
 }
@@ -245,12 +275,44 @@ function buildOption(
   hovered: Set<string> | null,
 ): EChartsOption {
   const { palette, paletteColors, nodeColors } = resolved
-  const nodeItemStyle =
-    layerColors && Object.keys(layerColors).length > 0
-      ? (n: SankeyNode) => ({
-          color: nodeColors[String(n.layer ?? 0)] ?? paletteColors[0],
-        })
-      : undefined
+  // Resolve per-node color: spec palette + per-node overrides take precedence
+  // over any caller-provided layerColors. Domains use action, dests use isHighRisk,
+  // with link-metadata fallback when the node itself carries no flag.
+  const resolveNodeColor = (n: SankeyNode): string => {
+    const layer = n.layer ?? 0
+    if (layer === 2) {
+      let act = n.action
+      if (!act) {
+        const acts = links
+          .filter((l) => l.target === n.id || l.source === n.id)
+          .map((l) => l.action)
+          .filter((v): v is string => Boolean(v))
+        if (acts.length) {
+          const counts: Record<string, number> = {}
+          for (const a of acts) counts[a] = (counts[a] ?? 0) + 1
+          act = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
+        }
+      }
+      if (act) return domainColor(act)
+      return LAYER_COLORS[2]
+    }
+    if (layer === 3) {
+      let hr = n.isHighRisk
+      if (hr === undefined) {
+        const flags = links
+          .filter((l) => l.target === n.id || l.source === n.id)
+          .map((l) => l.isHighRisk)
+          .filter((v): v is boolean => v !== undefined)
+        if (flags.length) hr = flags.some(Boolean)
+      }
+      if (hr !== undefined) return destColor(hr)
+      return LAYER_COLORS[3]
+    }
+    if (layerColors && layerColors[String(layer)]) {
+      return nodeColors[String(layer)] ?? LAYER_COLORS[layer] ?? paletteColors[0]
+    }
+    return LAYER_COLORS[layer] ?? paletteColors[0]
+  }
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
   const layerCounts: Record<number, number> = {}
   for (const n of nodes) {
@@ -276,12 +338,12 @@ function buildOption(
   const data = nodes.map((n) => {
     const inComponent = hovered === null || hovered.has(n.id)
     const item: SankeyNode & {
-      itemStyle: { color?: string; opacity: number }
+      itemStyle: { color: string; opacity: number }
       label?: { position?: "left"; opacity: number }
     } = {
       ...n,
       itemStyle: {
-        ...(nodeItemStyle ? nodeItemStyle(n) : {}),
+        color: resolveNodeColor(n),
         opacity: hovered === null ? 0.92 : inComponent ? 1 : 0.12,
       },
       label: {
@@ -343,9 +405,8 @@ function buildOption(
         nodeGap,
         layoutIterations,
         emphasis: {
-          // Hover emphasis is driven by the connected-component opacity in
-          // the data above — ECharts' adjacency focus would fight it.
-          focus: "none",
+          focus: "adjacency",
+          blurScope: "coordinateSystem",
           itemStyle: { borderWidth: 2.5 },
         },
         // Default stateAnimation duration is 300ms, which animates the
@@ -382,6 +443,7 @@ export function SankeyDiagram({
   height,
   className,
   ariaLabel,
+  onNodeClick,
 }: {
   nodes: SankeyNode[]
   links: SankeyLink[]
@@ -391,6 +453,8 @@ export function SankeyDiagram({
   height?: number
   className?: string
   ariaLabel?: string
+  /** Click handler — receives node name or "source target" for edges. */
+  onNodeClick?: (name: string) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ECharts | null>(null)
@@ -435,6 +499,8 @@ export function SankeyDiagram({
   resolvedRef.current = resolved
   const layoutIterRef = useRef(layoutIterations)
   layoutIterRef.current = layoutIterations
+  const onNodeClickRef = useRef(onNodeClick)
+  onNodeClickRef.current = onNodeClick
 
   useEffect(() => {
     const el = ref.current
@@ -536,6 +602,27 @@ export function SankeyDiagram({
     return () => {
       chart.off("mouseover", onMouseOver)
       chart.off("mouseout", onMouseOut)
+    }
+  }, [])
+
+  // Click-to-filter wiring — forwards node name or "source target" to FilterContext.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const onClick = (params: ECElementEvent) => {
+      const cb = onNodeClickRef.current
+      if (!cb) return
+      if (params.dataType === "node") cb((params as unknown as { name: string }).name)
+      if (params.dataType === "edge") {
+        const d = params.data as { source?: string; target?: string } | undefined
+        const src = d?.source ?? (params as unknown as { source?: string }).source ?? ""
+        const tgt = d?.target ?? (params as unknown as { target?: string }).target ?? ""
+        cb(`${src} ${tgt}`.trim())
+      }
+    }
+    chart.on("click", onClick)
+    return () => {
+      chart.off("click", onClick)
     }
   }, [])
 
