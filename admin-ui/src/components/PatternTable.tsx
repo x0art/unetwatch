@@ -221,17 +221,26 @@ export function PatternTable() {
     try {
       const params = new URLSearchParams(window.location.search)
       const p = params.get("pattern")
-      if (p) {
-        // Consume the one-shot ?pattern= draft so it doesn't re-trigger on refresh.
-        params.delete("pattern")
-        window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`)
-        return p
-      }
+      if (p) return p
       return window.localStorage.getItem("unetwatch_pattern_draft") ?? undefined
     } catch {
       return undefined
     }
   })
+
+  /* Consume the one-shot ?pattern= draft after mount (not in the useState
+   * initializer — StrictMode double-invokes initializers, and history writes
+   * are a side effect that does not belong there). */
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (!params.has("pattern")) return
+      params.delete("pattern")
+      window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`)
+    } catch {
+      /* ignore */
+    }
+  }, [])
 
   // ── Bulk import dialog ──
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -302,6 +311,14 @@ export function PatternTable() {
     fetchStats()
   }, [fetchStats])
 
+  /* Mutations change the registry rows AND the summary-card aggregates, so
+   * every successful create/edit/delete/import refreshes both in parallel
+   * (the cards are documented as live in spec §3.3). */
+  const refreshPatternsAndStats = () => {
+    fetchPatterns()
+    fetchStats()
+  }
+
   /* Category/Action/Active filters are client-side (derived fields). When one
    * is active the fetched page is smaller than pageSize, so drop to page 0 to
    * avoid showing an empty page while matching rows exist on earlier pages. */
@@ -343,7 +360,7 @@ export function PatternTable() {
       await deletePattern(deleteTarget)
       toast({ title: "Pattern deleted", variant: "success" })
       setDeleteTarget(null)
-      fetchPatterns()
+      refreshPatternsAndStats()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -360,8 +377,10 @@ export function PatternTable() {
     try {
       await Promise.all(idList.map((id) => deletePattern(id)))
       toast({ title: `Deleted ${idList.length} pattern${idList.length === 1 ? "" : "s"}`, variant: "success" })
-      if (idList.length >= patterns.length && page > 0) setPage(page - 1)
-      else fetchPatterns()
+      if (idList.length >= patterns.length && page > 0) {
+        setPage(page - 1)
+        fetchStats()
+      } else refreshPatternsAndStats()
     } catch (e) {
       toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
     } finally {
@@ -387,7 +406,7 @@ export function PatternTable() {
       })
       toast({ title: "Pattern updated", variant: "success" })
       setEditOpen(false)
-      fetchPatterns()
+      refreshPatternsAndStats()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -408,7 +427,7 @@ export function PatternTable() {
       toast({ title: `Imported ${result.length} patterns`, variant: "success" })
       setBulkOpen(false)
       setBulkValue("")
-      fetchPatterns()
+      refreshPatternsAndStats()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -429,10 +448,12 @@ export function PatternTable() {
     { value: "Whitelist", label: "Category: Whitelist" },
   ]
 
+  /* Only the actions patternAction actually emits (block→FLAG, whitelist→ALLOW)
+   * are listed — DENY never matches a derived row, so offering it would be a
+   * filter that silently returns nothing. */
   const actionOptions = [
     { value: "all", label: "Action: All" },
     { value: "FLAG", label: "Action: FLAG" },
-    { value: "DENY", label: "Action: DENY" },
     { value: "ALLOW", label: "Action: ALLOW" },
   ]
 
@@ -634,7 +655,7 @@ export function PatternTable() {
       <AddPatternDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={fetchPatterns}
+        onCreated={refreshPatternsAndStats}
       />
 
       {/* ── Live Kibana simulation drawer (Task 9 — spec §3.3) ── */}
@@ -650,7 +671,7 @@ export function PatternTable() {
           }
           setInitialPattern(undefined)
         }}
-        onCreated={fetchPatterns}
+        onCreated={refreshPatternsAndStats}
         initialUrl={initialPattern}
       />
 

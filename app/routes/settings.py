@@ -148,10 +148,11 @@ async def test_connection(body: KibanaSettings):
     """Ping the configured Kibana/ES host with the provided auth.
 
     Returns 200 with ``{ ok, latencyMs, status?, error? }`` — ``ok`` is
-    False (not a 5xx) when the host answers but reports an error, and a
-    connection failure returns ``ok: False`` with the exception text. The
-    page renders this inline next to the Test Connection button. Validation
-    failures (bad auth_type, malformed URL) are rejected 422 by Pydantic.
+    True only for 2xx/3xx; 4xx (bad key, forbidden) and 5xx both surface as
+    ``ok: False`` with the status, and a connection failure returns
+    ``ok: False`` with the exception text. The page renders this inline
+    next to the Test Connection button. Validation failures (bad auth_type,
+    malformed URL) are rejected 422 by Pydantic.
     """
     headers = {}
     if body.api_key:
@@ -162,15 +163,21 @@ async def test_connection(body: KibanaSettings):
 
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=3, verify=False) as client:
+        # verify=True by default: this is an internal Kibana host and the whole
+        # point of the check is auth validity, so a self-signed/MITM TLS cert
+        # must fail loudly instead of silently passing.
+        async with httpx.AsyncClient(timeout=3) as client:
             resp = await client.get(url, headers=headers)
         latency_ms = round((time.perf_counter() - start) * 1000, 1)
-        # 4xx (auth) and 2xx/3xx both prove reachability; only 5xx means the
-        # host is up but the service is failing.
+        # Only 2xx/3xx mean the connection is usable. A 401/403 proves the host
+        # is reachable but the provided auth is wrong — that must surface as
+        # ok=False with the status, not a green "Connection OK".
+        ok = 200 <= resp.status_code < 400
         return {
-            "ok": resp.status_code < 500,
+            "ok": ok,
             "latencyMs": latency_ms,
             "status": resp.status_code,
+            **({"error": f"unexpected HTTP {resp.status_code}"} if not ok else {}),
         }
     except Exception as e:
         latency_ms = round((time.perf_counter() - start) * 1000, 1)

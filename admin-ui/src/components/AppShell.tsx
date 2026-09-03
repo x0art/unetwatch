@@ -8,6 +8,7 @@ const TIME_RANGE_OPTIONS = [
   { value: "1h", label: "1h" },
   { value: "24h", label: "24h" },
   { value: "7d", label: "7d" },
+  { value: "30d", label: "30d" },
 ]
 
 export function AppShell({
