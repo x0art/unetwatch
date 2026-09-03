@@ -1384,3 +1384,148 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
     },
   }
 }
+
+/* ── Analytics & Reports (Task 10 — spec §3.4) ─────────────────────── */
+
+export interface AnalyticsSummary {
+  has_data: boolean
+  totalVolume: number // bytes (approximate when duration_seconds absent — see backend docstring)
+  totalBlocked: number
+  topBandwidthHost: string
+  peakTrafficTime: string
+  range: string
+  compare: string
+  hostGroup: string
+  source: string
+  es_online: boolean
+  previous: { totalVolume: number; totalBlocked: number } | null
+  volumeDeltaPct: number | null
+  blockedDeltaPct: number | null
+}
+
+export interface BandwidthPoint {
+  bucket: string
+  inbound: number
+  outbound: number
+}
+
+export interface AnalyticsBandwidth {
+  points: BandwidthPoint[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
+export interface EnforcementPoint {
+  bucket: string
+  allow: number
+  deny: number
+}
+
+export interface AnalyticsEnforcements {
+  points: EnforcementPoint[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
+export interface TopDomainRow {
+  domain: string
+  volume: number // bytes
+  pct: number // % of window total
+}
+
+export interface AnalyticsTopDomains {
+  items: TopDomainRow[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
+export interface TopDeniedRow {
+  domain: string
+  blocks: number
+  primaryRule: string
+}
+
+export interface AnalyticsTopDenied {
+  items: TopDeniedRow[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+export async function getAnalyticsSummary(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+} = {}): Promise<AnalyticsSummary> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  return request(`/analytics/summary?${qs}`)
+}
+
+export async function getAnalyticsBandwidth(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+} = {}): Promise<AnalyticsBandwidth> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  return request(`/analytics/bandwidth?${qs}`)
+}
+
+export async function getAnalyticsEnforcements(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+} = {}): Promise<AnalyticsEnforcements> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  return request(`/analytics/enforcements?${qs}`)
+}
+
+export async function getAnalyticsTopDomains(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+  limit?: number
+} = {}): Promise<AnalyticsTopDomains> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  if (params.limit) qs.set("limit", String(params.limit))
+  return request(`/analytics/top-domains?${qs}`)
+}
+
+export async function getAnalyticsTopDenied(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+  limit?: number
+} = {}): Promise<AnalyticsTopDenied> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  if (params.limit) qs.set("limit", String(params.limit))
+  return request(`/analytics/top-denied?${qs}`)
+}
