@@ -39,7 +39,7 @@ aggregation (documented honest no-op — see each endpoint docstring).
 
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException as FastAPIHTTPException
@@ -90,12 +90,21 @@ def _has_column(columns: list[str], name: str) -> bool:
     return name in columns
 
 
+def _parse_matched_patterns(raw) -> list:
+    """Safely parse the stored ``matched_patterns`` JSON column.
+
+    A corrupted or non-JSON row must never 500 the analytics endpoints — a
+    garbage row is treated as an empty match list.
+    """
+    try:
+        return json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 def _primary_rule(matched_patterns: str | None) -> str:
     """First matched pattern, or a stable fallback label when unavailable."""
-    try:
-        pats = json.loads(matched_patterns or "[]")
-    except (TypeError, ValueError):
-        pats = []
+    pats = _parse_matched_patterns(matched_patterns)
     if isinstance(pats, list) and pats:
         return str(pats[0])
     return "matched"
@@ -131,11 +140,6 @@ def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
         else:
             total += DEFAULT_BYTES_PER_REQUEST
     return total
-
-
-def _days_ago(n: int) -> str:
-    """ISO timestamp for n days ago (used for fixed-period comparisons)."""
-    return (datetime.now(UTC) - timedelta(days=n)).isoformat()
 
 
 def _fmt_peak(ts: str) -> str:
@@ -184,7 +188,7 @@ async def _findings_summary(db, minutes: int) -> dict:
             # or was denied — persisted rows with an empty matched list are the
             # ALLOW/whitelist-traffic side of the window.
             total_blocked = sum(
-                1 for r in rows if json.loads(r.get("matched_patterns") or "[]")
+                1 for r in rows if _parse_matched_patterns(r.get("matched_patterns"))
             )
 
         by_host: dict[str, int] = {}
@@ -211,26 +215,27 @@ async def _findings_summary(db, minutes: int) -> dict:
 
 
 async def _previous_period_summary(db, minutes: int) -> dict | None:
-    """Summarize the fixed 7-day period immediately before the window.
+    """Summarize the fixed period immediately before the window.
 
-    Rows older than the current window but within the 7 days before it. When
-    the current window is 30d the previous 30d slice is used instead — the
-    delta stays meaningful for the range the user picked.
+    The previous window is the comparable slice before the current one:
+    24h / 7d windows compare against the prior 7 days, 30d against the prior
+    30 days. Bounds are evaluated by SQLite (UTC) via ``strftime`` modifiers so
+    the filter is consistent with ``_window_clause``.
     """
-    offset_days = 7 if minutes <= 1440 else 30
-    params: list = []
-    if minutes > 0:
-        params.extend([_days_ago(offset_days), _days_ago(0)])
-        where = (
-            " WHERE log_timestamp >= ?"
-            " AND log_timestamp < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
-        )
-        cursor = await db.execute(
-            f"SELECT * FROM findings{where} LIMIT 10000", params
-        )
-        rows = [dict(r) for r in await cursor.fetchall()]
-    else:
-        rows = []
+    if minutes <= 0:
+        return None
+    # Comparable prior window: 24h and 7d → 7 days, 30d → 30 days.
+    offset_days = 7 if minutes == 1440 else (7 if minutes == 10080 else 30)
+    offset_minutes = minutes + offset_days * 1440
+    params: list = [f"-{offset_minutes} minutes", f"-{minutes} minutes"]
+    where = (
+        " WHERE log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+        " AND log_timestamp < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+    )
+    cursor = await db.execute(
+        f"SELECT * FROM findings{where} LIMIT 10000", params
+    )
+    rows = [dict(r) for r in await cursor.fetchall()]
 
     if not rows:
         return None
@@ -243,7 +248,7 @@ async def _previous_period_summary(db, minutes: int) -> dict | None:
         total_blocked = sum(1 for r in rows if r.get("action") in ("DENY", "FLAG"))
     else:
         total_blocked = sum(
-            1 for r in rows if json.loads(r.get("matched_patterns") or "[]")
+            1 for r in rows if _parse_matched_patterns(r.get("matched_patterns"))
         )
     return {"totalVolume": total_volume, "totalBlocked": total_blocked}
 
@@ -307,7 +312,7 @@ async def _findings_enforcements(db, minutes: int) -> list[dict]:
             else:
                 b["allow"] += 1
         else:
-            if json.loads(r.get("matched_patterns") or "[]"):
+            if _parse_matched_patterns(r.get("matched_patterns")):
                 b["deny"] += 1
             else:
                 b["allow"] += 1
@@ -366,7 +371,7 @@ async def _findings_top_denied(db, minutes: int, limit: int) -> list[dict]:
             if r.get("action") not in ("DENY", "FLAG"):
                 continue
         else:
-            if not json.loads(r.get("matched_patterns") or "[]"):
+            if not _parse_matched_patterns(r.get("matched_patterns")):
                 continue
         domain = _domain_of_base(r.get("base_url") or "")
         entry = by_domain.setdefault(

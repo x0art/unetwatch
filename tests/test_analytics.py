@@ -77,14 +77,24 @@ async def test_analytics_summary_seeded(client, db_path):
 
 
 async def test_analytics_summary_previous_period(client, db_path):
+    from datetime import UTC, datetime, timedelta
+
     import aiosqlite
+
+    now = datetime.now(UTC)
+    # Current window for range=30d is [now-30d, now); previous is [now-60d, now-30d).
+    # Seed one row in each so has_data is True and previous is not None.
+    cur_ts = (now - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    prev_ts = (now - timedelta(days=35)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    prev_ts2 = (now - timedelta(days=36)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     db = await aiosqlite.connect(db_path)
     await db.executemany(
         _INSERT_SQL,
         [
-            ("10.0.0.1", "", "http://a.example/x", "a.example", "2026-09-01T10:00:00Z", "[]"),
-            ("10.0.0.1", "", "http://a.example/y", "a.example", "2026-09-02T10:00:00Z", "[]"),
+            ("10.0.0.1", "", "http://a.example/x", "a.example", cur_ts, "[]"),
+            ("10.0.0.1", "", "http://a.example/y", "a.example", prev_ts, "[]"),
+            ("10.0.0.1", "", "http://a.example/z", "a.example", prev_ts2, '["*/admin/*"]'),
         ],
     )
     await db.commit()
@@ -95,8 +105,14 @@ async def test_analytics_summary_previous_period(client, db_path):
     data = res.json()
     assert data["has_data"] is True
     assert "previous" in data
-    assert "volumeDeltaPct" in data
-    assert "blockedDeltaPct" in data
+    # The previous window (30d before now) must be found — not the null that a
+    # broken bounds clause produces (was: strftime(...,'now',?) fed an ISO
+    # timestamp → NULL → previous always None).
+    assert data["previous"] is not None
+    assert data["previous"]["totalVolume"] == 2 * 8192
+    assert data["previous"]["totalBlocked"] == 1  # one of the two previous rows matched
+    assert data["volumeDeltaPct"] is not None
+    assert data["blockedDeltaPct"] is not None
 
 
 async def test_analytics_bandwidth_shape(client):
