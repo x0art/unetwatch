@@ -594,6 +594,8 @@ export function timeRangeToMinutesLive(tr: string): number {
       return 60
     case "7d":
       return 10080
+    case "30d":
+      return 43200
     case "24h":
       return 1440
     default: {
@@ -1155,9 +1157,10 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
  * backend task lands. The interim aggregation mirrors the wireframe numbers:
  * Total Requests 42,810 when no data, Risk HIGH 78/100 at ~>5% deny rate.
  */
-export async function getHostProfile(ip: string, _timeRange: string): Promise<HostProfile> {
+export async function getHostProfile(ip: string, timeRange: string): Promise<HostProfile> {
   const cleanIp = ip.trim()
   if (!cleanIp) throw new Error("IP required")
+  const minutes = timeRangeToMinutesLive(timeRange)
 
   // 1) Try dedicated host endpoint (future backend task). 404/501 falls through.
   try {
@@ -1188,8 +1191,9 @@ export async function getHostProfile(ip: string, _timeRange: string): Promise<Ho
   }
 
   // 2) Try live ES query filtered to this IP — richer (action-aware) than findings.
+  //    The window follows the selector (1h/24h/7d/30d) via timeRangeToMinutesLive.
   try {
-    const qRes = await runQuery(1440, { q: cleanIp })
+    const qRes = await runQuery(minutes, { q: cleanIp })
     if (qRes.items.length > 0 || qRes.total_requests > 0) {
       return hostProfileFromQuery(cleanIp, qRes)
     }
