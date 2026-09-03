@@ -9,20 +9,16 @@ import {
 } from "react"
 import {
   Activity,
-  Ban,
+  BarChart3,
   ChevronLeft,
   ChevronRight,
-  FileSearch,
-  GitBranch,
-  LayoutDashboard,
   ListFilter,
   LogOut,
   Menu,
   Moon,
-  Network,
-  Radar,
-  ScrollText,
+  Settings,
   Sun,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -97,9 +93,13 @@ export function useTheme(): ThemeContextValue {
 }
 
 export type View =
+  | "live"
+  | "host"
+  | "patterns"
+  | "analytics"
+  | "settings"
   | "dashboard"
   | "query"
-  | "patterns"
   | "findings"
   | "graph"
   | "blacklist"
@@ -119,25 +119,24 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    label: "Monitor",
-    items: [
-      { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { view: "graph", label: "Traffic", icon: Network },
-      { view: "query", label: "Query", icon: FileSearch },
-    ],
+    label: "Live Log Monitor",
+    items: [{ view: "live", label: "Live Monitor", icon: Activity }],
   },
   {
-    label: "Management",
-    items: [
-      { view: "patterns", label: "Patterns", icon: ListFilter },
-      { view: "findings", label: "Findings", icon: Radar },
-      { view: "redirects", label: "Redirects", icon: GitBranch },
-      { view: "blacklist", label: "Blacklist", icon: Ban },
-    ],
+    label: "Host Inspector",
+    items: [{ view: "host", label: "Host Inspector", icon: Users }],
   },
   {
-    label: "System",
-    items: [{ view: "logs", label: "Logs", icon: ScrollText }],
+    label: "Pattern Manager",
+    items: [{ view: "patterns", label: "Pattern Manager", icon: ListFilter }],
+  },
+  {
+    label: "Analytics & Reports",
+    items: [{ view: "analytics", label: "Analytics", icon: BarChart3 }],
+  },
+  {
+    label: "System & Settings",
+    items: [{ view: "settings", label: "System Settings", icon: Settings }],
   },
 ]
 
