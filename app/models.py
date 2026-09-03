@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 class UrlPatternBase(BaseModel):
     pattern: str = Field(..., min_length=1, max_length=500)
     pattern_type: str = Field(default="block", pattern="^(block|whitelist)$")
+    name: str | None = Field(None, max_length=200)
+    category: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class UrlPatternCreate(UrlPatternBase):
@@ -15,6 +18,9 @@ class UrlPatternCreate(UrlPatternBase):
 class UrlPatternUpdate(BaseModel):
     pattern: str | None = Field(None, min_length=1, max_length=500)
     pattern_type: str | None = Field(None, pattern="^(block|whitelist)$")
+    name: str | None = Field(None, max_length=200)
+    category: str | None = Field(None, max_length=100)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class UrlPatternResponse(UrlPatternBase):

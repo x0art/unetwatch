@@ -3,6 +3,10 @@ export interface Pattern {
   id: number
   pattern: string
   pattern_type: "block" | "whitelist"
+  /** Rule Definition metadata (spec §3.3) — persisted by the registry. */
+  name?: string | null
+  category?: string | null
+  notes?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -440,8 +444,9 @@ export async function listPatterns(params?: {
 export async function createPattern(data: {
   pattern: string
   pattern_type: string
-  /** Rule Definition metadata (spec §3.3). Accepted by the registry POST body
-   * (extra fields are ignored server-side until the Task 10 editor persists them). */
+  /** Rule Definition metadata (spec §3.3) — persisted by the registry and
+   * round-tripped through listPatterns/getPattern. */
+  name?: string
   category?: string
   notes?: string
 }): Promise<Pattern> {

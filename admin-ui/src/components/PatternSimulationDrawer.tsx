@@ -117,9 +117,9 @@ export function PatternSimulationDrawer({
       await createPattern({
         pattern,
         pattern_type: mapAction(action),
-        // Category + notes are Rule Definition metadata (spec §3.3). The
-        // registry schema persists pattern + pattern_type today; the extras
-        // are sent for forward-compat with the Task 10 pattern editor.
+        // Rule Definition metadata (spec §3.3) — name, category and notes are
+        // all persisted by the registry and round-tripped through listPatterns.
+        name,
         category,
         notes,
       })

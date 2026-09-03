@@ -220,8 +220,9 @@ async def get_pattern(pattern_id: int, db=Depends(get_db_conn)):
 async def create_pattern(data: UrlPatternCreate, db=Depends(get_db_conn)):
     try:
         cursor = await db.execute(
-            "INSERT INTO url_patterns (pattern, pattern_type) VALUES (?, ?)",
-            (data.pattern, data.pattern_type),
+            "INSERT INTO url_patterns (pattern, pattern_type, name, category, notes)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (data.pattern, data.pattern_type, data.name, data.category, data.notes),
         )
         await db.commit()
         pid = cursor.lastrowid
@@ -244,6 +245,12 @@ async def update_pattern(pattern_id: int, data: UrlPatternUpdate, db=Depends(get
         updates["pattern"] = data.pattern
     if data.pattern_type is not None:
         updates["pattern_type"] = data.pattern_type
+    if data.name is not None:
+        updates["name"] = data.name
+    if data.category is not None:
+        updates["category"] = data.category
+    if data.notes is not None:
+        updates["notes"] = data.notes
 
     if not updates:
         raise HTTPException(400, "No fields to update")

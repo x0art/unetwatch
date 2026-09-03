@@ -27,6 +27,15 @@ async def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Migration: add Rule Definition metadata (Task 9 — spec §3.3) to existing
+    # databases that predate the columns. `name` is the rule's display name,
+    # `category` the threat-class tag, `notes` free-text context. All optional
+    # (nullable) so pre-existing rows and bare bulk imports keep working.
+    cursor = await db.execute("PRAGMA table_info(url_patterns)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    for col in ("name", "category", "notes"):
+        if col not in columns:
+            await db.execute(f"ALTER TABLE url_patterns ADD COLUMN {col} TEXT")
     await db.execute("""
         CREATE TABLE IF NOT EXISTS url_whitelist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -48,3 +48,39 @@ async def test_simulate_matches_findings(client):
     assert len(body["preview"]) == 2
     urls = {row["url"] for row in body["preview"]}
     assert "http://safe.example/page" not in urls
+
+
+def test_simulate_save_and_deploy_persists_metadata(client):
+    """Save & Deploy sends Rule Definition metadata (name/category/notes) that
+    the registry persists and round-trips through list/get."""
+    res = client.post(
+        "/api/patterns/",
+        json={
+            "pattern": "*://*executable-share.net/download/*.exe",
+            "pattern_type": "block",
+            "name": "Executable-Share Download",
+            "category": "Malware",
+            "notes": "Blue Team ticket #123",
+        },
+    )
+    assert res.status_code == 201
+    created = res.json()
+    assert created["name"] == "Executable-Share Download"
+    assert created["category"] == "Malware"
+    assert created["notes"] == "Blue Team ticket #123"
+
+    # The registry fetch returns the same metadata.
+    fetched = client.get(f"/api/patterns/{created['id']}").json()
+    assert fetched["name"] == "Executable-Share Download"
+    assert fetched["category"] == "Malware"
+    assert fetched["notes"] == "Blue Team ticket #123"
+    assert fetched["pattern"] == "*://*executable-share.net/download/*.exe"
+    assert fetched["pattern_type"] == "block"
+
+    # listPatterns carries it back too.
+    listed = client.get("/api/patterns/?search=executable-share.net").json()
+    assert any(p["id"] == created["id"] for p in listed)
+    mine = next(p for p in listed if p["id"] == created["id"])
+    assert mine["name"] == "Executable-Share Download"
+    assert mine["category"] == "Malware"
+    assert mine["notes"] == "Blue Team ticket #123"
