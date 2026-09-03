@@ -155,3 +155,123 @@ def build_client_session_query(client: str, minutes: int, size: int) -> dict:
         "sort": [{"@timestamp": {"order": "asc"}}],
         "query": {"bool": {"filter": session_filters}},
     }
+
+
+# ── Task 12: UI-filter → ES _search body (spec §5.1 query pipeline) ────────
+
+
+def time_range_to_es(time_range: str) -> str | None:
+    """Translate a UI time-range label to an ES ``now-*`` offset.
+
+    Accepts ``"24h"`` / ``"7d"`` / ``"30d"`` (and any ``<n>h``/``<n>d``/``<n>m``
+    label) and returns ``"now-1d"`` / ``"now-7d"`` / ``"now-30d"``. Returns
+    ``None`` for empty / ``"all"`` (the all-time sentinel) and ``"24h"``-style
+    labels that don't parse, so callers can skip the range clause entirely.
+    """
+    label = (time_range or "").strip().lower()
+    if not label or label == "all":
+        return None
+    if re.fullmatch(r"\d+[hdm]", label):
+        return f"now-{label}"
+    if label in {"24h", "1d"}:
+        return "now-1d"
+    return None
+
+
+class QueryBuilder:
+    """Translate UI filter state into an ES ``_search`` body (spec §5.1).
+
+    Consumes the FilterContext state ``{globalSearch, timeRange, action,
+    hostFilter, patternFilter, size}`` plus the Kibana ``FieldMap`` so custom
+    index schemas configured in System Settings are honoured everywhere.
+    """
+
+    @staticmethod
+    def build(filters: dict, field_map: "FieldMap") -> dict:  # noqa: F821
+        """Build an ES ``_search`` body from UI filter state.
+
+        ``filters`` keys: ``globalSearch`` (multi_match over src/dest/url/
+        domain), ``timeRange`` (``"24h"``/``"7d"``/``"30d"`` → ``now-*``
+        range), ``action`` (uppercase ALLOW/DENY/FLAG, ``"All"``/empty skips),
+        ``hostFilter``/``patternFilter`` (KQL-style clauses), ``size`` (default
+        50). Results sort newest-first by the mapped timestamp field.
+        """
+        must: list[dict] = []
+        if filters.get("globalSearch"):
+            q = filters["globalSearch"]
+            must.append(
+                {
+                    "multi_match": {
+                        "query": q,
+                        "fields": [
+                            field_map.src_ip,
+                            field_map.dest_ip,
+                            field_map.url,
+                            field_map.domain,
+                        ],
+                    }
+                }
+            )
+        if filters.get("timeRange"):
+            es_offset = time_range_to_es(filters["timeRange"])
+            if es_offset:
+                must.append(
+                    {"range": {field_map.timestamp: {"gte": es_offset}}}
+                )
+        if filters.get("action") and filters["action"] != "All":
+            must.append({"term": {field_map.action: filters["action"].lower()}})
+        for key in ("hostFilter", "patternFilter"):
+            value = filters.get(key)
+            if not value:
+                continue
+            clauses = QueryBuilder.kql_to_dsl(str(value), field_map)
+            must.extend(clauses)
+        return {
+            "query": {"bool": {"must": must}},
+            "size": int(filters.get("size", 50) or 50),
+            "sort": [{field_map.timestamp: "desc"}],
+        }
+
+    @staticmethod
+    def kql_to_dsl(kql: str, field_map: "FieldMap") -> list[dict]:  # noqa: F821
+        """Translate a minimal KQL expression into ES DSL ``must`` clauses.
+
+        Minimal safe translation: ``field: value`` pairs map to ``term``
+        clauses on the mapped field (dotted paths are kept verbatim — ES
+        handles nested fields), ``AND`` joins are preserved as sibling
+        ``must`` clauses, and bare text becomes a ``multi_match`` across the
+        same four search fields as ``globalSearch``. Anything unparseable
+        (operators other than ``AND``/``OR``, unbalanced quotes) is treated
+        as bare text rather than raised — a search box can never 500.
+
+        Example: ``url.full: *streaming* AND event.action: deny`` →
+        ``[{term: {url.full: "*streaming*"}}, {term: {event.action: "deny"}}]``
+        """
+        clauses: list[dict] = []
+        text = (kql or "").strip()
+        if not text:
+            return clauses
+        # Split on AND (uppercase, with optional surrounding spaces).
+        tokens = [t.strip() for t in re.split(r"\s+AND\s+", text, flags=re.IGNORECASE)]
+        for token in tokens:
+            if not token:
+                continue
+            match = re.match(r"^([A-Za-z0-9_.@-]+)\s*:\s*(.+)$", token)
+            if match:
+                field, value = match.group(1), match.group(2).strip()
+                clauses.append({"term": {field: value}})
+            else:
+                clauses.append(
+                    {
+                        "multi_match": {
+                            "query": token,
+                            "fields": [
+                                field_map.src_ip,
+                                field_map.dest_ip,
+                                field_map.url,
+                                field_map.domain,
+                            ],
+                        }
+                    }
+                )
+        return clauses

@@ -121,3 +121,31 @@ class RedirectCheckRequest(BaseModel):
 
 class LogBulkDelete(BaseModel):
     ids: list[int] = Field(..., min_length=1, max_length=500)
+
+
+# ── Data architecture schemas (spec §5.2 — Kibana pipeline, Task 12) ───────
+
+
+class NormalizedAppState(BaseModel):
+    """Canonical app row produced by ``Normalizer.to_app_state`` (spec §5.2).
+
+    ``id`` is the ES hit id; ``timestamp`` is ``@timestamp`` (or the mapped
+    timestamp field when a custom ``FieldMap`` is configured). ``action`` is
+    always uppercased (ALLOW/DENY/FLAG) to match the UI badge contract.
+    ``matched_pattern_*`` are the ``rule`` document fields when a Kibana rule
+    fired for this event; ``bytes`` is ``source.bytes`` when the log records
+    it.
+    """
+
+    id: str | None = None
+    timestamp: str | None = None
+    src_ip: str | None = None
+    src_host: str | None = None
+    dest_ip: str | None = None
+    domain: str | None = None
+    url: str | None = None
+    action: str = ""
+    duration_ms: int | float | None = None  # noqa: UP045 — keep compatible with ES duration mix
+    bytes: int | None = None
+    matched_pattern_id: str | None = None
+    matched_pattern_name: str | None = None
