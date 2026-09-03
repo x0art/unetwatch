@@ -470,6 +470,9 @@ export async function getLiveMetrics(opts?: { minutes?: number }): Promise<LiveM
     total_requests: number
     unique_ips: number
     es_online: boolean
+    denied_count?: number
+    denied_requests?: number
+    total_denied?: number
   }>(`/monitor/metrics?minutes=${metricsMinutes}`).catch(() => null)
   const queryPromise = runQuery(metricsMinutes).catch(() => null)
 
@@ -480,14 +483,36 @@ export async function getLiveMetrics(opts?: { minutes?: number }): Promise<LiveM
 
   let deniedRequests = 0
   let avgDuration = "—"
-  if (query && query.items.length > 0) {
-    deniedRequests = query.items.filter((d) => d.action === "DENY").length
-    const durations = query.items
-      .map((d) => d.duration_seconds)
-      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
-    if (durations.length > 0) {
-      const mean = durations.reduce((a, b) => a + b, 0) / durations.length
-      avgDuration = `${(mean * 1000).toFixed(0)}ms`
+  if (query) {
+    // Prefer server-side aggregation when available (accurate over the full
+    // window); fall back to sampled count from fetched items only when no
+    // aggregation field exists. Sampled fallback is window-truncated (LogInspector
+    // caps at 50 / runQuery paginates) so deny-rate hint is understated.
+    const m = metrics as Record<string, unknown> | null
+    const q = query as unknown as Record<string, unknown>
+    const aggDenied =
+      (typeof m?.denied_count === "number" ? m.denied_count : undefined) ??
+      (typeof m?.denied_requests === "number" ? m.denied_requests : undefined) ??
+      (typeof m?.total_denied === "number" ? m.total_denied : undefined) ??
+      (typeof q.denied_count === "number" ? q.denied_count : undefined) ??
+      (typeof q.total_denied === "number" ? q.total_denied : undefined) ??
+      (typeof q.denied_requests === "number" ? q.denied_requests : undefined)
+    if (typeof aggDenied === "number") {
+      deniedRequests = aggDenied
+    } else if (query.items.length > 0) {
+      deniedRequests = query.items.filter((d) => d.action === "DENY").length
+    }
+    // avgDuration is sampled from fetched items (not an ES avg aggregation) —
+    // acceptable placeholder until backend exposes aggregated duration; truncated
+    // to the fetched window when paginated.
+    if (query.items.length > 0) {
+      const durations = query.items
+        .map((d) => d.duration_seconds)
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+      if (durations.length > 0) {
+        const mean = durations.reduce((a, b) => a + b, 0) / durations.length
+        avgDuration = `${(mean * 1000).toFixed(0)}ms`
+      }
     }
   }
 

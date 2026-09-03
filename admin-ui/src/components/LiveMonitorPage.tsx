@@ -53,60 +53,61 @@ function SankeySection({
 
   const fetchFlow = useCallback(async () => {
     setLoading(true)
-    const minutes = timeRangeToMinutes(timeRange)
-    const q = filter.trim() || undefined
     try {
-      const res = await runQuery(Math.min(minutes, 1440), q ? { q } : undefined)
-      if (res.flow && res.flow.links.length > 0) {
-        const sankeyNodes: SankeyNode[] = res.flow.nodes.map((n) => ({
-          id: n.id,
-          name: n.label,
-          layer: n.kind === "ip" ? 0 : 1,
-        }))
-        const sankeyLinks: SankeyLink[] = res.flow.links.map((l) => ({
-          source: l.source,
-          target: l.target,
-          value: l.count,
-        }))
-        setNodes(sankeyNodes)
-        setLinks(sankeyLinks)
-        return
-      }
-    } catch {
-      /* fall through to findings graph */
-    }
-    try {
-      const graph = await getFindingsGraph(30)
-      if (graph.flows.length > 0) {
-        const byIp = new Map<string, SankeyNode>()
-        const byBase = new Map<string, SankeyNode>()
-        const sankeyLinks: SankeyLink[] = []
-        for (const f of graph.flows) {
-          if (!byIp.has(f.client_ip)) {
-            byIp.set(f.client_ip, { id: `ip:${f.client_ip}`, name: f.client_ip, layer: 0 })
-          }
-          if (!byBase.has(f.base_url)) {
-            byBase.set(f.base_url, { id: `base:${f.base_url}`, name: f.base_url, layer: 1 })
-          }
-          sankeyLinks.push({
-            source: `ip:${f.client_ip}`,
-            target: `base:${f.base_url}`,
-            value: f.count,
-          })
-        }
-        const sankeyNodes = [...byIp.values(), ...byBase.values()]
-        if (sankeyNodes.length > 0 && sankeyLinks.length > 0) {
+      const minutes = timeRangeToMinutes(timeRange)
+      const q = filter.trim() || undefined
+      try {
+        const res = await runQuery(Math.min(minutes, 1440), q ? { q } : undefined)
+        if (res.flow && res.flow.links.length > 0) {
+          const sankeyNodes: SankeyNode[] = res.flow.nodes.map((n) => ({
+            id: n.id,
+            name: n.label,
+            layer: n.kind === "ip" ? 0 : 1,
+          }))
+          const sankeyLinks: SankeyLink[] = res.flow.links.map((l) => ({
+            source: l.source,
+            target: l.target,
+            value: l.count,
+          }))
           setNodes(sankeyNodes)
           setLinks(sankeyLinks)
           return
         }
+      } catch {
+        /* fall through to findings graph */
       }
-    } catch {
-      /* keep stub */
+      try {
+        const graph = await getFindingsGraph(30)
+        if (graph.flows.length > 0) {
+          const byIp = new Map<string, SankeyNode>()
+          const byBase = new Map<string, SankeyNode>()
+          const sankeyLinks: SankeyLink[] = []
+          for (const f of graph.flows) {
+            if (!byIp.has(f.client_ip)) {
+              byIp.set(f.client_ip, { id: `ip:${f.client_ip}`, name: f.client_ip, layer: 0 })
+            }
+            if (!byBase.has(f.base_url)) {
+              byBase.set(f.base_url, { id: `base:${f.base_url}`, name: f.base_url, layer: 1 })
+            }
+            sankeyLinks.push({
+              source: `ip:${f.client_ip}`,
+              target: `base:${f.base_url}`,
+              value: f.count,
+            })
+          }
+          const sankeyNodes = [...byIp.values(), ...byBase.values()]
+          if (sankeyNodes.length > 0 && sankeyLinks.length > 0) {
+            setNodes(sankeyNodes)
+            setLinks(sankeyLinks)
+            return
+          }
+        }
+      } catch {
+        /* keep stub */
+      }
     } finally {
       setLoading(false)
     }
-    setLoading(false)
   }, [filter, timeRange])
 
   useEffect(() => {
