@@ -3,49 +3,17 @@ import { motion } from "framer-motion"
 import { ExternalLink, X } from "lucide-react"
 import { Badge, Button, useToast } from "./ui"
 import { useFilter } from "../contexts/FilterContext"
-import type { LogRow } from "./LogInspector"
-
-function getSrcIp(row: LogRow): string {
-  return (row.src_ip ?? (row as unknown as { client_ip?: string }).client_ip ?? "") as string
-}
-function getSrcHost(row: LogRow): string | null {
-  return (row.src_host ?? (row as unknown as { src_host?: string | null }).src_host ?? null) as string | null
-}
-function getDestIp(row: LogRow): string {
-  return (row.dest_ip ?? (row as unknown as { server_ip?: string }).server_ip ?? "") as string
-}
-function getDurationMs(row: LogRow): number | null {
-  if (typeof row.duration_ms === "number" && Number.isFinite(row.duration_ms)) return row.duration_ms
-  const s = (row as unknown as { duration_seconds?: number | null }).duration_seconds
-  if (typeof s === "number" && Number.isFinite(s)) return Math.round(s * 1000)
-  return null
-}
-function getMatchedRule(row: LogRow): string {
-  if (row.matched_pattern_name) return row.matched_pattern_name
-  if (row.matched_pattern_id) return row.matched_pattern_id
-  const blocked = (row as unknown as { blocked_by?: string[] }).blocked_by
-  if (Array.isArray(blocked) && blocked.length > 0) return blocked.join(", ")
-  return "—"
-}
-function getRowId(row: LogRow): string {
-  const id = (row as { id?: unknown }).id
-  if (typeof id === "string" || typeof id === "number") return String(id)
-  const q = row as unknown as { timestamp?: string; client_ip?: string; url?: string }
-  return q.timestamp ?? row.url ?? String(id ?? "")
-}
-function actionVariant(action: string): "success" | "destructive" | "warning" | "secondary" {
-  if (action === "ALLOW") return "success"
-  if (action === "DENY") return "destructive"
-  if (action === "FLAG") return "warning"
-  return "secondary"
-}
-function hostOfUrl(url: string): string {
-  try {
-    return new URL(url).host
-  } catch {
-    return url.split("/")[0] ?? url
-  }
-}
+import {
+  getSrcIp,
+  getSrcHost,
+  getDestIp,
+  getDurationMs,
+  getMatchedRule,
+  getRowId,
+  actionVariant,
+  hostOfUrl,
+  type LogRow,
+} from "../lib/logRow"
 
 export function InspectionDrawer({ row, onClose }: { row: LogRow; onClose: () => void }) {
   const { setGlobalFilter } = useFilter()

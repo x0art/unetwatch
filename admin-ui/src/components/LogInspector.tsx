@@ -2,50 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Download, Eye, SearchX, Settings2 } from "lucide-react"
 import { Badge, Button, Panel, Select, Skeleton, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
-import { runQuery, timeRangeToMinutesLive, type QueryDoc } from "../api"
+import { runQuery, timeRangeToMinutesLive } from "../api"
+import { useFilter } from "../contexts/FilterContext"
+import { getSrcIp, getDestIp, getDurationMs, getRowId, actionVariant, type LogRow } from "../lib/logRow"
 
-export type LogRow = QueryDoc & {
-  /** Spec aliases — present when NormalizedAppState shape is used */
-  id?: string | number
-  src_ip?: string
-  src_host?: string | null
-  dest_ip?: string
-  domain?: string
-  duration_ms?: number | null
-  matched_pattern_id?: string | null
-  matched_pattern_name?: string | null
-}
-
-function getSrcIp(r: LogRow): string {
-  return (r.src_ip ?? (r as unknown as QueryDoc).client_ip ?? "") as string
-}
-function getDestIp(r: LogRow): string {
-  return (r.dest_ip ?? (r as unknown as QueryDoc).server_ip ?? "") as string
-}
-function getDurationMs(r: LogRow): number | null {
-  if (typeof r.duration_ms === "number" && Number.isFinite(r.duration_ms)) return r.duration_ms
-  const s = (r as unknown as QueryDoc).duration_seconds
-  if (typeof s === "number" && Number.isFinite(s)) return Math.round(s * 1000)
-  return null
-}
-function getRowId(r: LogRow): string {
-  const q = r as unknown as QueryDoc
-  const id = (r as { id?: unknown }).id
-  if (typeof id === "string" || typeof id === "number") return String(id)
-  return `${q.timestamp}|${q.client_ip ?? getSrcIp(r)}|${q.url}`
-}
+export type { LogRow }
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toLocaleString()
-}
-
-function actionVariant(action: string): "success" | "destructive" | "warning" | "secondary" {
-  if (action === "ALLOW") return "success"
-  if (action === "DENY") return "destructive"
-  if (action === "FLAG") return "warning"
-  return "secondary"
 }
 
 const ACTION_OPTIONS = [
@@ -94,6 +60,7 @@ export interface LogInspectorProps {
 
 export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogInspectorProps) {
   const { toast } = useToast()
+  const { setGlobalFilter } = useFilter()
   const [rows, setRows] = useState<LogRow[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -186,10 +153,12 @@ export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogI
         header: "Actions",
         enableSorting: false,
         cell: (r) => (
-          <Button size="sm" variant="outline" onClick={() => onInspect?.(r)}>
-            <Eye className="h-3.5 w-3.5" />
-            Inspect
-          </Button>
+          <span onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" variant="outline" onClick={() => onInspect?.(r)}>
+              <Eye className="h-3.5 w-3.5" />
+              Inspect
+            </Button>
+          </span>
         ),
         width: "w-28",
         align: "right" as const,
@@ -212,18 +181,15 @@ export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogI
     toast({ title: "Table settings", description: "Column visibility coming soon.", variant: "info" })
   }
 
-  // Wire click-to-filter: row click pushes source IP into global filter for cross-page consistency.
-  // Spec §3.1 allows row click to update context; DataTable onRowClick provides it without
-  // stealing the Inspect button (which stops propagation via its own onClick).
+  // Wire click-to-filter: row click pushes source IP into global filter for cross-page consistency
+  // (spec §3.1) and opens the drawer. Inspect button uses stopPropagation so it fires once.
   const handleRowClick = useCallback(
     (row: LogRow) => {
-      // No-op if parent doesn't filter — keep local; otherwise spec expects context sync.
-      // Parent (LiveMonitorPage) owns FilterContext; this is intentionally local-only unless
-      // the page wires onInspect to also setGlobalFilter. Keep behavior non-surprising:
-      // row click opens the drawer (same as Inspect) when onInspect exists.
+      const ip = getSrcIp(row)
+      if (ip) setGlobalFilter(ip)
       if (onInspect) onInspect(row)
     },
-    [onInspect],
+    [onInspect, setGlobalFilter],
   )
 
   return (
