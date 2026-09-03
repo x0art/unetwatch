@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 export type TimeRange = "1h" | "24h" | "7d"
 
@@ -27,15 +27,15 @@ function readInitialFilter(): string {
 function readInitialTimeRange(): TimeRange {
   if (typeof window === "undefined") return "24h"
   try {
-    const stored = window.localStorage.getItem(TIME_RANGE_KEY)
-    if (stored === "1h" || stored === "24h" || stored === "7d") return stored
+    const params = new URLSearchParams(window.location.search)
+    const q = params.get("range")
+    if (q === "1h" || q === "24h" || q === "7d") return q
   } catch {
     /* ignore */
   }
   try {
-    const params = new URLSearchParams(window.location.search)
-    const q = params.get("range")
-    if (q === "1h" || q === "24h" || q === "7d") return q
+    const stored = window.localStorage.getItem(TIME_RANGE_KEY)
+    if (stored === "1h" || stored === "24h" || stored === "7d") return stored
   } catch {
     /* ignore */
   }
@@ -45,17 +45,21 @@ function readInitialTimeRange(): TimeRange {
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [globalFilter, setGlobalFilterRaw] = useState<string>(() => readInitialFilter())
   const [timeRange, setTimeRangeRaw] = useState<TimeRange>(() => readInitialTimeRange())
+  const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const setGlobalFilter = useCallback((v: string) => {
     setGlobalFilterRaw(v)
-    try {
-      const url = new URL(window.location.href)
-      if (v) url.searchParams.set(GLOBAL_FILTER_QS_KEY, v)
-      else url.searchParams.delete(GLOBAL_FILTER_QS_KEY)
-      window.history.replaceState(null, "", url.toString())
-    } catch {
-      /* ignore */
-    }
+    if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current)
+    filterDebounceRef.current = setTimeout(() => {
+      try {
+        const url = new URL(window.location.href)
+        if (v) url.searchParams.set(GLOBAL_FILTER_QS_KEY, v)
+        else url.searchParams.delete(GLOBAL_FILTER_QS_KEY)
+        window.history.replaceState(null, "", url.toString())
+      } catch {
+        /* ignore */
+      }
+    }, 250)
   }, [])
 
   const setTimeRange = useCallback((v: TimeRange) => {
@@ -89,6 +93,12 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }
     window.addEventListener("popstate", onPop)
     return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (filterDebounceRef.current) clearTimeout(filterDebounceRef.current)
+    }
   }, [])
 
   const value = useMemo<FilterContextValue>(
