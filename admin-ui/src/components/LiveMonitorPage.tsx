@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from "react"
-import { Activity, Eye, SearchX } from "lucide-react"
+import { Activity } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Badge, Button, Dialog, PageHeader, Panel, Skeleton } from "./ui"
+import { Button, PageHeader, Panel, Skeleton } from "./ui"
 import { MetricCards } from "./MetricCards"
 import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
 import {
   getLiveSankey,
   getLiveMetrics,
   liveSankeyTruncationNote,
-  runQuery,
   timeRangeToMinutesLive,
   type LiveMetrics,
-  type QueryDoc,
 } from "../api"
 import { useAutoRefresh } from "../lib/utils"
+import { LogInspector, type LogRow } from "./LogInspector"
+import { InspectionDrawer } from "./InspectionDrawer"
 
 /** Delegates to api.timeRangeToMinutesLive (single source; also handles numeric strings). */
 function timeRangeToMinutes(tr: string): number {
@@ -134,189 +134,11 @@ function SankeySection({
   )
 }
 
-function LogInspectorSection({
-  filter,
-  timeRange,
-  onInspect,
-}: {
-  filter: string
-  timeRange: string
-  onInspect: (row: QueryDoc) => void
-}) {
-  const [rows, setRows] = useState<QueryDoc[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-
-  const fetchLogs = useCallback(async () => {
-    setLoading(true)
-    const minutes = timeRangeToMinutes(timeRange)
-    const q = filter.trim() || undefined
-    try {
-      const res = await runQuery(Math.min(minutes, 1440), q ? { q } : undefined)
-      setRows(res.items.slice(0, 50))
-      setTotal(res.total_requests)
-    } catch {
-      setRows([])
-      setTotal(0)
-    } finally {
-      setLoading(false)
-    }
-  }, [filter, timeRange])
-
-  useEffect(() => {
-    fetchLogs()
-  }, [fetchLogs])
-
-  return (
-    <Panel
-      title="Log Inspector"
-      description={`${total.toLocaleString()} docs · ${timeRange} window${filter ? ` · filter: ${filter}` : ""}`}
-      icon={SearchX}
-      action={
-        <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading}>
-          {loading ? "LOADING…" : "REFRESH"}
-        </Button>
-      }
-    >
-      {loading ? (
-        <Skeleton className="h-48 w-full" />
-      ) : rows.length === 0 ? (
-        <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
-          No log entries in this window — try a broader time range or clear the filter.
-        </p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                <th className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Timestamp
-                </th>
-                <th className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Src IP
-                </th>
-                <th className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Dest IP
-                </th>
-                <th className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-widest">
-                  URL / Domain
-                </th>
-                <th className="px-3 py-2 text-left font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Action
-                </th>
-                <th className="px-3 py-2 text-right font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Duration
-                </th>
-                <th className="px-3 py-2 text-right font-mono text-[11px] font-bold uppercase tracking-widest">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((r) => (
-                <tr key={`${r.timestamp}|${r.client_ip}|${r.url}`} className="hover:bg-muted/30">
-                  <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">
-                    {new Date(r.timestamp).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2 font-mono font-semibold">{r.client_ip}</td>
-                  <td className="px-3 py-2 font-mono text-muted-foreground">{r.server_ip}</td>
-                  <td className="max-w-[320px] truncate px-3 py-2 font-mono" title={r.url}>
-                    {r.url}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge variant={r.action === "ALLOW" ? "success" : r.action === "DENY" ? "destructive" : "warning"}>
-                      {r.action || "—"}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">
-                    {r.duration_seconds != null ? `${(r.duration_seconds * 1000).toFixed(0)}ms` : "—"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button variant="outline" size="sm" onClick={() => onInspect(r)}>
-                      <Eye className="h-3.5 w-3.5" />
-                      Inspect
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="border-t border-border bg-muted/30 px-3 py-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-            Showing 1–{rows.length} of {total.toLocaleString()} · Task 5 will add pagination, filters, and CSV
-            export.
-          </div>
-        </div>
-      )}
-      <p className="mt-3 font-mono text-[11px] text-muted-foreground">
-        Placeholder Log Inspector — Task 5 replaces this with the full DataTable + slide-over drawer.
-      </p>
-    </Panel>
-  )
-}
-
-function InspectionDrawer({ row, onClose }: { row: QueryDoc; onClose: () => void }) {
-  return (
-    <Dialog open onClose={onClose} title={`Event — ${row.client_ip} → ${row.base_url}`}>
-      <div className="space-y-3 font-mono text-xs">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <p className="mono-label">Timestamp</p>
-            <p className="mt-1 text-foreground">{new Date(row.timestamp).toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="mono-label">Action</p>
-            <p className="mt-1">
-              <Badge variant={row.action === "ALLOW" ? "success" : row.action === "DENY" ? "destructive" : "warning"}>
-                {row.action || "—"}
-              </Badge>
-            </p>
-          </div>
-          <div>
-            <p className="mono-label">Source IP (Host)</p>
-            <p className="mt-1 font-bold text-foreground">{row.client_ip}</p>
-          </div>
-          <div>
-            <p className="mono-label">Dest IP</p>
-            <p className="mt-1 text-foreground">{row.server_ip}</p>
-          </div>
-          <div>
-            <p className="mono-label">Duration</p>
-            <p className="mt-1 tabular-nums">
-              {row.duration_seconds != null ? `${(row.duration_seconds * 1000).toFixed(0)}ms` : "—"}
-            </p>
-          </div>
-          <div>
-            <p className="mono-label">Matched Rule</p>
-            <p className="mt-1 text-muted-foreground">
-              {row.blocked_by.length > 0 ? row.blocked_by.join(", ") : "—"}
-            </p>
-          </div>
-        </div>
-        <div>
-          <p className="mono-label">Full URL</p>
-          <a href={row.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-primary hover:underline">
-            {row.url}
-          </a>
-          <p className="mt-1 text-muted-foreground">Base: {row.base_url}</p>
-        </div>
-        <div className="flex flex-wrap gap-2 border-t border-border pt-3">
-          <Button size="sm" onClick={onClose}>
-            Close
-          </Button>
-          <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground self-center">
-            Full drawer with Allow List + Host History lands in Task 5.
-          </span>
-        </div>
-      </div>
-    </Dialog>
-  )
-}
-
 export function LiveMonitorPage() {
   const { globalFilter, setGlobalFilter, timeRange } = useFilter()
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
   const [loading, setLoading] = useState(true)
-  const [drawerRow, setDrawerRow] = useState<QueryDoc | null>(null)
+  const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true)
@@ -375,7 +197,7 @@ export function LiveMonitorPage() {
 
       <SankeySection filter={globalFilter} timeRange={timeRange} onNodeClick={(q) => setGlobalFilter(q)} />
 
-      <LogInspectorSection filter={globalFilter} timeRange={timeRange} onInspect={(row) => setDrawerRow(row)} />
+      <LogInspector filter={globalFilter} timeRange={timeRange} onInspect={setDrawerRow} />
 
       {drawerRow && <InspectionDrawer row={drawerRow} onClose={() => setDrawerRow(null)} />}
     </div>
