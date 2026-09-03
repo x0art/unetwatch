@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   type Pattern,
+  type PatternStats,
+  getPatternStats,
+  patternAction,
   listPatterns,
   deletePattern,
   updatePattern,
@@ -20,7 +23,9 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
+import { actionVariant } from "../lib/logRow"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
+import { PatternSummaryCards } from "./PatternSummaryCards"
 import {
   Upload,
   Pencil,
@@ -30,6 +35,18 @@ import {
 } from "lucide-react"
 
 const DEFAULT_PAGE_SIZE = 50
+
+/** A pattern row enriched with the Pattern Manager display fields (spec §3.3).
+ *  The backend registry exposes only id/pattern/pattern_type/timestamps, so
+ *  CATEGORY, ACTION and STATUS are derived client-side from pattern_type. */
+interface PatternRow extends Pattern {
+  category: string
+  action: "ALLOW" | "DENY" | "FLAG"
+  /** Per-pattern hits in the 24h window — not yet exposed by the backend, so
+   *  always "—" until Task 9/10 lands per-pattern aggregation. */
+  matches24h: number | null
+  status: "active" | "draft"
+}
 
 /* Module-level handles to component state, synced each render, so
  * PATTERNS_COLUMNS stays referentially stable at module scope while its
@@ -45,11 +62,11 @@ const PATTERNS_UI: {
 }
 
 /** Stable row identity for the patterns table. */
-const PATTERNS_ROW_ID = (p: Pattern) => p.id
+const PATTERNS_ROW_ID = (p: PatternRow) => p.id
 
 /* Module-scope columns for the patterns table — referentially stable so
  * DataTable never re-sorts/re-renders when PatternTable re-renders. */
-const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
+const PATTERNS_COLUMNS: DataTableColumn<PatternRow>[] = [
   {
     id: "id",
     header: "ID",
@@ -59,7 +76,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   },
   {
     id: "pattern",
-    header: "Pattern",
+    header: "Pattern Regex/Wildcard",
     accessor: (p) => p.pattern,
     defaultSortDir: "asc",
     cell: (p) => (
@@ -69,13 +86,44 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     ),
   },
   {
-    id: "pattern_type",
-    header: "Type",
-    accessor: (p) => p.pattern_type,
+    id: "category",
+    header: "Category",
+    accessor: (p) => p.category,
     defaultSortDir: "asc",
     cell: (p) => (
-      <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
-        {p.pattern_type}
+      <Badge variant="secondary">{p.category}</Badge>
+    ),
+    width: "w-28",
+  },
+  {
+    id: "action",
+    header: "Action",
+    accessor: (p) => p.action,
+    defaultSortDir: "asc",
+    cell: (p) => (
+      <Badge variant={actionVariant(p.action)}>{p.action}</Badge>
+    ),
+    width: "w-24",
+  },
+  {
+    id: "matches_24h",
+    header: "Matches (24h)",
+    accessor: (p) => p.matches24h ?? 0,
+    cell: (p) => (
+      <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        {p.matches24h === null ? "—" : p.matches24h.toLocaleString()}
+      </span>
+    ),
+    width: "w-24",
+  },
+  {
+    id: "status",
+    header: "Status",
+    accessor: (p) => p.status,
+    defaultSortDir: "asc",
+    cell: (p) => (
+      <Badge variant={p.status === "active" ? "success" : "outline"} className={p.status === "active" ? "" : "text-muted-foreground"}>
+        {p.status === "active" ? "[Active]" : "Draft"}
       </Badge>
     ),
     width: "w-24",
@@ -123,12 +171,21 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
 ]
 
 export function PatternTable() {
-  const [patterns, setPatterns] = useState<Pattern[]>([])
+  const [patterns, setPatterns] = useState<PatternRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
+  const [filterCategory, setFilterCategory] = useState("all")
+  const [filterAction, setFilterAction] = useState("all")
+  const [filterActive, setFilterActive] = useState("all")
+  const [stats, setStats] = useState<PatternStats>({
+    totalActive: 0,
+    flagged24h: 0,
+    highRisk: 0,
+    pendingDrafts: 0,
+  })
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
@@ -164,7 +221,13 @@ export function PatternTable() {
     .map((l) => l.trim())
     .filter(Boolean).length
 
-  /* ── Data fetching ──────────────────────────────────────────────── */
+  /* ── Data fetching ────────────────────────────────────────────────
+   * Server-side: pattern_type (block/whitelist) + search + sort.
+   * Client-side (documented in Task 8 report): the Category/Action/Active
+   * filters operate on derived fields the backend does not expose, so they
+   * apply over the fetched registry page below. The table stays server-
+   * paginated by the base pattern_type/search; rows hidden by a derived
+   * filter are simply not rendered. */
   const fetchPatterns = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -177,13 +240,48 @@ export function PatternTable() {
         sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
         sort_order: sortDir,
       })
-      setPatterns(data)
+      const rows: PatternRow[] = data.map((p) => {
+        const action = patternAction(p)
+        return {
+          ...p,
+          category: p.pattern_type === "block" ? "Block" : "Whitelist",
+          action,
+          matches24h: null,
+          status: p.pattern_type === "block" ? "active" : "draft",
+        }
+      })
+      setPatterns(rows)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
   }, [debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
+
+  /* ── Pattern Manager summary cards (spec §3.3) ──────────────────── */
+  const fetchStats = useCallback(async () => {
+    try {
+      setStats(await getPatternStats())
+    } catch {
+      /* leave the last known values in place */
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchStats()
+  }, [fetchStats])
+
+  /* Category/Action/Active filters are client-side (derived fields). When one
+   * is active the fetched page is smaller than pageSize, so drop to page 0 to
+   * avoid showing an empty page while matching rows exist on earlier pages. */
+  useEffect(() => {
+    if (
+      (filterCategory !== "all" || filterAction !== "all" || filterActive !== "all") &&
+      page > 0
+    ) {
+      setPage(0)
+    }
+  }, [filterCategory, filterAction, filterActive, page])
 
   useEffect(() => {
     fetchPatterns()
@@ -294,6 +392,28 @@ export function PatternTable() {
     { value: "whitelist", label: "Whitelist" },
   ]
 
+  const categoryOptions = [
+    { value: "all", label: "Category: All" },
+    { value: "Block", label: "Category: Block" },
+    { value: "Whitelist", label: "Category: Whitelist" },
+  ]
+
+  const actionOptions = [
+    { value: "all", label: "Action: All" },
+    { value: "FLAG", label: "Action: FLAG" },
+    { value: "DENY", label: "Action: DENY" },
+    { value: "ALLOW", label: "Action: ALLOW" },
+  ]
+
+  /* Status filter — spec §3.3 renders this as `[Active v]`. The "all" (no
+   * filter) state is not a dropdown entry: the closed trigger falls back to
+   * the placeholder "Active" so it reads exactly like the spec, while the
+   * dropdown offers Active / Draft as explicit filters. */
+  const activeOptions = [
+    { value: "active", label: "Active" },
+    { value: "draft", label: "Draft" },
+  ]
+
   const editTypeOptions = [
     { value: "block", label: "Block" },
     { value: "whitelist", label: "Whitelist" },
@@ -303,30 +423,74 @@ export function PatternTable() {
   PATTERNS_UI.busy = busy
   PATTERNS_UI.onEdit = openEdit
   PATTERNS_UI.onDelete = (id) => setDeleteTarget(id)
-  const columns: DataTableColumn<Pattern>[] = PATTERNS_COLUMNS
+  const columns: DataTableColumn<PatternRow>[] = PATTERNS_COLUMNS
+
+  const filteredPatterns = useMemo(() => {
+    let rows = patterns
+    if (filterCategory !== "all") {
+      const want = filterCategory.toLowerCase()
+      rows = rows.filter((p) => p.category.toLowerCase() === want)
+    }
+    if (filterAction !== "all") {
+      rows = rows.filter((p) => p.action === filterAction)
+    }
+    if (filterActive !== "all") {
+      rows = rows.filter((p) => p.status === filterActive)
+    }
+    return rows
+  }, [patterns, filterCategory, filterAction, filterActive])
+
+  const anyDerivedFilter =
+    filterCategory !== "all" || filterAction !== "all" || filterActive !== "all"
 
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
       {/* ── Header + Toolbar ── */}
       <PageHeader
-        title="Patterns"
-        description="Manage block and whitelist patterns used for URL matching"
+        title="Pattern Manager"
+        description="Block and whitelist patterns used for URL matching — summary cards, filters and the pattern registry (spec §3.3)"
       >
-        <SearchInput
-          placeholder="Search patterns..."
-          value={search}
-          onChange={handleSearchChange}
-          className="w-56"
-          aria-label="Search patterns"
-        />
-        <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
         <AddPatternButton onOpen={() => setCreateOpen(true)} />
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk Import
         </Button>
       </PageHeader>
+
+      {/* ── Pattern Manager summary cards (spec §3.3) ── */}
+      <PatternSummaryCards stats={stats} />
+
+      {/* ── Search + Category/Action/Active filter bar ── */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3 shadow-sm">
+        <SearchInput
+          placeholder="Search patterns, tags, domain..."
+          value={search}
+          onChange={handleSearchChange}
+          className="w-64"
+          aria-label="Search patterns"
+        />
+        <Select value={filterCategory} onChange={setFilterCategory} options={categoryOptions} aria-label="Filter by category" />
+        <Select value={filterAction} onChange={setFilterAction} options={actionOptions} aria-label="Filter by action" />
+        <Select value={filterActive} onChange={setFilterActive} options={activeOptions} placeholder="Active" aria-label="Filter by status" />
+        <Select value={filterType} onChange={handleFilterChange} options={typeOptions} aria-label="Filter by type" />
+        {(debouncedSearch || filterType !== "all" || anyDerivedFilter) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearch("")
+              setFilterType("all")
+              setFilterCategory("all")
+              setFilterAction("all")
+              setFilterActive("all")
+              setPage(0)
+            }}
+          >
+            Reset
+          </Button>
+        )}
+      </div>
 
       {/* ── Error banner ── */}
       {error && (
@@ -341,7 +505,7 @@ export function PatternTable() {
       {/* ── Table ── */}
       <DataTable
         columns={columns}
-        data={patterns}
+        data={filteredPatterns}
         rowId={PATTERNS_ROW_ID}
         loading={loading}
         selectable
@@ -359,9 +523,12 @@ export function PatternTable() {
         ]}
         empty={{
           icon: ListFilter,
-          title: debouncedSearch || filterType !== "all" ? "No patterns match your search" : "No patterns yet",
+          title:
+            debouncedSearch || filterType !== "all" || anyDerivedFilter
+              ? "No patterns match your filters"
+              : "No patterns yet",
           description:
-            debouncedSearch || filterType !== "all"
+            debouncedSearch || filterType !== "all" || anyDerivedFilter
               ? "Try adjusting your search or filter"
               : "Add your first pattern to get started",
         }}

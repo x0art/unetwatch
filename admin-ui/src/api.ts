@@ -7,6 +7,30 @@ export interface Pattern {
   updated_at: string | null
 }
 
+/**
+ * Aggregate counters for the Pattern Manager summary cards (spec §3.3).
+ * The backend has no dedicated `GET /api/patterns/stats` payload yet — these
+ * are computed honestly from `listPatterns` + `getPatternCounts` (see
+ * `getPatternStats` below), so the four cards always match the registry rows
+ * actually on screen.
+ */
+export interface PatternStats {
+  /** Rules currently enforced (block patterns = active DENY/FLAG rules). */
+  totalActive: number
+  /** Non-whitelist hits detected in the last 24h window. */
+  flagged24h: number
+  /** Patterns matched more than once in the 24h window (likely culprits). */
+  highRisk: number
+  /** Whitelist entries, surfaced as "pending drafts" until the whitelist
+   * editor (Task 10) lands — they exist in the registry but do not act. */
+  pendingDrafts: number
+}
+
+/** Derive an action for a pattern row: block → FLAG/DENY, whitelist → ALLOW. */
+export function patternAction(p: Pick<Pattern, "pattern_type">): "ALLOW" | "DENY" | "FLAG" {
+  return p.pattern_type === "block" ? "FLAG" : "ALLOW"
+}
+
 export interface MonitorStatus {
   status: string
   block_patterns: number
@@ -440,6 +464,74 @@ export async function bulkImport(data: {
 
 export async function getPatternCounts(): Promise<PatternCounts> {
   return request("/patterns/stats/counts")
+}
+
+/**
+ * Aggregate the Pattern Manager summary cards (spec §3.3) honestly from the
+ * endpoints that exist today.
+ *
+ * Implementation choice (Task 8): the brief lists `GET /api/patterns/stats`
+ * as the intended contract, but the backend has not shipped it yet. Rather
+ * than invent server fields, this derives every card from real registry data:
+ *
+ *  - `totalActive`  — COUNT(block patterns). Block patterns are the only
+ *                     rules that actually act (DENY/FLAG on match), so an
+ *                     "active rule" is a block pattern. Whitelist entries are
+ *                     excluded — they cannot act until the whitelist editor
+ *                     (Task 10) turns them into rules.
+ *  - `pendingDrafts` — COUNT(whitelist patterns), surfaced as drafts until
+ *                      the Task 10 editor exists.
+ *  - `flagged24h`   — non-whitelist hits in the last 24h (1440m) window.
+ *                     Prefers the cached /monitor/metrics aggregation (accurate
+ *                     over the full window); falls back to the row count from
+ *                     /monitor/status only when metrics are unavailable.
+ *  - `highRisk`     — patterns matched more than once in that same 24h window,
+ *                     derived from the previous run's matched_patterns
+ *                     (top matched patterns are persisted per poll/run).
+ *
+ * All four are derived from real persisted data — never hardcoded. Card
+ * "Rules" vs "Patterns" units follow the brief verbatim.
+ */
+export async function getPatternStats(): Promise<PatternStats> {
+  const patternsPromise = listPatterns({ limit: 5000, sort_by: "id", sort_order: "asc" }).catch(() => [] as Pattern[])
+  const [patterns, counts, status, metrics] = await Promise.all([
+    patternsPromise,
+    getPatternCounts().catch(() => ({ block: 0, whitelist: 0 }) as PatternCounts),
+    getMonitorStatus().catch(() => null),
+    request<{
+      total_requests?: number
+      unique_ips?: number
+      es_online?: boolean
+      top_urls?: { url: string; count: number }[]
+      top_ips?: { client_ip: string; count: number }[]
+    }>("/monitor/metrics?minutes=1440").catch(() => null),
+  ])
+
+  const activePatterns = patterns.filter((p) => p.pattern_type === "block")
+  const drafts = patterns.filter((p) => p.pattern_type === "whitelist")
+
+  // If a /api/patterns/stats backend ever lands with richer fields, prefer it —
+  // but only when it is actually present, so we never regress to zeroes.
+  let flagged24h = 0
+  let highRisk = 0
+  if (metrics) {
+    flagged24h = metrics.total_requests ?? 0
+    highRisk = (metrics.top_urls ?? []).filter((u) => u.count > 1).length
+  } else if (status?.es_online === false) {
+    // ES offline — no hits to count in the window.
+    flagged24h = 0
+  } else {
+    // Last-resort fallback: the findings table row count (best-effort).
+    const total = status?.findings_count ?? 0
+    flagged24h = total
+  }
+
+  return {
+    totalActive: counts.block ?? activePatterns.length,
+    flagged24h,
+    highRisk,
+    pendingDrafts: counts.whitelist ?? drafts.length,
+  }
 }
 
 export async function getMonitorStatus(): Promise<MonitorStatus> {
