@@ -9,30 +9,30 @@ def test_field_map_round_trips(client):
 
 
 def test_field_map_defaults_and_partial_put(client):
-    """Defaults are the spec field mapping; a partial PUT overlays only what
-    was sent and leaves the rest intact (no nulls)."""
+    """Defaults match the configured logstash-proxy-* flat schema; a partial
+    PUT overlays only what was sent and leaves the rest intact (no nulls)."""
     res = client.get("/api/settings/field-map")
     data = res.json()
-    assert data["src_ip"] == "source.ip"
-    assert data["dest_ip"] == "destination.ip"
-    assert data["url"] == "url.full"
-    assert data["domain"] == "url.domain"
+    assert data["src_ip"] == "client_ip"
+    assert data["dest_ip"] == "server_ip"
+    assert data["url"] == "url"
+    assert data["domain"] == "domain"
     assert data["timestamp"] == "@timestamp"
-    assert data["action"] == "event.action"
-    assert data["duration"] == "event.duration"
+    assert data["action"] == "action"
+    assert data["duration"] == "duration_seconds"
 
-    put = client.put("/api/settings/field-map", json={"src_ip": "source.ip"})
+    put = client.put("/api/settings/field-map", json={"src_ip": "client_ip"})
     assert put.status_code == 200
     body = put.json()
-    assert body["src_ip"] == "source.ip"
+    assert body["src_ip"] == "client_ip"
     # Fields not sent keep their defaults.
-    assert body["dest_ip"] == "destination.ip"
-    assert body["duration"] == "event.duration"
+    assert body["dest_ip"] == "server_ip"
+    assert body["duration"] == "duration_seconds"
 
     # The saved row round-trips through GET.
     data = client.get("/api/settings/field-map").json()
-    assert data["src_ip"] == "source.ip"
-    assert data["dest_ip"] == "destination.ip"
+    assert data["src_ip"] == "client_ip"
+    assert data["dest_ip"] == "server_ip"
 
 
 def test_kibana_settings_defaults_and_round_trip(client):

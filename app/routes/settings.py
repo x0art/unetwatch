@@ -45,18 +45,22 @@ class KibanaSettings(BaseModel):
 class FieldMap(BaseModel):
     """App-attribute → Kibana-log-field mapping (spec §3.5 Field Mapper).
 
-    Defaults are the documented flat/nested schema the NOC pipeline expects.
-    The UI edits these so custom index schemas can be mapped without code
-    changes; Task 12's QueryBuilder/Normalizer consume this mapping.
+    Defaults are the configured ``logstash-proxy-*`` index's flat schema
+    (``client_ip``, ``server_ip``, ``url``, ``domain``, ``action`` as
+    uppercase ALLOW/DENY/FLAG, ``duration_seconds``). The UI edits these so
+    custom index schemas can be mapped without code changes; Task 12's
+    QueryBuilder/Normalizer consume this mapping and fall back to the
+    spec's nested-ECS shape (``source.ip``/``url.full``/``event.action``)
+    when a flat field is absent from a document.
     """
 
-    src_ip: str = "source.ip"
-    dest_ip: str = "destination.ip"
-    url: str = "url.full"
-    domain: str = "url.domain"
+    src_ip: str = "client_ip"
+    dest_ip: str = "server_ip"
+    url: str = "url"
+    domain: str = "domain"
     timestamp: str = "@timestamp"
-    action: str = "event.action"
-    duration: str = "event.duration"
+    action: str = "action"
+    duration: str = "duration_seconds"
 
 
 class AlertSettings(BaseModel):

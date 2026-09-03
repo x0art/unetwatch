@@ -55,14 +55,17 @@ class Normalizer:
             hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
         )
 
-        def mapped(field_map_attr: str, default_dotted: str) -> Any:
-            """Mapped dotted value first, literal default second."""
+        def mapped(field_map_attr: str, flat_default: str, nested_default: str) -> Any:
+            """Mapped dotted path first, flat default second, nested default third."""
             if field_map is not None:
                 mapped_path = getattr(field_map, field_map_attr)
                 val = _get_dotted(src, mapped_path)
                 if val is not None:
                     return val
-            return _get_dotted(src, default_dotted)
+            val = _get_dotted(src, flat_default)
+            if val is not None:
+                return val
+            return _get_dotted(src, nested_default)
 
         timestamp = (
             _get_dotted(src, field_map.timestamp)
@@ -72,18 +75,45 @@ class Normalizer:
         if timestamp is None and field_map is not None:
             timestamp = src.get("@timestamp")
 
-        src_ip = mapped("src_ip", "source.ip")
-        # FieldMap has no src_host key — always the literal source.host path.
+        # Flat logstash-proxy-* fields first (the configured index), nested ECS
+        # (§5.2) as fallback so the spec example keeps working.
+        src_ip = mapped("src_ip", "client_ip", "source.ip")
         src_host = _get_dotted(src, "source.host")
-        dest_ip = mapped("dest_ip", "destination.ip")
-        domain = mapped("domain", "destination.domain")
+        if not src_host and isinstance(src.get("host"), dict):
+            src_host = src.get("host").get("ip")
+        dest_ip = mapped("dest_ip", "server_ip", "destination.ip")
+        domain = mapped("domain", "domain", "destination.domain")
         if not domain:
             domain = _get_dotted(src, "url.domain")
-        url = mapped("url", "url.full")
-        raw_action = mapped("action", "event.action")
+        url = mapped("url", "url", "url.full")
+        raw_action = mapped("action", "action", "event.action")
         action = (raw_action or "").upper() if raw_action is not None else ""
-        duration_ms = mapped("duration", "event.duration")
+        # Duration: flat logstash-proxy stores seconds (12.64); nested ECS §5.2
+        # stores milliseconds. Track which field won so seconds→ms is applied
+        # exactly once, and only for the flat source.
+        duration_raw: Any = None
+        duration_is_seconds = False
+        if field_map is not None:
+            duration_raw = _get_dotted(src, field_map.duration)
+            duration_is_seconds = field_map.duration == "duration_seconds"
+        if duration_raw is None:
+            duration_raw = _get_dotted(src, "duration_seconds")
+            duration_is_seconds = True
+        if duration_raw is None:
+            duration_raw = _get_dotted(src, "event.duration")
+            duration_is_seconds = False
+        duration_ms: Any = None
+        if isinstance(duration_raw, (int, float)) and not isinstance(duration_raw, bool):
+            val = float(duration_raw)
+            if duration_is_seconds and val < 60:  # seconds → milliseconds
+                duration_ms = int(round(val * 1000))
+            else:
+                duration_ms = int(val)
         bts = _get_dotted(src, "source.bytes")
+        if bts is None:
+            bts = src.get("bytes_downloaded")
+        if bts is None:
+            bts = src.get("bytes_uploaded")
 
         rule = src.get("rule") if isinstance(src.get("rule"), dict) else {}
 

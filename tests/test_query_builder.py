@@ -40,7 +40,9 @@ def test_query_builder_uses_custom_field_map():
     )
     assert "client_ip" in str(body)  # multi_match uses mapped src/dest fields
     assert "log_timestamp" in str(body)  # range + sort on mapped timestamp
-    assert {"term": {"verdict": "allow"}} in body["query"]["bool"]["must"]
+    # The configured index stores `action` as UPPERCASE (ALLOW/DENY/FLAG), so
+    # the filter value is sent verbatim — never lowercased.
+    assert {"term": {"verdict": "ALLOW"}} in body["query"]["bool"]["must"]
 
 
 def test_query_builder_kql_to_dsl():

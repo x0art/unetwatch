@@ -51,3 +51,43 @@ def test_normalizer_missing_fields():
     assert app_state["id"] == "empty"
     assert app_state["action"] == ""
     assert app_state["matched_pattern_id"] is None
+
+
+def test_normalizer_maps_flat_proxy_sample():
+    """Real logstash-proxy-* schema (flat) must resolve to NormalizedAppState.
+
+    Regression test from a live document: the index stores flat fields
+    (client_ip, server_ip, url, domain, action=ALLOW, duration_seconds,
+    bytes_downloaded/uploaded) — not the nested ECS shape the §5.2 example
+    used. Without a persisted FieldMap the default resolution must handle
+    BOTH shapes so out-of-the-box queries match the configured index.
+    """
+    raw = {
+        "_id": "uEKgZqABzfGkVtx8PrFL",
+        "_source": {
+            "@timestamp": "2026-09-03T09:36:12.000Z",
+            "action": "ALLOW",
+            "category": "Search Site",
+            "client_ip": "172.21.26.84",
+            "server_ip": "142.251.154.119",
+            "url": "https://www.google.com/gen_204",
+            "domain": "www.google.com",
+            "duration_seconds": 12.64,
+            "bytes_downloaded": 916,
+            "bytes_uploaded": 4116,
+            "http_method": "GET",
+            "http_status_code": 204,
+            "country_code": "US",
+            "rule_info": "DS",
+            "rule_name": "-",
+            "host": {"ip": "172.21.73.13"},
+        },
+    }
+    state = Normalizer.to_app_state(raw)  # no field_map → default resolution
+    assert state["src_ip"] == "172.21.26.84"
+    assert state["dest_ip"] == "142.251.154.119"
+    assert state["url"] == "https://www.google.com/gen_204"
+    assert state["domain"] == "www.google.com"
+    assert state["action"] == "ALLOW"
+    assert state["duration_ms"] == 12640  # duration_seconds * 1000
+    assert state["bytes"] == 916

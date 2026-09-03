@@ -219,7 +219,10 @@ class QueryBuilder:
                     {"range": {field_map.timestamp: {"gte": es_offset}}}
                 )
         if filters.get("action") and filters["action"] != "All":
-            must.append({"term": {field_map.action: filters["action"].lower()}})
+            # The configured logstash-proxy index stores `action` as UPPERCASE
+            # (ALLOW/DENY/FLAG); a lowercase term would match nothing. Keep the
+            # filter value verbatim (UI already sends uppercase).
+            must.append({"term": {field_map.action: filters["action"]}})
         for key in ("hostFilter", "patternFilter"):
             value = filters.get(key)
             if not value:
