@@ -31,6 +31,60 @@ console.
   ES query.
 - **Serve API + UI from one process** — the built frontend is served at `/`.
 
+## Network Traffic Monitor — NOC/SOC
+
+The admin console is organized as a five-page NOC/SOC workflow —
+**observe → click to filter → inspect → generate a rule → simulate & deploy**
+(spec §7). Every visual element (Sankey node, metric card, log row) is
+clickable and applies a global context filter without navigating away, so an
+analyst can chase a host or domain from the Live Monitor straight through to a
+deployed pattern.
+
+### Information Architecture
+
+```
+Network Traffic Monitor
+├── Live Log Monitor
+│   └── Live Monitor — 4 KPI Metric Cards + Sankey (Sources → Patterns → Domains → Destinations)
+│                      + Log Inspector + Inspection Drawer
+├── Host Inspector
+│   ├── Host lookup bar + Host Entity & Risk Card
+│   ├── Visual Traffic Timeline & Anomaly Heatmap
+│   ├── Top Destinations & Rule Matches
+│   └── Chronological Kibana Request Logs (paginated)
+├── Pattern Manager
+│   ├── Summary Cards (Total Active / Flagged 24h / High-Risk / Pending Drafts)
+│   ├── Search + Category / Action / Status filter bar
+│   ├── Patterns table (edit / delete / bulk select)
+│   └── Run Pattern Test — Live Kibana Simulation drawer (preview before Save & Deploy)
+├── Analytics & Reports
+│   ├── Range / Compare / Host Group controls
+│   ├── 4 high-level metric cards
+│   ├── Daily Bandwidth (area) + Daily Policy Enforcements (stacked bar)
+│   ├── Top Bandwidth Domains + Top Denied Domains tables
+│   └── Export CSV / PDF
+└── System Settings
+    ├── Kibana Connection (host, index pattern, auth) + Test Connection
+    ├── Field Mapping (app attribute ↔ Kibana log field, sample values)
+    ├── Alert Rules (DENY-ratio threshold, rolling window, webhook)
+    └── User Access Control
+```
+
+### Page Inventory
+
+| Page | Key Components | Source Files |
+|------|----------------|--------------|
+| Live Monitor | MetricCards (4 KPIs), SankeyDiagram (4-column, click-to-filter), LogInspector (live stream + action filter + export), InspectionDrawer (matched rule + quick actions) | `LiveMonitorPage.tsx`, `MetricCards.tsx`, `SankeyDiagram.tsx`, `LogInspector.tsx`, `InspectionDrawer.tsx` |
+| Host Inspector | HostEntityCard (identity + risk score), TrafficTimeline (spike annotation), TopDestinations (domains + triggered patterns), host log table (paginated) | `HostInspectorPage.tsx`, `HostEntityCard.tsx`, `TrafficTimeline.tsx`, `TopDestinations.tsx` |
+| Pattern Manager | PatternSummaryCards, PatternTable (search + category/action/status filters), PatternSimulationDrawer (Rule Definition → Run Pattern Test → Match Preview → Save & Deploy) | `PatternTable.tsx`, `PatternSummaryCards.tsx`, `PatternSimulationDrawer.tsx` |
+| Analytics | Range/compare/host-group controls, 4 metric cards, TrendCharts (bandwidth area + enforcements stacked bar), two top tables, CSV/PDF export | `AnalyticsPage.tsx`, `TrendCharts.tsx` |
+| System Settings | Kibana Connection form + Test Connection, FieldMapper (app attribute ↔ Kibana field, sample values), Alert Rules (threshold 5.0% / 15-min window + webhook) | `SystemSettingsPage.tsx`, `FieldMapper.tsx` |
+
+Shared infrastructure: `contexts/FilterContext.tsx` (global click-to-filter
+state + URL sync), `lib/echartsTheme.ts` (theme-aware ECharts color
+resolution), `components/DataTable.tsx` (sortable/paginated tables), and
+`lib/logRow.ts` (row accessors used by every page).
+
 ## Tech Stack
 
 | Layer      | Technology                                        |
@@ -165,6 +219,29 @@ matches a single character, and everything else is literal.
 | POST   | `/api/query/`                   | Run an ad-hoc ES query             |
 | GET    | `/api/logs/`                    | Monitor-log audit trail            |
 | GET    | `/health`                       | Liveness + dependency status       |
+
+### Pattern Simulation / Analytics / Settings (NOC/SOC)
+
+| Method | Path                              | Description                                       |
+|--------|-----------------------------------|---------------------------------------------------|
+| POST   | `/api/patterns/simulate`          | Sandbox a wildcard/regex pattern against recent logs → `{matchCount, preview}` |
+| GET    | `/api/analytics/summary`          | High-level usage metrics (volume, blocked, top host, peak time; optional previous-period compare) |
+| GET    | `/api/analytics/bandwidth`        | Daily inbound/outbound bandwidth buckets           |
+| GET    | `/api/analytics/enforcements`     | Daily ALLOW vs DENY enforcement buckets            |
+| GET    | `/api/analytics/top-domains`      | Top bandwidth-consuming domains (volume + % total) |
+| GET    | `/api/analytics/top-denied`       | Top denied target domains (blocks + primary rule)  |
+| GET    | `/api/settings/kibana`            | Current Kibana connection form                     |
+| PUT    | `/api/settings/kibana`            | Persist Kibana connection form                     |
+| POST   | `/api/settings/test-connection`   | Ping the configured Kibana host with credentials   |
+| GET    | `/api/settings/field-map`         | App-attribute ↔ Kibana-field mapping               |
+| PUT    | `/api/settings/field-map`         | Persist the field mapping                          |
+| GET    | `/api/settings/alerts`            | DENY-ratio threshold + webhook alert rules         |
+| PUT    | `/api/settings/alerts`            | Persist alert rules                                |
+
+The analytics endpoints share the `range` / `compare` / `hostGroup` query
+params and aggregate the persisted findings table (falling back to live
+Elasticsearch when the rich fields exist). `compare=previous` returns honest
+previous-period deltas.
 
 ## Health
 
