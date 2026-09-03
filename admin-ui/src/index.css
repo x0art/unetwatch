@@ -1,108 +1,89 @@
-/* ── Fonts: heavy grotesk + mono for neobrutalist system ──── */
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap');
+/* ── Fonts: Inter + JetBrains Mono for NOC/SOC Dark Obsidian ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 @import "tailwindcss";
 
-/* ── Dark mode: class-based ────────────────────────────────────── */
+/* ── Dark mode: class-based (single dark theme, NOC) ────────────── */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Neobrutalist tokens ───────────────────────────────────────── */
+/* ── Dark Obsidian NOC — Canvas/Card/Border/Text/Status/Accent ──── */
 @theme {
-  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Archivo Black", "Space Grotesk", ui-sans-serif, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
-  /* Paper / Ink */
-  --color-background: #F6F2E8;
-  --color-foreground: #0A0A0A;
-  --color-card: #FFFFFF;
-  --color-card-foreground: #0A0A0A;
-  --color-popover: #FFFFFF;
-  --color-popover-foreground: #0A0A0A;
-
-  /* Hazard primaries — flat, no gradients */
-  --color-primary: #FF3B30;
-  --color-primary-foreground: #FFFFFF;
-  --color-secondary: #FFD60A;
-  --color-secondary-foreground: #0A0A0A;
-  --color-accent: #FFD60A;
-  --color-accent-foreground: #0A0A0A;
-
-  --color-muted: #ECE8DD;
-  --color-muted-foreground: #6B6560;
-
-  /* Semantic — flat */
-  --color-success: #0A0A0A;
-  --color-success-foreground: #FFD60A;
-  --color-warning: #FFD60A;
-  --color-warning-foreground: #0A0A0A;
-  --color-danger: #FF3B30;
-  --color-danger-foreground: #FFFFFF;
-  --color-info: #0A7AFF;
-  --color-info-foreground: #FFFFFF;
+  --color-background: #0F172A;
+  --color-foreground: #F8FAFC;
+  --color-card: #1E293B;
+  --color-card-foreground: #F8FAFC;
+  --color-popover: #1E293B;
+  --color-popover-foreground: #F8FAFC;
+  --color-primary: #6366F1;
+  --color-primary-foreground: #F8FAFC;
+  --color-muted: #1E293B;
+  --color-muted-foreground: #94A3B8;
+  --color-border: #334155;
+  --color-input: #334155;
+  --color-ring: #6366F1;
+  --color-success: #10B981;
+  --color-success-foreground: #0F172A;
+  --color-warning: #F59E0B;
+  --color-warning-foreground: #0F172A;
+  --color-danger: #EF4444;
+  --color-danger-foreground: #F8FAFC;
+  --color-info: #6366F1;
+  --color-info-foreground: #F8FAFC;
   --color-destructive: var(--color-danger);
   --color-destructive-foreground: var(--color-danger-foreground);
-
-  /* Ink borders — everywhere */
-  --color-border: #0A0A0A;
-  --color-input: #0A0A0A;
-  --color-ring: #0A0A0A;
-
-  /* Sidebar — ink slab */
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --color-sidebar-muted: #9A9590;
-  --color-sidebar-active: #FFD60A;
-  --color-sidebar-hover: #1A1A1A;
-  --color-sidebar-border: #1A1A1A;
-
-  /* Neobrutalist: no radius, hard edges */
-  --radius: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
-
-  --shadow-color: #0A0A0A;
-  --default-transition-duration: 140ms;
+  --color-secondary: #1E293B;
+  --color-secondary-foreground: #94A3B8;
+  --color-accent: #6366F1;
+  --color-accent-foreground: #F8FAFC;
+  --color-sidebar: #0F172A;
+  --color-sidebar-foreground: #F8FAFC;
+  --color-sidebar-active: #6366F1;
+  --color-sidebar-border: #1E293B;
+  --color-sidebar-muted: #94A3B8;
+  --radius: 0.5rem;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --default-transition-duration: 160ms;
   --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Light is the default paper — same tokens, kept for explicit .light class */
+/* Single dark — .light and .dark mirror the same obsidian tokens. */
 .light {
-  --color-background: #F6F2E8;
-  --color-foreground: #0A0A0A;
-  --color-card: #FFFFFF;
-  --color-card-foreground: #0A0A0A;
-  --color-popover: #FFFFFF;
-  --color-popover-foreground: #0A0A0A;
-  --color-border: #0A0A0A;
-  --color-input: #0A0A0A;
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --shadow-color: #0A0A0A;
+  --color-background: #0F172A;
+  --color-foreground: #F8FAFC;
+  --color-card: #1E293B;
+  --color-card-foreground: #F8FAFC;
+  --color-popover: #1E293B;
+  --color-popover-foreground: #F8FAFC;
+  --color-border: #334155;
+  --color-input: #334155;
+  --color-ring: #6366F1;
+  --color-muted: #1E293B;
+  --color-muted-foreground: #94A3B8;
+  --color-sidebar: #0F172A;
+  --color-sidebar-foreground: #F8FAFC;
 }
-
-/* Dark brutal — inverted paper */
 .dark {
-  --color-background: #0A0A0A;
-  --color-foreground: #F6F2E8;
-  --color-card: #141414;
-  --color-card-foreground: #F6F2E8;
-  --color-popover: #141414;
-  --color-popover-foreground: #F6F2E8;
-  --color-muted: #1E1E1E;
-  --color-muted-foreground: #9A9590;
-  --color-border: #F6F2E8;
-  --color-input: #F6F2E8;
-  --color-ring: #FFD60A;
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --color-sidebar-border: #2A2A2A;
-  --shadow-color: #F6F2E8;
+  --color-background: #0F172A;
+  --color-foreground: #F8FAFC;
+  --color-card: #1E293B;
+  --color-card-foreground: #F8FAFC;
+  --color-popover: #1E293B;
+  --color-popover-foreground: #F8FAFC;
+  --color-border: #334155;
+  --color-input: #334155;
+  --color-ring: #6366F1;
+  --color-muted: #1E293B;
+  --color-muted-foreground: #94A3B8;
+  --color-sidebar: #0F172A;
+  --color-sidebar-foreground: #F8FAFC;
 }
 
-/* ── Base ─────────────────────────────────────────────────────── */
+/* ── Base ───────────────────────────────────────────────────────── */
 @layer base {
   * { border-color: var(--color-border); }
   html {
@@ -115,117 +96,104 @@
   body { margin: 0; overflow-x: clip; }
   h1, h2, h3 { text-wrap: balance; }
   p { text-wrap: pretty; }
-  ::selection { background: var(--color-primary); color: #fff; }
+  ::selection { background: var(--color-ring); color: var(--color-primary-foreground); }
 }
 
-/* ── Neobrutalist primitives ─────────────────────────────────── */
-.brutal-border { border: 2.5px solid var(--color-border); }
-.brutal-border-thick { border: 3px solid var(--color-border); }
-.brutal-shadow { box-shadow: 4px 4px 0 var(--shadow-color); }
-.brutal-shadow-lg { box-shadow: 6px 6px 0 var(--shadow-color); }
-.brutal-shadow-sm { box-shadow: 3px 3px 0 var(--shadow-color); }
-/* Dark mode: shadows use ink, so cards need light border shadow visible */
-.dark .brutal-shadow,
-.dark .brutal-shadow-lg,
-.dark .brutal-shadow-sm { box-shadow: 4px 4px 0 #F6F2E8; }
-.dark .brutal-shadow-lg { box-shadow: 6px 6px 0 #F6F2E8; }
-
-/* Hard press — brutal buttons slam 1px */
-.brutal-press:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--shadow-color) !important; }
-.dark .brutal-press:active { box-shadow: 2px 2px 0 #F6F2E8 !important; }
-
-/* Card = white slab + ink border + hard shadow, no radius */
-.brutal-card {
-  background: var(--color-card);
-  color: var(--color-card-foreground);
-  border: 2.5px solid var(--color-border);
-  box-shadow: 5px 5px 0 var(--shadow-color);
+/* ── Typography utilities — NOC spec ──────────────────────────────
+ * Page Title   20px / 700  sans
+ * H2           15px / 600  sans
+ * KPI          24px / 800  mono
+ * Table        13px / 400  mono
+ * Badge        11px / 700  uppercase mono
+ * ──────────────────────────────────────────────────────────────── */
+.page-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
 }
-.dark .brutal-card { border-color: #2A2A2A; box-shadow: 5px 5px 0 #F6F2E8; }
-
-/* Ticker tape / stamp label */
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  border: 2px solid var(--color-border);
-  background: var(--color-secondary);
-  color: var(--color-secondary-foreground);
+.h2, .section-title {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.kpi, .kpi-value {
   font-family: var(--font-mono);
+  font-size: 24px;
   font-weight: 800;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 3px 8px;
   line-height: 1;
+  letter-spacing: -0.02em;
 }
-.stamp--red { background: var(--color-primary); color: #fff; border-color: #0A0A0A; }
-.stamp--ink { background: #0A0A0A; color: #F6F2E8; border-color: #0A0A0A; }
-.dark .stamp--ink { background: #F6F2E8; color: #0A0A0A; border-color: #F6F2E8; }
-.stamp--blue { background: var(--color-info); color: #fff; }
-
-/* Halftone — ink dots */
-.halftone {
-  background-image: radial-gradient(circle, #0A0A0A 1.1px, transparent 1.2px);
-  background-size: 10px 10px;
-  opacity: 0.08;
+.table-mono, .telemetry-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
 }
-.dark .halftone { background-image: radial-gradient(circle, #F6F2E8 1.1px, transparent 1.2px); opacity: 0.12; }
-
-/* Hazard stripe bar — 45deg */
-.hazard-bar {
-  height: 10px;
-  background: repeating-linear-gradient(135deg, #0A0A0A 0 12px, #FFD60A 12px 24px);
-  border-top: 2px solid #0A0A0A;
-  border-bottom: 2px solid #0A0A0A;
+.badge-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
-.dark .hazard-bar { border-color: #F6F2E8; }
-
-/* Grid paper — 1px blueprint grid */
-.grid-paper {
-  background-image:
-    linear-gradient(to right, color-mix(in oklch, var(--color-foreground) 7%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--color-foreground) 7%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-/* Mono label — telemetry */
 .mono-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--color-muted-foreground);
 }
-
-/* Display — Archivo Black brutal */
 .font-display {
-  font-family: var(--font-display);
-  letter-spacing: -0.02em;
-  line-height: 0.95;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
 }
 
-/* Focus — brutal offset ring */
+/* Tailwind @utility aliases (so `text-page-title` etc work as utilities) */
+@utility text-page-title { font-size: 20px; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+@utility text-h2 { font-size: 15px; font-weight: 600; line-height: 1.35; }
+@utility text-kpi { font-family: var(--font-mono); font-size: 24px; font-weight: 800; line-height: 1; }
+@utility text-table { font-family: var(--font-mono); font-size: 13px; font-weight: 400; line-height: 1.5; }
+@utility text-badge { font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ── Soft NOC surfaces — replaces brutal hard-edge slabs ───────── */
+.noc-card {
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(2, 6, 23, 0.4), 0 4px 16px rgba(2, 6, 23, 0.35);
+}
+.shadow-soft { box-shadow: 0 1px 2px rgba(2, 6, 23, 0.35), 0 4px 16px rgba(2, 6, 23, 0.3); }
+.shadow-tinted { box-shadow: 0 1px 3px rgba(99, 102, 241, 0.18), 0 4px 16px rgba(2, 6, 23, 0.35); }
+.card-glass {
+  background: color-mix(in oklch, var(--color-card) 92%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(2, 6, 23, 0.35), 0 8px 24px rgba(2, 6, 23, 0.4);
+  backdrop-filter: blur(10px);
+}
+.grain-overlay { display: none !important; }
+.mesh-ambient { display: none !important; }
+
+/* Focus — soft ring in accent */
 :focus-visible {
-  outline: 2.5px solid var(--color-foreground);
+  outline: 2px solid var(--color-ring);
   outline-offset: 2px;
 }
 
-/* Scrollbar — chunky ink */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--color-muted); border-left: 2px solid var(--color-border); }
-::-webkit-scrollbar-thumb { background: var(--color-foreground); border: 1px solid var(--color-background); }
-::-webkit-scrollbar-thumb:hover { background: #000; }
-.dark ::-webkit-scrollbar-thumb { background: #F6F2E8; }
-
-/* Keep legacy helpers but brutalized */
-.grain-overlay { display: none !important; }
-.mesh-ambient { display: none !important; }
-.shadow-tinted { box-shadow: 4px 4px 0 var(--shadow-color) !important; }
-.card-glass { background: var(--color-card) !important; backdrop-filter: none !important; border: 2.5px solid var(--color-border) !important; box-shadow: 5px 5px 0 var(--shadow-color) !important; }
-.spotlight-card::before { display: none !important; }
+/* Scrollbar — slate, not ink */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--color-background); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 999px; border: 1px solid var(--color-background); }
+::-webkit-scrollbar-thumb:hover { background: #475569; }
 
 /* Motion */
 @utility animate-in { animation: animate-in 0.18s cubic-bezier(0.16,1,0.3,1); }
@@ -238,8 +206,8 @@
 @keyframes fade-in { from{opacity:0} to{opacity:1} }
 .metric-bar { animation: metric-bar-grow 0.6s cubic-bezier(0.16,1,0.3,1); }
 @keyframes metric-bar-grow { from{width:0} }
-.skeleton-shimmer { background: repeating-linear-gradient(90deg, transparent 0 16px, color-mix(in oklch, var(--color-foreground) 6%, transparent) 16px 17px); animation: skeleton-shimmer 0.9s linear infinite; }
-@keyframes skeleton-shimmer { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+.skeleton-shimmer { background: linear-gradient(90deg, transparent 0%, color-mix(in oklch, var(--color-foreground) 8%, transparent) 50%, transparent 100%); background-size: 200% 100%; animation: skeleton-shimmer 1.1s linear infinite; }
+@keyframes skeleton-shimmer { 0%{background-position: 200% 0} 100%{background-position: -200% 0} }
 @utility cv-auto { content-visibility: auto; contain-intrinsic-size: 1px 300px; }
 html[data-paused] *, html[data-paused] *::before, html[data-paused] *::after { animation-play-state: paused !important; }
 .edge-flow { stroke-dasharray: 3 8; animation: dash-flow 0.9s linear infinite; }
