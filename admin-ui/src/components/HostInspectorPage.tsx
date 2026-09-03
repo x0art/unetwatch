@@ -208,37 +208,78 @@ function buildDemoSections(timeRange: string): HostSectionData {
   }
 }
 
+/** Demo row action — must stay in sync with buildDemoRow below. */
+function demoActionForIndex(i: number): "ALLOW" | "DENY" | "FLAG" {
+  if (i % 7 === 0) return "DENY"
+  if (i % 5 === 0) return "FLAG"
+  return "ALLOW"
+}
+
+function buildDemoRow(
+  i: number,
+  baseNow: number,
+  meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
+): LogRow {
+  const action = demoActionForIndex(i)
+  const matched = action === "ALLOW" ? null : meta.patterns[i % meta.patterns.length].pattern
+  const dip = meta.destIps[i % meta.destIps.length]
+  const u = meta.urls[i % meta.urls.length]
+  return {
+    id: i,
+    timestamp: new Date(baseNow - i * 13 * 60 * 1000).toISOString(),
+    client_ip: DEMO_IP,
+    src_ip: DEMO_IP,
+    server_ip: dip,
+    dest_ip: dip,
+    url: u,
+    base_url: u.split("/").slice(0, 3).join("/"),
+    duration_seconds: 0.02 + (i % 9) * 0.11,
+    duration_ms: 20 + (i % 9) * 110,
+    action,
+    blocked_by: matched ? [matched] : [],
+    matched_pattern_name: matched,
+    whitelisted: false,
+    blacklisted: false,
+    blacklist_source: null,
+  }
+}
+
 function buildDemoRows(
   offset: number,
   count: number,
   baseNow: number,
   meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
 ): LogRow[] {
-  return Array.from({ length: count }, (_, k) => {
-    const i = offset + k
-    const action = i % 7 === 0 ? "DENY" : i % 5 === 0 ? "FLAG" : "ALLOW"
-    const matched = action === "ALLOW" ? null : meta.patterns[i % meta.patterns.length].pattern
-    const dip = meta.destIps[i % meta.destIps.length]
-    const u = meta.urls[i % meta.urls.length]
-    return {
-      id: i,
-      timestamp: new Date(baseNow - i * 13 * 60 * 1000).toISOString(),
-      client_ip: DEMO_IP,
-      src_ip: DEMO_IP,
-      server_ip: dip,
-      dest_ip: dip,
-      url: u,
-      base_url: u.split("/").slice(0, 3).join("/"),
-      duration_seconds: 0.02 + (i % 9) * 0.11,
-      duration_ms: 20 + (i % 9) * 110,
-      action,
-      blocked_by: matched ? [matched] : [],
-      matched_pattern_name: matched,
-      whitelisted: false,
-      blacklisted: false,
-      blacklist_source: null,
-    }
-  })
+  return Array.from({ length: count }, (_, k) => buildDemoRow(offset + k, baseNow, meta))
+}
+
+/** Honest filtered total: walk the virtual demo dataset and count rows whose
+ * action matches. Deterministic (no allocation), matches the row formula. */
+function demoActionTotal(action: string, total: number): number {
+  let n = 0
+  for (let i = 0; i < total; i++) if (demoActionForIndex(i) === action) n++
+  return n
+}
+
+/** Lazy page over the *filtered* demo set: walks indices from 0 collecting
+ * `startOrdinal`-th matching row onward, materializing at most `count` rows.
+ * Keeps the demo window allocation-free at any page/filter combination. */
+function buildDemoRowsFiltered(
+  action: string,
+  startOrdinal: number,
+  count: number,
+  total: number,
+  baseNow: number,
+  meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
+): LogRow[] {
+  const rows: LogRow[] = []
+  let seen = 0
+  for (let i = 0; i < total && rows.length < count; i++) {
+    if (demoActionForIndex(i) !== action) continue
+    if (seen >= startOrdinal) rows.push(buildDemoRow(i, baseNow, meta))
+    seen++
+  }
+  return rows
 }
 
 /* ── Page ────────────────────────────────────────────────────────────── */
@@ -347,22 +388,38 @@ export function HostInspectorPage() {
 
   // Materialize the current page. Real data is already sliced; the demo window
   // (42,810 virtual rows) generates each page lazily from demoMeta so the full
-  // pagination range works without allocating the whole dataset.
+  // pagination range works without allocating the dataset.
   const pageRows = useMemo(() => {
-    if (sections?.demoMeta && actionFilter === "All") {
-      return buildDemoRows(page * pageSize, pageSize, sections.demoMeta.baseNow, sections.demoMeta)
+    if (sections?.demoMeta) {
+      if (actionFilter === "All") {
+        return buildDemoRows(page * pageSize, pageSize, sections.demoMeta.baseNow, sections.demoMeta)
+      }
+      // Filtered demo page: walk the virtual set and materialize only the
+      // `page`-th slice of matching rows (honest "of N" total, still lazy).
+      return buildDemoRowsFiltered(
+        actionFilter,
+        page * pageSize,
+        pageSize,
+        sections.logTotal,
+        sections.demoMeta.baseNow,
+        sections.demoMeta,
+      )
     }
     return filteredLogs.slice(page * pageSize, (page + 1) * pageSize)
   }, [sections, filteredLogs, actionFilter, page, pageSize])
 
   // Pagination total. The demo window has a fully-lazy dataset so it reports
-  // the full wireframe count (42,810); live rows are capped by the backend
-  // (~500 items) so their total is bounded to what we actually fetched —
-  // otherwise paging past the fetched rows would show "501-550 of 42,810"
-  // with empty rows.
+  // the full wireframe count (42,810) unfiltered, and the exact filtered
+  // subset count (e.g. 6,116 DENY rows) when an action filter is active. Live
+  // rows are capped by the backend (~500 items) so their total is bounded to
+  // what we actually fetched — otherwise paging past the fetched rows would
+  // show "501-550 of 42,810" with empty rows.
   const displayTotal = useMemo(() => {
     if (!sections) return 0
-    if (sections.demoMeta && actionFilter === "All") return sections.logTotal
+    if (sections.demoMeta) {
+      if (actionFilter === "All") return sections.logTotal
+      return demoActionTotal(actionFilter, sections.logTotal)
+    }
     return filteredLogs.length
   }, [sections, actionFilter, filteredLogs])
 
