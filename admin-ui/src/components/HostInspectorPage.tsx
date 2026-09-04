@@ -10,6 +10,7 @@ import {
   getHostProfile,
   runQuery,
   timeRangeToMinutesLive,
+  formatBytes,
   type QueryDoc,
   type HostProfile,
 } from "../api"
@@ -478,6 +479,63 @@ export function HostInspectorPage() {
             {getMatchedRule(r)}
           </span>
         ),
+      },
+      /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
+      {
+        id: "category",
+        header: "Category",
+        accessor: (r) => r.category,
+        cell: (r) => <span className="font-mono text-xs text-muted-foreground">{r.category || "—"}</span>,
+        width: "w-24",
+      },
+      {
+        id: "method",
+        header: "Method",
+        accessor: (r) => r.http_method,
+        cell: (r) => <span className="font-mono text-xs">{r.http_method || "—"}</span>,
+        width: "w-20",
+      },
+      {
+        id: "status",
+        header: "Status",
+        accessor: (r) => r.http_status_code,
+        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.http_status_code ?? "—"}</span>,
+        width: "w-20",
+        align: "right" as const,
+      },
+      {
+        id: "country",
+        header: "Country",
+        accessor: (r) => r.country_code,
+        cell: (r) => <span className="font-mono text-xs">{r.country_code || "—"}</span>,
+        width: "w-20",
+      },
+      {
+        id: "bytes",
+        header: "↓/↑ Bytes",
+        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
+        cell: (r) => {
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+          return (
+            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
+              {formatBytes(dn + up)}
+            </span>
+          )
+        },
+        align: "right" as const,
+        width: "w-24",
+      },
+      {
+        id: "rule",
+        header: "Rule",
+        accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
+        cell: (r) => {
+          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
+          return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+        },
+        width: "w-28",
       },
     ],
     [],

@@ -22,6 +22,7 @@ import {
   type QueryFlow,
   type QueryResult,
   addBaseUrlToBlacklist,
+  formatBytes,
   runQuery,
 } from "../api"
 import {
@@ -268,6 +269,63 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
       </div>
     ),
     width: "w-44",
+  },
+  /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
+  {
+    id: "category",
+    header: "Category",
+    accessor: (d) => d.category,
+    cell: (d) => <span className="font-mono text-xs text-muted-foreground">{d.category || "—"}</span>,
+    width: "w-24",
+  },
+  {
+    id: "method",
+    header: "Method",
+    accessor: (d) => d.http_method,
+    cell: (d) => <span className="font-mono text-xs">{d.http_method || "—"}</span>,
+    width: "w-20",
+  },
+  {
+    id: "status",
+    header: "Status",
+    accessor: (d) => d.http_status_code,
+    cell: (d) => <span className="font-mono text-xs tabular-nums">{d.http_status_code ?? "—"}</span>,
+    width: "w-20",
+    align: "right",
+  },
+  {
+    id: "country",
+    header: "Country",
+    accessor: (d) => d.country_code,
+    cell: (d) => <span className="font-mono text-xs">{d.country_code || "—"}</span>,
+    width: "w-20",
+  },
+  {
+    id: "bytes",
+    header: "↓/↑ Bytes",
+    accessor: (d) => (Number(d.bytes_downloaded) || 0) + (Number(d.bytes_uploaded) || 0),
+    cell: (d) => {
+      const dn = Number(d.bytes_downloaded) || 0
+      const up = Number(d.bytes_uploaded) || 0
+      if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+      return (
+        <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
+          {formatBytes(dn + up)}
+        </span>
+      )
+    },
+    align: "right",
+    width: "w-24",
+  },
+  {
+    id: "rule",
+    header: "Rule",
+    accessor: (d) => d.rule_name ?? d.rule_info ?? "—",
+    cell: (d) => {
+      const rule = d.rule_name && d.rule_name !== "-" ? d.rule_name : d.rule_info
+      return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+    },
+    width: "w-28",
   },
   {
     id: "actions",

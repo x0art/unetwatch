@@ -3,6 +3,7 @@ import { motion } from "framer-motion"
 import { ExternalLink, X } from "lucide-react"
 import { Badge, Button, useToast } from "./ui"
 import { useFilter } from "../contexts/FilterContext"
+import { formatBytes } from "../api"
 import {
   getSrcIp,
   getSrcHost,
@@ -160,6 +161,43 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
                 <div>
                   <p className="mono-label">Matched Rule</p>
                   <p className="mt-1 text-muted-foreground">{matchedRule}</p>
+                </div>
+                {/* ── Rich flat proxy fields (logstash-proxy-* schema) ── */}
+                <div>
+                  <p className="mono-label">Category</p>
+                  <p className="mt-1 text-foreground">{row.category || "—"}</p>
+                </div>
+                <div>
+                  <p className="mono-label">HTTP Method</p>
+                  <p className="mt-1 text-foreground">{row.http_method || "—"}</p>
+                </div>
+                <div>
+                  <p className="mono-label">Status Code</p>
+                  <p className="mt-1 tabular-nums">{row.http_status_code ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="mono-label">Country</p>
+                  <p className="mt-1 text-foreground">{row.country_code || "—"}</p>
+                </div>
+                <div>
+                  <p className="mono-label">Bytes ↓ / ↑</p>
+                  {Number(row.bytes_downloaded) || Number(row.bytes_uploaded) ? (
+                    <p className="mt-1 tabular-nums">
+                      ↓ {formatBytes(Number(row.bytes_downloaded) || 0)} / ↑ {formatBytes(Number(row.bytes_uploaded) || 0)}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-muted-foreground">—</p>
+                  )}
+                </div>
+                <div>
+                  <p className="mono-label">Rule</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {row.rule_name && row.rule_name !== "-" ? row.rule_name : row.rule_info || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="mono-label">User ID</p>
+                  <p className="mt-1 text-foreground">{row.user_id || "—"}</p>
                 </div>
               </div>
             </div>
