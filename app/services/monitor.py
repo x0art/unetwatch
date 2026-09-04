@@ -26,6 +26,7 @@ from app.services.es_client import (  # noqa: F401
 
 # ── Re-exports from deep modules (backward compatibility) ──────────────────
 from app.services.query_builder import (  # noqa: F401
+    build_all_query,
     build_logs_query,
     build_pattern_regex as _build_pattern_regex,
     escape_query_string as _escape_query_string,
@@ -375,6 +376,144 @@ async def run_query(
         log["error"] = str(e)
         result["error"] = str(e)
         print(f"[{datetime.now(UTC).isoformat()}][WARN] Query run failed: {e}")
+    finally:
+        log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        if (
+            not log["error"]
+            and log["webhook_status"] is None
+            and not log["webhook_error"]
+        ):
+            log["webhook_reason"] = "Query runs don't trigger webhook delivery"
+        from app.services.logs import write_log
+
+        await write_log(log)
+        _query_cache[cache_key] = (time.monotonic(), result)
+    return result
+
+
+async def run_all_query(
+    minutes: int = 60,
+    limit: int = 500,
+    search: str | None = None,
+) -> dict:
+    """Run an ES query over the WHOLE window — no block-pattern clause.
+
+    Returns the same response shape as ``run_query`` (``items``, ``top_urls``,
+    ``top_ips``, ``timeline``, ``flow``, ``total_requests``, ``unique_ips``,
+    ``es_online``) so the Live Monitor can switch between the full proxy
+    stream and flagged-only with a single toggle. ``apply_filters`` keeps
+    EVERY action (``actions=None``) and does NOT exclude whitelist matches —
+    the full stream is exactly that. Elasticsearch failures degrade
+    gracefully (``es_online: False``), never 5xx.
+    """
+    started = datetime.now(UTC)
+    settings = get_settings()
+
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        block_patterns = await get_block_patterns(db)
+        whitelist_patterns = await get_whitelist_patterns(db)
+        bl_cursor = await db.execute("SELECT kind, value FROM blacklist_entries")
+        bl_rows = await bl_cursor.fetchall()
+    finally:
+        await db.close()
+    blacklist_urls = {r["value"] for r in bl_rows if r["kind"] == "url"}
+    blacklist_ips = {r["value"] for r in bl_rows if r["kind"] == "ip"}
+
+    cache_key = "all|" + _query_cache_key(
+        minutes,
+        search,
+        False,
+        False,
+        block_patterns,
+        whitelist_patterns,
+    )
+    hit = _query_cache.get(cache_key)
+    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
+        return dict(hit[1])
+
+    result = {
+        "window_minutes": minutes,
+        "es_online": True,
+        "query": None,
+        "total_requests": 0,
+        "unique_ips": 0,
+        "distinct_urls": 0,
+        "items": [],
+        "top_urls": [],
+        "top_ips": [],
+        "timeline": [],
+        "flow": {"nodes": [], "links": []},
+    }
+    log = _default_log("query", minutes)
+    try:
+        whitelist_regex = _build_pattern_regex(whitelist_patterns)
+        query = build_all_query(
+            minutes, settings.es_query_size, search=search
+        )
+        result["query"] = query
+        log["es_query"] = query
+
+        async with _es_client_context(settings, timeout=30) as es:
+            try:
+                res = await es.search(index=settings.elastic_index, body=query)
+            except Exception as e:
+                result["es_online"] = False
+                log["es_online"] = False
+                log["error"] = str(e)
+                return result
+
+        hits = res["hits"]["hits"]
+        log["matches"] = len(hits)
+        if not hits:
+            return result
+
+        df = apply_filters(
+            pd.DataFrame([h["_source"] for h in hits]),
+            whitelist_regex,
+            exclude_whitelist=False,
+            actions=None,
+        )
+        if df.empty:
+            return result
+
+        if blacklist_urls or blacklist_ips:
+            blacklist_set = blacklist_urls | blacklist_ips
+            df = df[
+                ~df["base_url"].astype(str).isin(blacklist_set)
+                & ~df["client_ip"].astype(str).isin(blacklist_ips)
+            ]
+        log["filtered"] = len(df)
+        if df.empty:
+            return result
+
+        result["total_requests"] = int(len(df))
+        result["unique_ips"] = int(df["client_ip"].nunique())
+        result["distinct_urls"] = int(df["url"].nunique())
+        result["top_urls"] = [
+            {"url": url, "count": int(count)}
+            for url, count in df["url"].astype(str).value_counts().head(10).items()
+        ]
+        result["top_ips"] = [
+            {"client_ip": ip, "count": int(count)}
+            for ip, count in df["client_ip"].astype(str).value_counts().head(10).items()
+        ]
+        result["timeline"] = _build_timeline(df, minutes)
+        result["flow"] = _build_flow(df)
+        result["items"] = _build_items(
+            df,
+            limit,
+            block_patterns=[],
+            whitelist_regex=whitelist_regex,
+            blacklist_urls=blacklist_urls,
+            blacklist_ips=blacklist_ips,
+        )
+    except Exception as e:
+        log["error"] = str(e)
+        result["error"] = str(e)
+        print(f"[{datetime.now(UTC).isoformat()}][WARN] All-traffic query failed: {e}")
     finally:
         log["duration_ms"] = int((datetime.now(UTC) - started).total_seconds() * 1000)
         if (

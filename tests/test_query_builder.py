@@ -65,3 +65,29 @@ def test_time_range_to_es():
     assert time_range_to_es("30d") == "now-30d"
     assert time_range_to_es("") is None
     assert time_range_to_es("all") is None
+
+
+def test_build_all_query_has_no_block_pattern_clause():
+    """The full-stream query must NOT carry a block-pattern query_string."""
+    from app.services.query_builder import build_all_query
+
+    body = build_all_query(minutes=60, size=50)
+    assert "query" in body
+    # Range applied for the window.
+    assert "now-60m" in str(body)
+    # No block-pattern query_string — the full stream returns ALL traffic.
+    assert "query_string" not in str(body["query"])
+    # Sorted newest-first.
+    assert body["sort"] == [{"@timestamp": {"order": "desc"}}]
+
+
+def test_build_all_query_search_and_alltime():
+    """Search tokens narrow the full-stream query; minutes<=0 omits the range."""
+    from app.services.query_builder import build_all_query
+
+    body = build_all_query(minutes=0, size=25, search="google.com")
+    assert "range" not in str(body)  # all-time sentinel
+    assert "google.com" in str(body)  # search token present
+
+    projected = build_all_query(minutes=60, size=10, fields=["url", "client_ip"])
+    assert projected["_source"] == ["url", "client_ip"]

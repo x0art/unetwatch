@@ -70,6 +70,9 @@ async def run_query(
     exclude_blacklist: bool = Query(
         False, description="Exclude blacklisted hosts/IPs from the result set"
     ),
+    view_mode: str = Query(
+        "flagged", pattern="^(all|flagged)$", description="all = full proxy stream, flagged = block-pattern matches only"
+    ),
     kql: str | None = Query(
         None,
         max_length=500,
@@ -105,7 +108,13 @@ async def run_query(
         finally:
             await db.close()
 
-    from app.services.monitor import run_query as run_query_service
+    from app.services.monitor import (
+        run_all_query,
+        run_query as run_query_service,
+    )
+
+    if view_mode == "all":
+        return await run_all_query(minutes, limit=500, search=q or None)
 
     return await run_query_service(
         minutes,

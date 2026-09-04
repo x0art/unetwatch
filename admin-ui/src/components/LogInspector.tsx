@@ -55,10 +55,11 @@ function exportCsv(rows: LogRow[], filename: string) {
 export interface LogInspectorProps {
   filter?: string
   timeRange?: string
+  viewMode?: "all" | "flagged"
   onInspect?: (row: LogRow) => void
 }
 
-export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogInspectorProps) {
+export function LogInspector({ filter = "", timeRange = "24h", viewMode = "flagged", onInspect }: LogInspectorProps) {
   const { toast } = useToast()
   const { setGlobalFilter, actionFilter, setActionFilter } = useFilter()
   const [rows, setRows] = useState<LogRow[]>([])
@@ -72,7 +73,7 @@ export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogI
     const minutes = timeRange ? timeRangeToMinutesLive(timeRange) : 60
     const q = filter.trim() || undefined
     try {
-      const res = await runQuery(minutes, q ? { q } : undefined)
+      const res = await runQuery(minutes, q ? { q, viewMode } : { viewMode })
       setRows(res.items as unknown as LogRow[])
       setTotal(res.total_requests)
     } catch {
@@ -81,7 +82,7 @@ export function LogInspector({ filter = "", timeRange = "24h", onInspect }: LogI
     } finally {
       setLoading(false)
     }
-  }, [filter, timeRange])
+  }, [filter, timeRange, viewMode])
 
   useEffect(() => {
     fetchLogs()

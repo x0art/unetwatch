@@ -138,6 +138,50 @@ def build_logs_query(
     return result
 
 
+def build_all_query(
+    minutes: int,
+    size: int,
+    search: str | None = None,
+    fields: list[str] | None = None,
+) -> dict:
+    """ES query over the whole window with NO block-pattern clause.
+
+    Range (+ optional substring search) only — returns ALL traffic so the
+    Live Monitor can show the full proxy stream, not just flagged matches.
+    ``minutes <= 0`` is the all-time sentinel (no range clause). ``fields``
+    optionally projects ``_source`` to the listed names.
+    """
+    must: list[dict] = []
+    if minutes > 0:
+        must.append(
+            {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
+        )
+    terms = [t for t in re.split(r"\s+", (search or "").strip()) if t][:20]
+    if terms:
+        clauses = [
+            "("
+            "url.keyword:*{t}* OR client_ip.keyword:*{t}* OR server_ip.keyword:*{t}*"
+            ")".format(t=escape_query_string(term))
+            for term in terms
+        ]
+        must.append(
+            {
+                "query_string": {
+                    "query": " AND ".join(clauses),
+                    "analyze_wildcard": True,
+                }
+            }
+        )
+    body: dict = {
+        "query": {"bool": {"must": must}},
+        "size": size,
+        "sort": [{"@timestamp": {"order": "desc"}}],
+    }
+    if fields is not None:
+        body["_source"] = fields
+    return body
+
+
 def build_client_session_query(client: str, minutes: int, size: int) -> dict:
     """ES query for all requests from one client in a time window.
 

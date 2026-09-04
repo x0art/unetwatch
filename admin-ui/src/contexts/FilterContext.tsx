@@ -5,6 +5,9 @@ export type TimeRange = "1h" | "24h" | "7d" | "30d"
 /** Global workspace action filter — "All" means no action filter applied. */
 export type ActionFilter = "All" | "ALLOW" | "DENY" | "FLAG"
 
+/** Live Monitor / Query page view mode — full proxy stream vs flagged-only. */
+export type ViewMode = "all" | "flagged"
+
 interface FilterContextValue {
   /** Brief-facing name for the global search term (spec §7 click-to-filter). */
   globalSearch: string
@@ -16,6 +19,8 @@ interface FilterContextValue {
   setTimeRange: (v: TimeRange) => void
   actionFilter: ActionFilter
   setActionFilter: (v: ActionFilter) => void
+  viewMode: ViewMode
+  setViewMode: (v: ViewMode) => void
 }
 
 const FilterContext = createContext<FilterContextValue | null>(null)
@@ -24,6 +29,8 @@ const GLOBAL_FILTER_QS_KEY = "q"
 const TIME_RANGE_KEY = "unetwatch_time_range"
 const ACTION_FILTER_QS_KEY = "action"
 const ACTION_FILTER_KEY = "unetwatch_action_filter"
+const VIEW_MODE_QS_KEY = "view"
+const VIEW_MODE_KEY = "unetwatch_view_mode"
 
 function readInitialFilter(): string {
   if (typeof window === "undefined") return ""
@@ -71,10 +78,29 @@ function readInitialActionFilter(): ActionFilter {
   return "All"
 }
 
+function readInitialViewMode(): ViewMode {
+  if (typeof window === "undefined") return "flagged"
+  try {
+    const params = new URLSearchParams(window.location.search)
+    const q = params.get(VIEW_MODE_QS_KEY)
+    if (q === "all" || q === "flagged") return q
+  } catch {
+    /* ignore */
+  }
+  try {
+    const stored = window.localStorage.getItem(VIEW_MODE_KEY)
+    if (stored === "all" || stored === "flagged") return stored as ViewMode
+  } catch {
+    /* ignore */
+  }
+  return "flagged"
+}
+
 export function FilterProvider({ children }: { children: ReactNode }) {
   const [globalFilter, setGlobalFilterRaw] = useState<string>(() => readInitialFilter())
   const [timeRange, setTimeRangeRaw] = useState<TimeRange>(() => readInitialTimeRange())
   const [actionFilter, setActionFilterRaw] = useState<ActionFilter>(() => readInitialActionFilter())
+  const [viewMode, setViewModeRaw] = useState<ViewMode>(() => readInitialViewMode())
   const filterDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /** Single source for the global search term — Task 2 alias kept. */
@@ -130,6 +156,23 @@ export function FilterProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const setViewMode = useCallback((v: ViewMode) => {
+    setViewModeRaw(v)
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, v)
+    } catch {
+      /* ignore */
+    }
+    try {
+      const url = new URL(window.location.href)
+      if (v !== "flagged") url.searchParams.set(VIEW_MODE_QS_KEY, v)
+      else url.searchParams.delete(VIEW_MODE_QS_KEY)
+      window.history.replaceState(null, "", url.toString())
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
   useEffect(() => {
     // Sync from URL on mount (already done in initializers) - listen for popstate
     const onPop = () => {
@@ -142,6 +185,9 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         const a = params.get(ACTION_FILTER_QS_KEY)
         if (a === "All" || a === "ALLOW" || a === "DENY" || a === "FLAG") setActionFilterRaw(a)
         else if (a === null) setActionFilterRaw("All")
+        const v = params.get(VIEW_MODE_QS_KEY)
+        if (v === "all" || v === "flagged") setViewModeRaw(v)
+        else if (v === null) setViewModeRaw("flagged")
       } catch {
         /* ignore */
       }
@@ -166,8 +212,10 @@ export function FilterProvider({ children }: { children: ReactNode }) {
       setTimeRange,
       actionFilter,
       setActionFilter,
+      viewMode,
+      setViewMode,
     }),
-    [globalFilter, setGlobalSearch, setGlobalFilter, timeRange, setTimeRange, actionFilter, setActionFilter],
+    [globalFilter, setGlobalSearch, setGlobalFilter, timeRange, setTimeRange, actionFilter, setActionFilter, viewMode, setViewMode],
   )
 
   return <FilterContext.Provider value={value}>{children}</FilterContext.Provider>

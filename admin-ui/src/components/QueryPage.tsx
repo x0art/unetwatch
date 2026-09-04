@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useDebounce } from "../lib/utils"
+import { useFilter } from "../contexts/FilterContext"
 import {
   type QueryDoc,
   type QueryFlow,
@@ -436,6 +437,7 @@ function toSankey(flow: QueryFlow): { nodes: SankeyNode[]; links: SankeyLink[] }
 
 export function QueryPage() {
   const { toast } = useToast()
+  const { viewMode, setViewMode } = useFilter()
   const [windowMinutes, setWindowMinutes] = useState("60")
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
   const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
@@ -459,6 +461,7 @@ export function QueryPage() {
       q,
       excludeWhitelist: whitelistMode === "exclude",
       excludeBlacklist: blacklistMode === "exclude",
+      viewMode,
     })
       .then((res) => {
         if (!cancelled) setResult(res)
@@ -475,7 +478,7 @@ export function QueryPage() {
     return () => {
       cancelled = true
     }
-  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch])
+  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => fetchQuery(), [fetchQuery])
@@ -591,6 +594,32 @@ export function QueryPage() {
           className="w-40"
           aria-label="Filter by action"
         />
+        <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="View mode">
+          <button
+            type="button"
+            onClick={() => setViewMode("all")}
+            aria-pressed={viewMode === "all"}
+            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              viewMode === "all"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Full stream
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("flagged")}
+            aria-pressed={viewMode === "flagged"}
+            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              viewMode === "flagged"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Flagged only
+          </button>
+        </div>
         <span className="text-xs text-muted-foreground">Window</span>
         <Select
           value={windowMinutes}

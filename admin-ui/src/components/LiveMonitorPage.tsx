@@ -44,10 +44,12 @@ const STUB_LINKS: SankeyLink[] = [
 function SankeySection({
   filter,
   timeRange,
+  viewMode,
   onNodeClick,
 }: {
   filter: string
   timeRange: string
+  viewMode: "all" | "flagged"
   onNodeClick: (q: string) => void
 }) {
   const [nodes, setNodes] = useState<SankeyNode[]>(STUB_NODES)
@@ -62,7 +64,7 @@ function SankeySection({
       // drives LogInspector; the Sankey always shows the full time window so its
       // structure stays stable while the user refines the table.
       try {
-        const graph = await getLiveSankey(timeRange)
+        const graph = await getLiveSankey(timeRange, viewMode)
         if (graph.nodes.length > 0 && graph.links.length > 0) {
           setNodes(graph.nodes)
           setLinks(graph.links)
@@ -74,7 +76,7 @@ function SankeySection({
     } finally {
       setLoading(false)
     }
-  }, [timeRange])
+  }, [timeRange, viewMode])
 
   useEffect(() => {
     fetchFlow()
@@ -135,7 +137,7 @@ function SankeySection({
 }
 
 export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "settings" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void } = {}) {
-  const { globalFilter, setGlobalFilter, timeRange } = useFilter()
+  const { globalFilter, setGlobalFilter, timeRange, viewMode, setViewMode } = useFilter()
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
@@ -143,14 +145,14 @@ export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "
   const fetchMetrics = useCallback(async () => {
     setLoading(true)
     try {
-      const m = await getLiveMetrics({ minutes: timeRangeToMinutes(timeRange) })
+      const m = await getLiveMetrics({ minutes: timeRangeToMinutes(timeRange), viewMode })
       setMetrics(m)
     } catch {
       // keep previous metrics on transient failure
     } finally {
       setLoading(false)
     }
-  }, [timeRange])
+  }, [timeRange, viewMode])
 
   useEffect(() => {
     fetchMetrics()
@@ -165,9 +167,38 @@ export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "
         title="Live Traffic Monitor"
         description="Real-time Kibana stream — Sankey + Log Inspector"
       >
-        <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          {globalFilter ? `filter: ${globalFilter}` : "no filter"} · {timeRange}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            {globalFilter ? `filter: ${globalFilter}` : "no filter"} · {timeRange}
+          </span>
+          {/* Full stream / Flagged only — segmented view-mode toggle */}
+          <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="View mode">
+            <button
+              type="button"
+              onClick={() => setViewMode("all")}
+              aria-pressed={viewMode === "all"}
+              className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                viewMode === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Full stream
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("flagged")}
+              aria-pressed={viewMode === "flagged"}
+              className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+                viewMode === "flagged"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Flagged only
+            </button>
+          </div>
+        </div>
       </PageHeader>
 
       {loading && !metrics ? (
@@ -195,9 +226,19 @@ export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "
         />
       )}
 
-      <SankeySection filter={globalFilter} timeRange={timeRange} onNodeClick={(q) => setGlobalFilter(q)} />
+      <SankeySection
+        filter={globalFilter}
+        timeRange={timeRange}
+        viewMode={viewMode}
+        onNodeClick={(q) => setGlobalFilter(q)}
+      />
 
-      <LogInspector filter={globalFilter} timeRange={timeRange} onInspect={setDrawerRow} />
+      <LogInspector
+        filter={globalFilter}
+        timeRange={timeRange}
+        viewMode={viewMode}
+        onInspect={setDrawerRow}
+      />
 
       {drawerRow && (
         <InspectionDrawer

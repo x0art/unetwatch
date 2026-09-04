@@ -246,13 +246,19 @@ export interface QueryResult {
 
 export async function runQuery(
   minutes: number,
-  opts?: { q?: string; excludeWhitelist?: boolean; excludeBlacklist?: boolean },
+  opts?: {
+    q?: string
+    excludeWhitelist?: boolean
+    excludeBlacklist?: boolean
+    viewMode?: "all" | "flagged"
+  },
 ): Promise<QueryResult> {
   const params = new URLSearchParams({ minutes: String(minutes) })
   const q = opts?.q?.trim()
   if (q) params.set("q", q)
   if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
   if (opts?.excludeBlacklist) params.set("exclude_blacklist", "true")
+  if (opts?.viewMode && opts.viewMode !== "flagged") params.set("view_mode", opts.viewMode)
   return request(`/query/run?${params}`)
 }
 
@@ -597,9 +603,11 @@ export interface LiveMetrics {
  * Aggregate live KPI metrics for the Live Traffic Monitor.
  * Calls GET /api/monitor/metrics and GET /api/query/run in parallel;
  * falls back gracefully when Elasticsearch is offline.
- * `bandwidth` is a display placeholder until byte accounting lands (Task 7+).
  */
-export async function getLiveMetrics(opts?: { minutes?: number }): Promise<LiveMetrics> {
+export async function getLiveMetrics(opts?: {
+  minutes?: number
+  viewMode?: "all" | "flagged"
+}): Promise<LiveMetrics> {
   const minutes = opts?.minutes ?? 60
   // Metrics endpoint is capped to 1440 (enforced by backend Query ge=1,le=1440);
   // longer windows fall back to the max so the card never 500s.
@@ -612,7 +620,7 @@ export async function getLiveMetrics(opts?: { minutes?: number }): Promise<LiveM
     denied_requests?: number
     total_denied?: number
   }>(`/monitor/metrics?minutes=${metricsMinutes}`).catch(() => null)
-  const queryPromise = runQuery(metricsMinutes).catch(() => null)
+  const queryPromise = runQuery(metricsMinutes, { viewMode: opts?.viewMode }).catch(() => null)
 
   const [metrics, query] = await Promise.all([metricsPromise, queryPromise])
 
@@ -758,7 +766,10 @@ export function timeRangeToMinutesLive(tr: string): number {
  *
  * Ribbon thickness ∝ value (aggregated counts).
  */
-export async function getLiveSankey(timeRange: string): Promise<LiveSankeyGraph> {
+export async function getLiveSankey(
+  timeRange: string,
+  viewMode: "all" | "flagged" = "flagged",
+): Promise<LiveSankeyGraph> {
   const minutes = timeRangeToMinutesLive(timeRange)
   // Backend /api/query/run caps at 1440; longer windows silently clamp — caller
   // should surface liveSankeyTruncationNote(timeRange) so the user sees "7d"
@@ -767,7 +778,7 @@ export async function getLiveSankey(timeRange: string): Promise<LiveSankeyGraph>
 
   // Prefer live ES data (rich: blocked_by, action, blacklisted).
   try {
-    const res = await runQuery(clamped)
+    const res = await runQuery(clamped, { viewMode })
     if (res.items.length > 0) {
       return buildLiveSankeyFromQuery(res.items)
     }
