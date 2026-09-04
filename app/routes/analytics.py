@@ -110,6 +110,21 @@ def _primary_rule(matched_patterns: str | None) -> str:
     return "matched"
 
 
+def _row_is_blocked(row: dict, has_action: bool) -> bool:
+    """Whether a findings row counts as a blocked/denied decision.
+
+    The flat logstash-proxy index persists ``action`` (ALLOW/DENY/FLAG), so
+    ``has_action`` is True in production and a DENY/FLAG action is blocked. But
+    legacy/seed rows (and COLLAPSED-era stores) have an empty ``action`` with
+    only ``matched_patterns`` — for those, a non-empty match list means the row
+    was blocked. Counting both keeps the analytics honest across the two shapes.
+    """
+    action = (row.get("action") or "").strip().upper()
+    if has_action and action:
+        return action in ("DENY", "FLAG")
+    return bool(_parse_matched_patterns(row.get("matched_patterns")))
+
+
 def _domain_of_base(base_url: str) -> str:
     """Best-effort hostname: strip scheme/port/path, keep the authority."""
     m = re.match(r"^(?:https?://)?([^/]+)", base_url or "")
@@ -121,16 +136,24 @@ def _domain_of_base(base_url: str) -> str:
 
 
 def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
-    """Sum a byte approximation per row.
+    """Sum bytes per row — real feed bytes first, duration proxy as fallback.
 
-    When the schema carries ``duration_seconds`` (UC-A/UC-B) the duration is
-    used as a proxy for transfer size (1s ≈ 8 KiB); otherwise a flat 8 KiB per
-    request is assumed. Either way the ranking is monotonic in request volume,
-    so "Top Bandwidth Consuming Domains" stays honest even without true byte
-    accounting.
+    The flat logstash-proxy index now persists ``bytes_downloaded`` and
+    ``bytes_uploaded``; when either is present they sum to the true transfer
+    size. Otherwise (legacy/COLLAPSED rows) the duration is used as a proxy
+    (1s ≈ 8 KiB) or a flat 8 KiB per request is assumed — monotonic in
+    request volume, so the rankings stay honest.
     """
     total = 0
     for r in rows:
+        dn = r.get("bytes_downloaded")
+        up = r.get("bytes_uploaded")
+        try:
+            if dn not in (None, "") or up not in (None, ""):
+                total += int(dn or 0) + int(up or 0)
+                continue
+        except (TypeError, ValueError):
+            pass
         if has_duration:
             dur = r.get("duration_seconds") or 0
             try:
@@ -181,15 +204,7 @@ async def _findings_summary(db, minutes: int) -> dict:
         rows = [dict(r) for r in await cursor.fetchall()]
 
         total_volume = _volume_for_bytes(rows, has_duration)
-        if has_action:
-            total_blocked = sum(1 for r in rows if r.get("action") in ("DENY", "FLAG"))
-        else:
-            # COLLAPSED: a finding exists only when it matched a block pattern
-            # or was denied — persisted rows with an empty matched list are the
-            # ALLOW/whitelist-traffic side of the window.
-            total_blocked = sum(
-                1 for r in rows if _parse_matched_patterns(r.get("matched_patterns"))
-            )
+        total_blocked = sum(1 for r in rows if _row_is_blocked(r, has_action))
 
         by_host: dict[str, int] = {}
         for r in rows:
@@ -244,12 +259,7 @@ async def _previous_period_summary(db, minutes: int) -> dict | None:
     has_duration = _has_column(columns, "duration_seconds")
     has_action = _has_column(columns, "action")
     total_volume = _volume_for_bytes(rows, has_duration)
-    if has_action:
-        total_blocked = sum(1 for r in rows if r.get("action") in ("DENY", "FLAG"))
-    else:
-        total_blocked = sum(
-            1 for r in rows if _parse_matched_patterns(r.get("matched_patterns"))
-        )
+    total_blocked = sum(1 for r in rows if _row_is_blocked(r, has_action))
     return {"totalVolume": total_volume, "totalBlocked": total_blocked}
 
 
@@ -277,13 +287,24 @@ async def _findings_bandwidth(db, minutes: int) -> list[dict]:
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
-        if has_duration:
-            dur = r.get("duration_seconds") or 0
-            try:
-                b["outbound"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-            except (TypeError, ValueError):
-                b["outbound"] += DEFAULT_BYTES_PER_REQUEST
-        else:
+        # Real bytes from the flat feed: download → inbound, upload → outbound.
+        dn = r.get("bytes_downloaded")
+        up = r.get("bytes_uploaded")
+        try:
+            if dn not in (None, ""):
+                b["inbound"] += int(dn)
+            if up not in (None, ""):
+                b["outbound"] += int(up)
+            if (dn in (None, "") and up in (None, "")) or (int(dn or 0) == 0 and int(up or 0) == 0):
+                if has_duration:
+                    dur = r.get("duration_seconds") or 0
+                    try:
+                        b["outbound"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
+                    except (TypeError, ValueError):
+                        b["outbound"] += DEFAULT_BYTES_PER_REQUEST
+                else:
+                    b["outbound"] += DEFAULT_BYTES_PER_REQUEST
+        except (TypeError, ValueError):
             b["outbound"] += DEFAULT_BYTES_PER_REQUEST
     return list(buckets.values())
 
@@ -306,16 +327,10 @@ async def _findings_enforcements(db, minutes: int) -> list[dict]:
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
-        if has_action:
-            if r.get("action") in ("DENY", "FLAG"):
-                b["deny"] += 1
-            else:
-                b["allow"] += 1
+        if _row_is_blocked(r, has_action):
+            b["deny"] += 1
         else:
-            if _parse_matched_patterns(r.get("matched_patterns")):
-                b["deny"] += 1
-            else:
-                b["allow"] += 1
+            b["allow"] += 1
     return list(buckets.values())
 
 
@@ -367,12 +382,8 @@ async def _findings_top_denied(db, minutes: int, limit: int) -> list[dict]:
 
     by_domain: dict[str, dict] = {}
     for r in rows:
-        if has_action:
-            if r.get("action") not in ("DENY", "FLAG"):
-                continue
-        else:
-            if not _parse_matched_patterns(r.get("matched_patterns")):
-                continue
+        if not _row_is_blocked(r, has_action):
+            continue
         domain = _domain_of_base(r.get("base_url") or "")
         entry = by_domain.setdefault(
             domain,
@@ -457,8 +468,22 @@ async def _es_summary(minutes: int) -> dict | None:
                 "peakTrafficTime": "",
             }
 
+        # Real bytes from the flat logstash-proxy feed (bytes_downloaded +
+        # bytes_uploaded) take priority over the duration×8192 proxy.
         has_duration = "duration_seconds" in df.columns
-        if has_duration:
+        if "bytes_downloaded" in df.columns or "bytes_uploaded" in df.columns:
+            total_volume = int(
+                df.get("bytes_downloaded", pd.Series(0, index=df.index))
+                .fillna(0)
+                .astype(int)
+                .sum()
+            ) + int(
+                df.get("bytes_uploaded", pd.Series(0, index=df.index))
+                .fillna(0)
+                .astype(int)
+                .sum()
+            )
+        elif has_duration:
             durations = df["duration_seconds"].fillna(0).apply(lambda d: max(1, int(d)))
             total_volume = int(durations.sum()) * DEFAULT_BYTES_PER_REQUEST
         else:

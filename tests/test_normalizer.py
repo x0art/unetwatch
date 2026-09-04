@@ -80,6 +80,7 @@ def test_normalizer_maps_flat_proxy_sample():
             "country_code": "US",
             "rule_info": "DS",
             "rule_name": "-",
+            "user_id": "172.21.26.84",
             "host": {"ip": "172.21.73.13"},
         },
     }
@@ -91,3 +92,13 @@ def test_normalizer_maps_flat_proxy_sample():
     assert state["action"] == "ALLOW"
     assert state["duration_ms"] == 12640  # duration_seconds * 1000
     assert state["bytes"] == 916
+    # Rich flat proxy fields surface too (category/method/status/country/rule).
+    assert state["category"] == "Search Site"
+    assert state["http_method"] == "GET"
+    assert state["http_status_code"] == 204  # numeric in the proxy feed
+    assert state["country_code"] == "US"
+    assert state["bytes_downloaded"] == 916
+    assert state["bytes_uploaded"] == 4116
+    assert state["rule_info"] == "DS"
+    assert state["rule_name"] == "-"
+    assert state["user_id"] == "172.21.26.84"

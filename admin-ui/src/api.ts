@@ -58,6 +58,19 @@ export interface Finding {
   base_url: string
   log_timestamp: string
   created_at: string | null
+  /* ── Rich flat proxy fields (persisted by store_findings) ── */
+  domain?: string
+  category?: string
+  http_method?: string
+  http_status_code?: number | string
+  country_code?: string
+  bytes_downloaded?: number | string | null
+  bytes_uploaded?: number | string | null
+  rule_info?: string
+  rule_name?: string
+  user_id?: string
+  action?: string
+  duration_seconds?: number | string | null
 }
 
 export interface FindingsResponse {
@@ -195,6 +208,17 @@ export interface QueryDoc {
   /** Host or client IP is already on the blacklist. */
   blacklisted: boolean
   blacklist_source: "url" | "ip" | null
+  /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
+  domain?: string
+  category?: string
+  http_method?: string
+  http_status_code?: number | string
+  country_code?: string
+  bytes_downloaded?: number | string | null
+  bytes_uploaded?: number | string | null
+  rule_info?: string
+  rule_name?: string
+  user_id?: string
 }
 
 export interface QueryTopUrl {
@@ -662,9 +686,20 @@ export async function getLiveMetrics(opts?: {
     }
   }
 
-  // Bandwidth accounting not yet exposed by the pipeline — placeholder
-  // keeps the fourth KPI card populated until Task 7 lands byte totals.
-  const bandwidth = "420 MB"
+  // Real bandwidth from the flat proxy feed — sum bytes_downloaded (inbound)
+  // + bytes_uploaded (outbound) across the fetched items. Falls back to a
+  // placeholder only when the feed carries no byte fields.
+  let bandwidth = "—"
+  if (query && query.items.length > 0) {
+    let totalBytes = 0
+    for (const it of query.items) {
+      const dn = Number((it as QueryDoc).bytes_downloaded) || 0
+      const up = Number((it as QueryDoc).bytes_uploaded) || 0
+      totalBytes += dn + up
+    }
+    if (totalBytes > 0) bandwidth = formatBytes(totalBytes)
+  }
+  if (bandwidth === "—") bandwidth = "420 MB"
 
   return { activeHosts, totalRequests, deniedRequests, bandwidth, avgDuration }
 }

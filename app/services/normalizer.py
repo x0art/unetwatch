@@ -117,6 +117,12 @@ class Normalizer:
 
         rule = src.get("rule") if isinstance(src.get("rule"), dict) else {}
 
+        # Rich flat proxy fields — surface the full logstash-proxy schema so
+        # normalized rows carry category/method/status/country/bytes/rule too.
+        def _flat(key: str) -> str | None:
+            val = src.get(key)
+            return val if val is not None else None
+
         return {
             "id": hit.get("_id"),
             "timestamp": timestamp,
@@ -130,4 +136,13 @@ class Normalizer:
             "bytes": bts,
             "matched_pattern_id": rule.get("id"),
             "matched_pattern_name": rule.get("name"),
+            "category": _flat("category"),
+            "http_method": _flat("http_method"),
+            "http_status_code": _flat("http_status_code"),
+            "country_code": _flat("country_code"),
+            "bytes_downloaded": _flat("bytes_downloaded"),
+            "bytes_uploaded": _flat("bytes_uploaded"),
+            "rule_info": _flat("rule_info"),
+            "rule_name": _flat("rule_name"),
+            "user_id": _flat("user_id"),
         }

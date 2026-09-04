@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { Download, Eye, SearchX, Settings2 } from "lucide-react"
 import { Badge, Button, Panel, Select, Skeleton, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
-import { runQuery, timeRangeToMinutesLive } from "../api"
+import { formatBytes, runQuery, timeRangeToMinutesLive } from "../api"
 import { useFilter } from "../contexts/FilterContext"
-import { getSrcIp, getDestIp, getDurationMs, getRowId, actionVariant, type LogRow } from "../lib/logRow"
+import { getSrcIp, getDestIp, getDurationMs, getRowId, getMatchedRule, actionVariant, type LogRow } from "../lib/logRow"
 
 export type { LogRow }
 
@@ -27,7 +27,7 @@ function toCsvValue(v: string): string {
 }
 
 function exportCsv(rows: LogRow[], filename: string) {
-  const header = ["Timestamp", "Src IP", "Dest IP", "URL", "Action", "Duration"]
+  const header = ["Timestamp", "Src IP", "Dest IP", "URL", "Action", "Duration", "Category", "Method", "Status", "Country", "Bytes Down", "Bytes Up", "Rule"]
   const lines = [
     header.map(toCsvValue).join(","),
     ...rows.map((r) =>
@@ -38,6 +38,13 @@ function exportCsv(rows: LogRow[], filename: string) {
         toCsvValue(r.url ?? ""),
         toCsvValue(r.action ?? ""),
         toCsvValue(getDurationMs(r) != null ? `${getDurationMs(r)}ms` : ""),
+        toCsvValue(r.category ?? ""),
+        toCsvValue(r.http_method ?? ""),
+        toCsvValue(String(r.http_status_code ?? "")),
+        toCsvValue(r.country_code ?? ""),
+        toCsvValue(String(r.bytes_downloaded ?? "")),
+        toCsvValue(String(r.bytes_uploaded ?? "")),
+        toCsvValue(r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info ?? ""),
       ].join(","),
     ),
   ]
@@ -147,6 +154,62 @@ export function LogInspector({ filter = "", timeRange = "24h", viewMode = "flagg
         },
         align: "right" as const,
         width: "w-24",
+      },
+      {
+        id: "category",
+        header: "Category",
+        accessor: (r) => r.category,
+        cell: (r) => <span className="font-mono text-xs text-muted-foreground">{r.category || "—"}</span>,
+        width: "w-24",
+      },
+      {
+        id: "method",
+        header: "Method",
+        accessor: (r) => r.http_method,
+        cell: (r) => <span className="font-mono text-xs">{r.http_method || "—"}</span>,
+        width: "w-20",
+      },
+      {
+        id: "status",
+        header: "Status",
+        accessor: (r) => r.http_status_code,
+        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.http_status_code ?? "—"}</span>,
+        width: "w-20",
+        align: "right" as const,
+      },
+      {
+        id: "country",
+        header: "Country",
+        accessor: (r) => r.country_code,
+        cell: (r) => <span className="font-mono text-xs">{r.country_code || "—"}</span>,
+        width: "w-20",
+      },
+      {
+        id: "bytes",
+        header: "↓/↑ Bytes",
+        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
+        cell: (r) => {
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+          return (
+            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
+              {formatBytes(dn + up)}
+            </span>
+          )
+        },
+        align: "right" as const,
+        width: "w-24",
+      },
+      {
+        id: "rule",
+        header: "Rule",
+        accessor: (r) => r.rule_name ?? r.rule_info ?? getMatchedRule(r),
+        cell: (r) => {
+          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info || getMatchedRule(r)
+          return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+        },
+        width: "w-28",
       },
       {
         id: "actions",
