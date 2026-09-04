@@ -768,3 +768,70 @@ def test_validation_put_invalid_type(client):
     pid = created.json()["id"]
     resp = client.put(f"/api/patterns/{pid}", json={"pattern_type": "invalid"})
     assert resp.status_code == 422
+
+
+async def test_store_findings_persists_rich_flat_columns(client):
+    """The flat logstash-proxy fields must survive a poll into the findings table.
+
+    Regression: the Analytics raw-data table showed '—' for Bytes and Rule
+    because store_findings never persisted the rich flat columns. They must be
+    written so Query/Findings/Host/Analytics can surface them.
+    """
+    import pandas as pd
+
+    from app.database import get_db
+    from app.services.result_processor import store_findings
+
+    df = pd.DataFrame(
+        [
+            {
+                "@timestamp": "2026-09-03T09:36:12.000Z",
+                "client_ip": "172.21.26.84",
+                "server_ip": "142.251.154.119",
+                "url": "https://www.google.com/gen_204",
+                "base_url": "www.google.com",
+                "domain": "www.google.com",
+                "category": "Search Site",
+                "http_method": "GET",
+                "http_status_code": "204",
+                "country_code": "US",
+                "bytes_downloaded": 916,
+                "bytes_uploaded": 4116,
+                "rule_info": "DS",
+                "rule_name": "-",
+                "user_id": "172.21.26.84",
+                "action": "ALLOW",
+                "duration_seconds": 12.64,
+            }
+        ]
+    )
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        inserted = await store_findings(db, df, matched_patterns=[])
+        assert inserted == 1
+        cur = await db.execute(
+            "SELECT domain, category, http_method, http_status_code, country_code, "
+            "bytes_downloaded, bytes_uploaded, rule_info, rule_name, user_id, "
+            "action, duration_seconds FROM findings"
+        )
+        row = await cur.fetchone()
+    finally:
+        await db.close()
+
+    assert row is not None
+    assert row[0] == "www.google.com"   # domain
+    assert row[1] == "Search Site"      # category
+    assert row[2] == "GET"              # http_method
+    assert row[3] == "204"              # http_status_code
+    assert row[4] == "US"               # country_code
+    # bytes_* persist as TEXT (migration columns); the frontend coerces for
+    # bandwidth sums. duration_seconds is an INTEGER column.
+    assert row[5] == "916"              # bytes_downloaded
+    assert row[6] == "4116"             # bytes_uploaded
+    assert row[7] == "DS"               # rule_info
+    assert row[8] == "-"                # rule_name
+    assert row[9] == "172.21.26.84"     # user_id
+    assert row[10] == "ALLOW"           # action
+    assert row[11] == 12                # duration_seconds (int)

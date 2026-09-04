@@ -74,19 +74,36 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''"
         )
 
-    # Migration: add action and duration_seconds (Schema S3 — OPTIONAL, UC-A/UC-B only).
-    # These columns round out the retained view only if F1 wants them (UC-A/UC-B mode).
-    # Anti-scope: leave them ES-only if not needed (COLLAPSED mode).
-    from app.services.es_fields import mode_has_extended_findings
+    # Migration: action + duration_seconds always persisted (flat logstash-proxy
+    # index carries both; COLLAPSED mode previously dropped them, starving
+    # analytics). Added unconditionally — a missing column is ALTERed in.
+    if "action" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN action TEXT NOT NULL DEFAULT ''"
+        )
+    if "duration_seconds" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
+        )
 
-    if mode_has_extended_findings():
-        if "action" not in columns:
+    # Migration: rich flat proxy fields — carry the full logstash-proxy schema
+    # into the findings table so Query/Findings/Host/Analytics can surface them.
+    rich_findings_columns = [
+        "domain",
+        "category",
+        "http_method",
+        "http_status_code",
+        "country_code",
+        "bytes_downloaded",
+        "bytes_uploaded",
+        "rule_info",
+        "rule_name",
+        "user_id",
+    ]
+    for col in rich_findings_columns:
+        if col not in columns:
             await db.execute(
-                "ALTER TABLE findings ADD COLUMN action TEXT NOT NULL DEFAULT ''"
-            )
-        if "duration_seconds" not in columns:
-            await db.execute(
-                "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
+                f"ALTER TABLE findings ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
             )
 
     # Indexes for the findings graph + list queries (url/base_url lookups,
