@@ -81,8 +81,7 @@ export function DashboardPage({
       ? {
           kind: "setup" as const,
           title: "NO BLOCK PATTERNS YET",
-          description:
-            "ADD BLOCK PATTERNS TO START FLAGGING TRAFFIC, THEN TRIGGER A MANUAL RUN TO SEED FINDINGS.",
+          description: "ADD BLOCK PATTERNS TO START FLAGGING TRAFFIC.",
           actionLabel: "ADD PATTERNS",
           action: () => onNavigate("patterns"),
         }
@@ -90,8 +89,7 @@ export function DashboardPage({
         ? {
             kind: "offline" as const,
             title: "ELASTICSEARCH UNREACHABLE",
-            description:
-              "UNETWATCH CANT REACH ELASTICSEARCH. MONITORING IS PAUSED. CHECK THE CLUSTER, THEN RETRY.",
+            description: "MONITORING IS PAUSED. CHECK THE CLUSTER, THEN RETRY.",
             actionLabel: "RETRY",
             action: onRefresh,
           }

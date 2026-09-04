@@ -22,6 +22,7 @@ import {
 import {
   Button,
   EmptyState,
+  LoadingIcon,
   PageHeader,
   Panel,
   SearchInput,
@@ -42,13 +43,17 @@ function formatCount(n: number): string {
 }
 
 /** True when a search string looks like a URL rather than a bare host/IP —
- * used so the URL page only reacts to URL filters (not host/IP ones). */
+ * used so the URL page only reacts to URL filters (not host/IP ones). A bare
+ * dotted host (e.g. ``evil.example``) counts as a URL so quick-nav from a
+ * base_url column auto-investigates it; a bare IPv4 (``192.168.1.45``) does not
+ * (that stays a Host Inspector filter). */
 function looksLikeUrl(s: string): boolean {
   return (
     /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ||
     s.includes("/") ||
     s.includes("?") ||
-    s.startsWith("www.")
+    s.startsWith("www.") ||
+    /[a-z0-9-]*[a-z][a-z0-9-]*\.[a-z0-9-]+/i.test(s)
   )
 }
 
@@ -203,8 +208,8 @@ export function UrlInvestigationPage({
             aria-label="URL to investigate"
           />
           <Button type="submit" disabled={loading}>
-            <Search className="h-4 w-4" />
-            Investigate
+            {loading ? <LoadingIcon /> : <Search className="h-4 w-4" />}
+            {loading ? "Investigating…" : "Investigate"}
           </Button>
         </form>
       </PageHeader>
@@ -305,14 +310,6 @@ export function UrlInvestigationPage({
             )}
           </Panel>
 
-          {/* Risk note */}
-          <div className="flex items-start gap-2 rounded-lg border border-border bg-card px-4 py-3">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-              Risk (ADR 0001): a URL that matched a block pattern with ALLOW is a risk; whitelisted hosts are
-              excluded from findings and risk counts. DENY rows are enforcements — the proxy already handled them.
-            </p>
-          </div>
         </>
       ) : null}
 

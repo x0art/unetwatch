@@ -288,9 +288,10 @@ async def test_query_run_annotates_lists(client, monkeypatch):
     assert by_url["http://blocked.example/c"]["blacklisted"] is True
     assert by_url["http://blocked.example/c"]["blacklist_source"] == "url"
 
-    # Client IP on the IP blacklist.
-    assert by_url["http://flagged.example/d"]["blacklisted"] is True
-    assert by_url["http://flagged.example/d"]["blacklist_source"] == "ip"
+    # Client IP on the IP blacklist no longer badges the row — blacklist
+    # annotation is destination-only, so this row is not blacklisted.
+    assert by_url["http://flagged.example/d"]["blacklisted"] is False
+    assert by_url["http://flagged.example/d"]["blacklist_source"] is None
 
     # Base URL is itself a blacklisted IP address.
     assert by_url["http://9.9.9.9/e"]["blacklisted"] is True

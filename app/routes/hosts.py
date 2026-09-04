@@ -21,16 +21,32 @@ router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 # high-risk because the proxy did NOT stop them.
 
 
-def _risk_from_shares(total: int, risk_requests: int) -> dict:
-    """Map total/risk counts to a risk score + level (ADR 0001)."""
+def _risk_from_shares(
+    total: int, risk_requests: int, blacklisted_risk: int = 0
+) -> dict:
+    """Map total/risk counts to a risk score + level (ADR 0001).
+
+    ``blacklisted_risk`` counts ALLOWed requests to blacklisted destinations —
+    an operator explicitly flagged the target and the proxy still let it
+    through, the highest-risk signal. Any such request escalates to HIGH.
+    """
     if total <= 0:
-        return {"riskScore": 12, "riskLevel": "LOW"}
-    share = risk_requests / total
-    if share > 0.5:
-        return {"riskScore": min(95, 72 + round((share - 0.5) * 40)), "riskLevel": "HIGH"}
-    if share > 0.2:
-        return {"riskScore": round(45 + ((share - 0.2) / 0.3) * 25), "riskLevel": "MEDIUM"}
-    return {"riskScore": round(12 + (share / 0.2) * 32), "riskLevel": "LOW"}
+        score = 12
+        level = "LOW"
+    else:
+        share = risk_requests / total
+        if share > 0.5:
+            score = min(95, 72 + round((share - 0.5) * 40))
+            level = "HIGH"
+        elif share > 0.2:
+            score = round(45 + ((share - 0.2) / 0.3) * 25)
+            level = "MEDIUM"
+        else:
+            score = round(12 + (share / 0.2) * 32)
+            level = "LOW"
+    if blacklisted_risk > 0:
+        return {"riskScore": max(92, score), "riskLevel": "HIGH"}
+    return {"riskScore": score, "riskLevel": level}
 
 
 def _synthesize_bandwidth(total_requests: int) -> str:
@@ -70,10 +86,15 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
         try:
             block_patterns = await get_block_patterns(db)
             whitelist_patterns = await get_whitelist_patterns(db)
+            bl_cursor = await db.execute("SELECT kind, value FROM blacklist_entries")
+            bl_rows = await bl_cursor.fetchall()
         finally:
             await db.close()
         if not block_patterns:
             return None
+        blacklist_urls = {r["value"] for r in bl_rows if r["kind"] == "url"}
+        blacklist_ips = {r["value"] for r in bl_rows if r["kind"] == "ip"}
+        blacklist_domains = blacklist_urls | blacklist_ips
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(
@@ -89,6 +110,7 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
                 "totalRequests": 0,
                 "riskRequests": 0,
                 "enforcements": 0,
+                "blacklistedRequests": 0,
                 "es_online": True,
             }
 
@@ -102,13 +124,25 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
             actions = df["action"].fillna("").astype(str).str.strip().str.upper()
             risk_requests = int(actions.isin(["ALLOW", ""]).sum())
             enforcements = int(actions.isin(["DENY", "FLAG"]).sum())
+            blacklisted_requests = int(
+                (
+                    df["base_url"].astype(str).isin(blacklist_domains)
+                    & actions.isin(["ALLOW", ""])
+                ).sum()
+            )
         else:
+            # Legacy rows carry no action — every block-pattern hit was an
+            # ALLOW risk by construction.
             risk_requests = total
             enforcements = 0
+            blacklisted_requests = int(
+                df["base_url"].astype(str).isin(blacklist_domains).sum()
+            )
         return {
             "totalRequests": total,
             "riskRequests": risk_requests,
             "enforcements": enforcements,
+            "blacklistedRequests": blacklisted_requests,
             "es_online": True,
         }
     except Exception:
@@ -140,8 +174,9 @@ async def host_profile(
     total = (agg or {}).get("totalRequests", 0)
     risk_requests = (agg or {}).get("riskRequests", 0)
     enforcements = (agg or {}).get("enforcements", 0)
+    blacklisted_requests = (agg or {}).get("blacklistedRequests", 0)
 
-    risk = _risk_from_shares(total, risk_requests)
+    risk = _risk_from_shares(total, risk_requests, blacklisted_requests)
     enforcements_pct = (enforcements / total) * 100 if total > 0 else 0
 
     return {
@@ -155,6 +190,7 @@ async def host_profile(
             "totalRequests": total,
             "riskRequests": risk_requests,
             "enforcements": enforcements,
+            "blacklistedRequests": blacklisted_requests,
             "enforcementsPct": round(enforcements_pct, 1),
             "bandwidth": _synthesize_bandwidth(total),
         },

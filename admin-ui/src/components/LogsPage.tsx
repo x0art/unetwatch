@@ -400,7 +400,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
       {/* Header */}
       <PageHeader
         title="Logs"
-        description="Audit trail of every Elasticsearch query and webhook delivery — what was sent, how many matched, and whether the alert landed."
+        description="Audit trail of ES queries and webhook deliveries."
       >
         <Select
           value={kind}

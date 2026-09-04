@@ -257,8 +257,10 @@ async def run_query(
     instead of changing the time window; ``client_ip`` narrows to a single
     client via the ES ``term`` filter (Host Inspector); ``exclude_whitelist``
     drops whitelisted matches server-side so the whole result set (table,
-    charts, flow, stats) shrinks. Returns the matching documents (table),
-    aggregates (stat cards + charts) and a client_ip → base_url flow.
+    charts, flow, stats) shrinks; ``exclude_blacklist`` excludes rows whose
+    destination host (``base_url``) is on the blacklist. Returns the matching
+    documents (table), aggregates (stat cards + charts) and a
+    client_ip → base_url flow.
     Elasticsearch failures degrade gracefully (``es_online: False``) and are
     recorded in ``monitor_logs``.
     """
@@ -343,10 +345,7 @@ async def run_query(
         )
         if exclude_blacklist and (blacklist_urls or blacklist_ips):
             blacklist_set = blacklist_urls | blacklist_ips
-            df = df[
-                ~df["base_url"].astype(str).isin(blacklist_set)
-                & ~df["client_ip"].astype(str).isin(blacklist_ips)
-            ]
+            df = df[~df["base_url"].astype(str).isin(blacklist_set)]
         log["filtered"] = len(df)
         if df.empty:
             return result
@@ -414,8 +413,10 @@ async def run_all_query(
     stream and flagged-only with a single toggle. ``ip`` narrows to a single
     client via a ``term`` filter. ``apply_filters`` keeps EVERY action
     (``actions=None``) and does NOT exclude whitelist matches — the full
-    stream is exactly that. Elasticsearch failures degrade gracefully
-    (``es_online: False``), never 5xx.
+    stream is exactly that. Blacklisted destinations (``base_url`` on the
+    blacklist) are always excluded here; the Query page's include/exclude
+    blacklist selector does not apply in this ``view_mode=all`` path.
+    Elasticsearch failures degrade gracefully (``es_online: False``), never 5xx.
     """
     started = datetime.now(UTC)
     settings = get_settings()
@@ -493,10 +494,7 @@ async def run_all_query(
 
         if blacklist_urls or blacklist_ips:
             blacklist_set = blacklist_urls | blacklist_ips
-            df = df[
-                ~df["base_url"].astype(str).isin(blacklist_set)
-                & ~df["client_ip"].astype(str).isin(blacklist_ips)
-            ]
+            df = df[~df["base_url"].astype(str).isin(blacklist_set)]
         log["filtered"] = len(df)
         if df.empty:
             return result

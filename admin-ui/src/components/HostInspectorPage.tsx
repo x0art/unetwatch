@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useState } from "react"
-import { Activity, Link2, Search, SearchX, Settings2, Download, ShieldAlert, ShieldCheck } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Activity, Link2, Search, SearchX, Download, ShieldCheck } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, useToast } from "./ui"
+import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, LoadingIcon, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
 import { TopDestinations, type TopDomain, type TriggeredPattern } from "./TopDestinations"
 import {
-  addBaseUrlToBlacklist,
   bulkImport,
   getHostProfile,
   runQuery,
@@ -419,11 +418,10 @@ export function HostInspectorPage({
     }
   }
 
-  const handleGear = () => {
-    toast({ title: "Table settings", description: "Column visibility coming soon.", variant: "info" })
-  }
-
-  /* ── Per-host enforcement actions (ADR 0001) ── */
+  /* ── Per-host whitelist action (ADR 0001) ──
+     NOTE: blacklisting a client source IP is intentionally removed — blacklist
+     entries are destination hosts (URLs whose host is an IP), consumed by the
+     device-firewall feeds. */
   const handleWhitelist = async () => {
     if (!target.trim()) return
     const host = target.trim()
@@ -436,21 +434,8 @@ export function HostInspectorPage({
     }
   }
 
-  const handleBlacklist = async () => {
-    if (!target.trim()) return
-    try {
-      const res = await addBaseUrlToBlacklist(target.trim())
-      toast({
-        title: res.added.length ? "Blacklisted" : "Already blacklisted",
-        description: `${target.trim()} added to the block feed.`,
-        variant: res.added.length ? "success" : "info",
-      })
-    } catch (e) {
-      toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
-    }
-  }
-
-  const handleOpenUrl = (url: string) => {
+  const handleOpenUrl = useCallback((url: string) => {
+    if (!url) return
     setGlobalFilter(url)
     try {
       window.localStorage.setItem("unetwatch_view", "url")
@@ -458,7 +443,18 @@ export function HostInspectorPage({
       /* ignore */
     }
     onNavigate?.("url")
-  }
+  }, [setGlobalFilter, onNavigate])
+
+  const handleOpenHost = useCallback((ip: string) => {
+    if (!ip) return
+    setGlobalFilter(ip)
+    try {
+      window.localStorage.setItem("unetwatch_view", "host")
+    } catch {
+      /* ignore */
+    }
+    onNavigate?.("host")
+  }, [setGlobalFilter, onNavigate])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") lookup(target)
@@ -525,8 +521,19 @@ export function HostInspectorPage({
         header: "Full URL / Dest Domain",
         accessor: (r) => r.url,
         cell: (r) => (
-          <span className="block max-w-[340px] truncate font-mono text-xs" title={r.url}>
-            {r.url}
+          <span className="flex items-center gap-1.5">
+            <span className="block max-w-[340px] truncate font-mono text-xs" title={r.url}>
+              {r.url}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleOpenUrl(r.url ?? "")}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in URL Investigation"
+              title="Open in URL Investigation"
+            >
+              <Search className="h-3 w-3" />
+            </button>
           </span>
         ),
       },
@@ -534,7 +541,20 @@ export function HostInspectorPage({
         id: "dest_ip",
         header: "Dest IP",
         accessor: (r) => getDestIp(r),
-        cell: (r) => <span className="font-mono text-xs text-muted-foreground">{getDestIp(r) || "—"}</span>,
+        cell: (r) => (
+          <span className="flex items-center gap-1.5">
+            <span className="font-mono text-xs text-muted-foreground">{getDestIp(r) || "—"}</span>
+            <button
+              type="button"
+              onClick={() => handleOpenHost(getDestIp(r))}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in Host Inspector"
+              title="Open in Host Inspector"
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          </span>
+        ),
       },
       {
         id: "action",
@@ -622,7 +642,7 @@ export function HostInspectorPage({
         width: "w-28",
       },
     ],
-    [],
+    [handleOpenHost, handleOpenUrl],
   )
 
   const showSections = !!host && !error
@@ -638,16 +658,10 @@ export function HostInspectorPage({
           Export Report
         </Button>
         {host && (
-          <>
-            <Button variant="outline" onClick={handleWhitelist}>
-              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-              Whitelist host
-            </Button>
-            <Button variant="outline" onClick={handleBlacklist} className="text-destructive hover:text-destructive">
-              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
-              Blacklist host
-            </Button>
-          </>
+          <Button variant="outline" onClick={handleWhitelist}>
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+            Whitelist host
+          </Button>
         )}
       </PageHeader>
 
@@ -661,7 +675,7 @@ export function HostInspectorPage({
           aria-label="Host or IP search"
         />
         <Button onClick={() => lookup(target)} disabled={loading}>
-          <Search className="h-4 w-4" aria-hidden="true" />
+          {loading ? <LoadingIcon /> : <Search className="h-4 w-4" aria-hidden="true" />}
           {loading ? "Looking up…" : "Lookup"}
         </Button>
         <Select
@@ -781,9 +795,6 @@ export function HostInspectorPage({
                   className="w-36"
                   aria-label="Filter by action"
                 />
-                <Button variant="outline" size="sm" onClick={handleGear} aria-label="Table settings">
-                  <Settings2 className="h-3.5 w-3.5" />
-                </Button>
               </div>
             }
           >

@@ -21,6 +21,7 @@ import {
   Info,
   AlertTriangle,
   CheckCircle2,
+  Loader2,
   Search,
   X,
   type LucideIcon,
@@ -84,6 +85,11 @@ export function Button({
       {children}
     </button>
   )
+}
+
+/** Shared spinner for "processing" button states. */
+export function LoadingIcon({ className }: { className?: string }) {
+  return <Loader2 className={cn("h-4 w-4 animate-spin", className)} aria-hidden="true" />
 }
 
 export function CopyUrlButton({

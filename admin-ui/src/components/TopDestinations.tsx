@@ -33,11 +33,11 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
   const maxHits = Math.max(1, ...triggeredPatterns.map((p) => p.hits))
 
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-card shadow-sm", className)}>
-      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-3">
+    <div className={cn("brutal-card overflow-hidden", className)}>
+      <div className="flex items-center gap-2 border-b-[2.5px] border-border bg-muted/40 px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-        <h3 className="font-mono text-xs font-bold uppercase tracking-widest">Top Destinations &amp; Rule Matches</h3>
-        <span className="ml-auto hidden font-mono text-[11px] text-muted-foreground sm:inline">
+        <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Top Destinations &amp; Rule Matches</h3>
+        <span className="ml-auto hidden font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground sm:inline">
           Destinations ranked by volume · rules by trigger count
         </span>
       </div>

@@ -30,10 +30,11 @@ async def run_query(
     Host Inspector so it finds risk rows by exact client). ``q`` narrows the
     query inside Elasticsearch itself (instead of changing the time window);
     ``exclude_whitelist`` drops whitelisted matches so fewer documents come
-    back; ``exclude_blacklist`` drops rows whose host or client IP is on the
-    blacklist. ``view_mode=all`` runs the full-stream query (no block-pattern
-    clause). Returns matching documents (table), aggregates (charts) and a
-    client_ip → base_url flow. Every run is recorded in the Logs page.
+    back; ``exclude_blacklist`` drops rows whose destination host (base_url)
+    is on the blacklist. ``view_mode=all`` runs the full-stream query (no
+    block-pattern clause). Returns matching documents (table), aggregates
+    (charts) and a client_ip → base_url flow. Every run is recorded in the
+    Logs page.
     """
     from app.services.monitor import run_all_query
     from app.services.monitor import run_query as run_query_service

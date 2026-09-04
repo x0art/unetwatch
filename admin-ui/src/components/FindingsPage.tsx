@@ -5,6 +5,7 @@ import {
   CornerUpRight,
   Eraser,
   History,
+  Search,
   SearchX,
   RefreshCcw,
   Trash2,
@@ -33,6 +34,7 @@ import {
 import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useAutoRefresh, useDebounce } from "../lib/utils"
+import { useFilter } from "../contexts/FilterContext"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -54,6 +56,8 @@ const FINDINGS_UI: {
   onCopy: (url: string) => void
   onTrack: (url: string) => void
   onDelete: (f: Finding) => void
+  onInspectHost: (ip: string) => void
+  onInspectUrl: (url: string) => void
 } = {
   whitelistIndex: {},
   blacklistIndex: {},
@@ -63,6 +67,8 @@ const FINDINGS_UI: {
   onCopy: () => {},
   onTrack: () => {},
   onDelete: () => {},
+  onInspectHost: () => {},
+  onInspectUrl: () => {},
 }
 
 /** Stable row identity for the findings table. */
@@ -87,6 +93,15 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     cell: (f) => (
       <span className="flex items-center gap-1.5">
         <span className="font-mono text-sm">{f.client_ip}</span>
+        <button
+          type="button"
+          onClick={() => FINDINGS_UI.onInspectHost(f.client_ip)}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+          aria-label="Open in Host Inspector"
+          title="Open in Host Inspector"
+        >
+          <Search className="h-3 w-3" />
+        </button>
         <CopyUrlButton value={f.client_ip} label="Client IP" />
       </span>
     ),
@@ -113,6 +128,15 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
         <span className="truncate font-mono text-xs" title={f.url}>
           {f.url}
         </span>
+        <button
+          type="button"
+          onClick={() => FINDINGS_UI.onInspectUrl(f.url)}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+          aria-label="Open in URL Investigation"
+          title="Open in URL Investigation"
+        >
+          <Search className="h-3 w-3" />
+        </button>
         <Button
           variant="ghost"
           size="icon"
@@ -134,6 +158,15 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     cell: (f) => (
       <div className="flex items-center gap-2">
         <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
+        <button
+          type="button"
+          onClick={() => FINDINGS_UI.onInspectUrl(f.base_url)}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+          aria-label="Open in URL Investigation"
+          title="Open in URL Investigation"
+        >
+          <Search className="h-3 w-3" />
+        </button>
         <CopyUrlButton value={f.base_url} label="Base URL" />
         {FINDINGS_UI.whitelistIndex[f.base_url] ? (
           <span
@@ -201,8 +234,9 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   },
 ]
 
-export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
+export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: string; onNavigate?: (view: "host" | "url") => void } = {}) {
   const { toast } = useToast()
+  const { setGlobalFilter } = useFilter()
   const [findings, setFindings] = useState<Finding[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -444,6 +478,16 @@ export function FindingsPage({ initialSearch }: { initialSearch?: string }) {
   FINDINGS_UI.onCopy = handleCopyUrl
   FINDINGS_UI.onTrack = handleTrackRedirect
   FINDINGS_UI.onDelete = (f) => setDeleteTarget(f)
+  FINDINGS_UI.onInspectHost = (ip: string) => {
+    setGlobalFilter(ip)
+    try { window.localStorage.setItem("unetwatch_view", "host") } catch { /* ignore */ }
+    onNavigate?.("host")
+  }
+  FINDINGS_UI.onInspectUrl = (url: string) => {
+    setGlobalFilter(url)
+    try { window.localStorage.setItem("unetwatch_view", "url") } catch { /* ignore */ }
+    onNavigate?.("url")
+  }
   const columns: DataTableColumn<Finding>[] = FINDINGS_COLUMNS
 
   return (

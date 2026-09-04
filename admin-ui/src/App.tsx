@@ -274,7 +274,7 @@ function AppRoutes() {
         )}
         {visited.has("findings") && (
           <div hidden={view !== "findings"}>
-            <FindingsPage initialSearch={findingsSearch} />
+            <FindingsPage initialSearch={findingsSearch} onNavigate={handleNavigate} />
           </div>
         )}
         {visited.has("blacklist") && (
@@ -304,7 +304,7 @@ function AppRoutes() {
         )}
         {visited.has("analytics") && (
           <div hidden={view !== "analytics"}>
-            <AnalyticsPage />
+            <AnalyticsPage onNavigate={handleNavigate} />
           </div>
         )}
       </Suspense>

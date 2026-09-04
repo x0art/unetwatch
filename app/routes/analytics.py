@@ -22,8 +22,8 @@ Every endpoint accepts the same three query params the Analytics page passes
 Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
 
     GET /api/analytics/summary?range=7d&compare=previous&hostGroup=all
-        { has_data, totalVolume, totalRisk, totalEnforcements, topBandwidthHost,
-          peakTrafficTime, range, compare, hostGroup, es_online,
+        { has_data, totalVolume, totalRisk, totalBlacklistedRisk, totalEnforcements,
+          topBandwidthHost, peakTrafficTime, range, compare, hostGroup, es_online,
           previous: { totalVolume, totalEnforcements } | null,
           volumeDeltaPct, enforcementsDeltaPct }
 
@@ -202,6 +202,16 @@ def _fmt_peak(ts: str) -> str:
 # ── Aggregation helpers (SQL over findings) ────────────────────────────────
 
 
+async def _load_blacklist_sets(db) -> tuple[set[str], set[str]]:
+    """Load the blacklist_entries table into (url, ip) value sets."""
+    cursor = await db.execute("SELECT kind, value FROM blacklist_entries")
+    rows = await cursor.fetchall()
+    return (
+        {r["value"] for r in rows if r["kind"] == "url"},
+        {r["value"] for r in rows if r["kind"] == "ip"},
+    )
+
+
 async def _findings_summary(db, minutes: int) -> dict:
     """Aggregate the persisted findings table into the summary shape."""
     columns = await _column_names(db)
@@ -217,8 +227,12 @@ async def _findings_summary(db, minutes: int) -> dict:
     )
     total = (await count_cursor.fetchone())["total"]
 
+    blacklist_urls, blacklist_ips = await _load_blacklist_sets(db)
+    blacklist_domains = blacklist_urls | blacklist_ips
+
     total_volume = 0
     total_risk = 0
+    total_blacklisted_risk = 0
     total_enforcements = 0
     top_host = ""
     peak_ts = ""
@@ -230,6 +244,12 @@ async def _findings_summary(db, minutes: int) -> dict:
 
         total_volume = _volume_for_bytes(rows, has_duration)
         total_risk = sum(1 for r in rows if _row_is_risk(r, has_action))
+        total_blacklisted_risk = sum(
+            1
+            for r in rows
+            if _row_is_risk(r, has_action)
+            and _domain_of_base(r.get("base_url") or "") in blacklist_domains
+        )
         total_enforcements = sum(1 for r in rows if _row_is_enforced(r, has_action))
 
         by_host: dict[str, int] = {}
@@ -250,6 +270,7 @@ async def _findings_summary(db, minutes: int) -> dict:
     return {
         "totalVolume": total_volume,
         "totalRisk": total_risk,
+        "totalBlacklistedRisk": total_blacklisted_risk,
         "totalEnforcements": total_enforcements,
         "topBandwidthHost": top_host,
         "peakTrafficTime": _fmt_peak(peak_ts) if peak_ts else "",
@@ -474,6 +495,7 @@ async def _es_summary(minutes: int) -> dict | None:
         try:
             block_patterns = await get_block_patterns(db)
             whitelist_patterns = await get_whitelist_patterns(db)
+            blacklist_urls, blacklist_ips = await _load_blacklist_sets(db)
         finally:
             await db.close()
         if not block_patterns:
@@ -490,6 +512,7 @@ async def _es_summary(minutes: int) -> dict | None:
             return {
                 "totalVolume": 0,
                 "totalRisk": 0,
+                "totalBlacklistedRisk": 0,
                 "totalEnforcements": 0,
                 "topBandwidthHost": "",
                 "peakTrafficTime": "",
@@ -504,6 +527,7 @@ async def _es_summary(minutes: int) -> dict | None:
             return {
                 "totalVolume": 0,
                 "totalRisk": 0,
+                "totalBlacklistedRisk": 0,
                 "totalEnforcements": 0,
                 "topBandwidthHost": "",
                 "peakTrafficTime": "",
@@ -532,15 +556,25 @@ async def _es_summary(minutes: int) -> dict | None:
 
         # ADR 0001: risk = ALLOW pattern-matches; enforcements = DENY/FLAG
         # (the proxy already handled those). Risk is what needs action.
+        blacklist_domains = blacklist_urls | blacklist_ips
         if "action" in df.columns:
             actions = df["action"].fillna("").astype(str).str.strip().str.upper()
             total_risk = int(actions.isin(["ALLOW"]).sum())
             total_enforcements = int(actions.isin(["DENY", "FLAG"]).sum())
+            # A blacklisted destination the proxy still ALLOWed is the highest
+            # risk — an explicit operator flag the proxy failed to enforce.
+            risk_rows = df[actions.isin(["ALLOW"])]
+            total_blacklisted_risk = int(
+                risk_rows["base_url"].astype(str).isin(blacklist_domains).sum()
+            )
         else:
             # Legacy/COLLAPSED docs carry no action — every block-pattern hit
             # was a risk by construction.
             total_risk = len(df)
             total_enforcements = 0
+            total_blacklisted_risk = int(
+                df["base_url"].astype(str).isin(blacklist_domains).sum()
+            )
 
         by_host = df["client_ip"].astype(str).value_counts()
         top_host = str(by_host.index[0]) if len(by_host) else ""
@@ -550,6 +584,7 @@ async def _es_summary(minutes: int) -> dict | None:
         return {
             "totalVolume": total_volume,
             "totalRisk": total_risk,
+            "totalBlacklistedRisk": total_blacklisted_risk,
             "totalEnforcements": total_enforcements,
             "topBandwidthHost": top_host,
             "peakTrafficTime": _fmt_peak(peak_hour) if peak_hour else "",

@@ -1,7 +1,5 @@
-import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { motion } from "framer-motion"
-import { Copy, ExternalLink, X } from "lucide-react"
-import { Badge, Button, useToast } from "./ui"
+import { Copy, ExternalLink } from "lucide-react"
+import { Badge, Button, Dialog, useToast } from "./ui"
 import { useFilter } from "../contexts/FilterContext"
 import { formatBytes } from "../api"
 import { copyText } from "../lib/utils"
@@ -133,34 +131,14 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
   }
 
   return (
-    <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
-        <DialogPrimitive.Content asChild>
-          <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", stiffness: 320, damping: 32 }}
-            className="fixed right-0 top-0 z-50 flex h-dvh w-full max-w-[480px] flex-col overflow-hidden border-l border-border bg-card shadow-xl"
-            aria-label={`Event Details: #${rowId}`}
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-              <div className="min-w-0">
-                <DialogPrimitive.Title className="font-sans text-sm font-semibold">Event Details: #{String(rowId).slice(0, 24)}</DialogPrimitive.Title>
-                <p className="mt-1 font-mono text-[11px] text-muted-foreground">{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</p>
-              </div>
-              <DialogPrimitive.Close
-                aria-label="Close drawer"
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-transparent hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={onClose}
-              >
-                <X className="h-4 w-4" />
-              </DialogPrimitive.Close>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 py-5">
-              <div className="space-y-4 font-mono text-xs">
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Event Details: #${String(rowId).slice(0, 24)}`}
+      description={row.timestamp ? new Date(row.timestamp).toLocaleString() : undefined}
+      className="max-w-2xl"
+    >
+      <div className="space-y-4 font-mono text-xs">
                 <CopyField label="Timestamp" copyValue={row.timestamp ? new Date(row.timestamp).toLocaleString() : ""}>
                   <p className="text-foreground">{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</p>
                 </CopyField>
@@ -234,20 +212,16 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
                   <p className="text-foreground">{row.user_id || "—"}</p>
                 </CopyField>
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2 border-t border-border bg-muted/30 px-5 py-4">
-              <Button onClick={handleAddToAllowList}>Add URL to Allow List</Button>
-              <Button variant="outline" onClick={handleViewHostHistory}>
-                View Host History
-              </Button>
-              <Button variant="ghost" onClick={onClose} className="ml-auto">
-                Close
-              </Button>
-            </div>
-          </motion.div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-border bg-muted/30 px-5 py-4">
+                <Button onClick={handleAddToAllowList}>Add URL to Allow List</Button>
+                <Button variant="outline" onClick={handleViewHostHistory}>
+                  View Host History
+                </Button>
+                <Button variant="ghost" onClick={onClose} className="ml-auto">
+                  Close
+                </Button>
+              </div>
+    </Dialog>
   )
 }

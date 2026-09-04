@@ -139,6 +139,73 @@ async def test_top_enforced_endpoint(client, db_path):
     ]
 
 
+async def test_summary_blacklisted_allow_is_additive_risk(client, db_path):
+    """A blacklisted destination whose request was ALLOWed is the highest-risk
+    signal: it counts in ``totalRisk`` AND as the distinct additive
+    ``totalBlacklistedRisk`` (ADR 0001 semantics preserved)."""
+    db = await aiosqlite.connect(db_path)
+    await db.execute(
+        "INSERT OR IGNORE INTO blacklist_entries (kind, value)"
+        " VALUES ('url', 'evil.example')"
+    )
+    await db.commit()
+    await db.close()
+
+    await _seed(
+        client,
+        db_path,
+        [
+            (
+                "1.1.1.1", "", "http://evil.example/a", "evil.example",
+                _now(), json.dumps(["*evil*"]), "ALLOW",
+            ),
+            (
+                "1.1.1.1", "", "http://bad.example/b", "bad.example",
+                _now(), json.dumps(["*bad*"]), "ALLOW",
+            ),
+        ],
+        add_action_col=True,
+    )
+
+    res = client.get("/api/analytics/summary?range=7d")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["source"] == "findings"
+    assert data["totalRisk"] == 2  # both ALLOW rows remain risk
+    assert data["totalBlacklistedRisk"] == 1  # only the blacklisted one
+
+
+async def test_summary_blacklist_deny_not_risk(client, db_path):
+    """A blacklisted destination that was DENYed is an enforcement, not risk —
+    totalBlacklistedRisk stays 0 (the proxy already stopped it)."""
+    db = await aiosqlite.connect(db_path)
+    await db.execute(
+        "INSERT OR IGNORE INTO blacklist_entries (kind, value)"
+        " VALUES ('url', 'evil.example')"
+    )
+    await db.commit()
+    await db.close()
+
+    await _seed(
+        client,
+        db_path,
+        [
+            (
+                "1.1.1.1", "", "http://evil.example/a", "evil.example",
+                _now(), json.dumps(["*evil*"]), "DENY",
+            ),
+        ],
+        add_action_col=True,
+    )
+
+    res = client.get("/api/analytics/summary?range=7d")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["totalRisk"] == 0
+    assert data["totalBlacklistedRisk"] == 0
+    assert data["totalEnforcements"] == 1
+
+
 async def test_summary_accepts_1h_range(client, db_path):
     """1h range is now supported (aligned with FilterContext presets)."""
     await _seed(

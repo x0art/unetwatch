@@ -1230,6 +1230,8 @@ export interface HostRisk {
   riskRequests: number
   /** DENY/FLAG — the proxy already handled these (not risk). */
   enforcements: number
+  /** Blacklisted destinations still ALLOWed — the highest-risk subset. */
+  blacklistedRequests?: number
   /** 0..100 share of total that was enforced (proxy handled). */
   enforcementsPct: number
   bandwidth: string
@@ -1435,6 +1437,8 @@ export interface AnalyticsSummary {
   totalVolume: number // bytes (approximate when duration_seconds absent — see backend docstring)
   /** ADR 0001: ALLOW pattern-matches — the requests that need attention. */
   totalRisk: number
+  /** Blacklisted destinations still ALLOWed — highest-risk subset of totalRisk. */
+  totalBlacklistedRisk?: number
   /** DENY/FLAG — the proxy already handled these (not risk). */
   totalEnforcements: number
   /** Back-compat alias of totalEnforcements for older consumers. */

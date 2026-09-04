@@ -7,6 +7,7 @@ import {
   Download,
   Globe,
   Printer,
+  Search,
   SearchX,
   Server,
   ShieldAlert,
@@ -26,6 +27,7 @@ import {
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { TrendCharts, type TrendPoint } from "./TrendCharts"
 import { useAutoRefresh } from "../lib/utils"
+import { useFilter } from "../contexts/FilterContext"
 import {
   getAnalyticsSummary,
   getAnalyticsBandwidth,
@@ -97,7 +99,12 @@ function formatWhen(iso: string): string {
 
 /* ── Page ───────────────────────────────────────────────────────────── */
 
-export function AnalyticsPage() {
+export function AnalyticsPage({
+  onNavigate,
+}: {
+  onNavigate?: (view: "host" | "url") => void
+} = {}) {
+  const { setGlobalFilter } = useFilter()
   const { toast } = useToast()
 
   const [range, setRange] = useState("7d")
@@ -110,6 +117,17 @@ export function AnalyticsPage() {
   const [topEnforced, setTopEnforced] = useState<AnalyticsTopEnforced | null>(null)
   const [raw, setRaw] = useState<Finding[]>([])
   const [rawTotal, setRawTotal] = useState(0)
+
+  const openHost = useCallback((ip: string) => {
+    setGlobalFilter(ip)
+    try { window.localStorage.setItem("unetwatch_view", "host") } catch { /* ignore */ }
+    onNavigate?.("host")
+  }, [setGlobalFilter, onNavigate])
+  const openUrl = useCallback((url: string) => {
+    setGlobalFilter(url)
+    try { window.localStorage.setItem("unetwatch_view", "url") } catch { /* ignore */ }
+    onNavigate?.("url")
+  }, [setGlobalFilter, onNavigate])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
@@ -184,7 +202,11 @@ export function AnalyticsPage() {
   const volumeHint = hasRealData
     ? pctArrow(summary!.volumeDeltaPct) ?? (compare === "previous" ? "no prev data" : rangeLabel(range))
     : rangeLabel(range)
-  const riskHint = hasRealData ? rangeLabel(range) : rangeLabel(range)
+  const riskHint = hasRealData
+    ? summary!.totalBlacklistedRisk
+      ? `${summary!.totalBlacklistedRisk} blacklisted still allowed`
+      : rangeLabel(range)
+    : rangeLabel(range)
   const enforcedHint = hasRealData
     ? pctArrow(summary!.enforcementsDeltaPct) ?? (compare === "previous" ? "no prev data" : "handled")
     : "handled"
@@ -310,15 +332,39 @@ export function AnalyticsPage() {
         id: "client_ip",
         header: "Client IP",
         accessor: (r) => r.client_ip,
-        cell: (r) => <span className="font-mono text-xs font-semibold">{r.client_ip}</span>,
+        cell: (r) => (
+          <span className="flex items-center gap-1.5">
+            <span className="font-mono text-xs font-semibold">{r.client_ip}</span>
+            <button
+              type="button"
+              onClick={() => openHost(r.client_ip)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in Host Inspector"
+              title="Open in Host Inspector"
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          </span>
+        ),
       },
       {
         id: "url",
         header: "URL",
         accessor: (r) => r.url,
         cell: (r) => (
-          <span className="block max-w-[320px] truncate font-mono text-xs" title={r.url}>
-            {r.url}
+          <span className="flex items-center gap-1.5">
+            <span className="block max-w-[320px] truncate font-mono text-xs" title={r.url}>
+              {r.url}
+            </span>
+            <button
+              type="button"
+              onClick={() => openUrl(r.url)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in URL Investigation"
+              title="Open in URL Investigation"
+            >
+              <Search className="h-3 w-3" />
+            </button>
           </span>
         ),
       },
@@ -326,7 +372,20 @@ export function AnalyticsPage() {
         id: "base_url",
         header: "Domain",
         accessor: (r) => r.base_url,
-        cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span>,
+        cell: (r) => (
+          <span className="flex items-center gap-1.5">
+            <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span>
+            <button
+              type="button"
+              onClick={() => openUrl(r.base_url)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in URL Investigation"
+              title="Open in URL Investigation"
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          </span>
+        ),
       },
       {
         id: "action",
@@ -363,7 +422,7 @@ export function AnalyticsPage() {
         width: "w-28",
       },
     ],
-    [],
+    [openHost, openUrl],
   )
 
   /* ── Export handlers ──────────────────────────────────────────────── */
@@ -444,7 +503,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Analytics & Reports" description="KPIs, trends, enforcements, and raw data">
+      <PageHeader title="Analytics & Reports" description="Usage, enforcements, and raw findings.">
         <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           {rangeLabel(range)} · {summary?.source === "es" ? "live ES" : "findings table"}
         </span>
@@ -459,20 +518,22 @@ export function AnalyticsPage() {
       </PageHeader>
 
       {/* ── Date range & comparison controls ───────────────────────── */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <Label className="mb-0">Range</Label>
-          <Select value={range} onChange={setRange} options={RANGE_OPTIONS} className="w-44" aria-label="Date range" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label className="mb-0">Compare to</Label>
-          <Select
-            value={compare}
-            onChange={setCompare}
-            options={COMPARE_OPTIONS}
-            className="w-44"
-            aria-label="Comparison period"
-          />
+      <div className="brutal-card p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <Label className="mb-0">Range</Label>
+            <Select value={range} onChange={setRange} options={RANGE_OPTIONS} className="w-44" aria-label="Date range" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label className="mb-0">Compare to</Label>
+            <Select
+              value={compare}
+              onChange={setCompare}
+              options={COMPARE_OPTIONS}
+              className="w-44"
+              aria-label="Comparison period"
+            />
+          </div>
         </div>
       </div>
 
@@ -555,7 +616,7 @@ export function AnalyticsPage() {
 
       {/* ── Top aggregations tables ─────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title="Top Bandwidth Consuming Domains" icon={Globe} description="Domain · Volume · % of total">
+        <Panel title="Top Bandwidth Consuming Domains" icon={Globe}>
           <DataTable
             columns={domainColumns}
             data={topDomains?.items ?? []}
@@ -569,7 +630,7 @@ export function AnalyticsPage() {
             ariaLabel="Top bandwidth consuming domains"
           />
         </Panel>
-        <Panel title="Top Enforced Target Domains" icon={ShieldCheck} description="Domain · Enforcements · Primary rule">
+        <Panel title="Top Enforced Target Domains" icon={ShieldCheck}>
           <DataTable
             columns={enforcedColumns}
             data={topEnforced?.items ?? []}
@@ -624,14 +685,6 @@ export function AnalyticsPage() {
         />
       </Panel>
 
-      {/* ── Source note ─────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3">
-        <ArrowDownToLine className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          Aggregated from {summary?.source === "es" ? "live Elasticsearch" : "the persisted findings table"} —
-          risk = ALLOW pattern matches, enforcements = DENY (handled). Bandwidth approximated (8 KiB/request) until byte accounting lands.
-        </p>
-      </div>
     </div>
   )
 }

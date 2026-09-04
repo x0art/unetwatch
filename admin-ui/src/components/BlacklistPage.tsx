@@ -27,6 +27,7 @@ import {
   EmptyState,
   Input,
   Label,
+  LoadingIcon,
   SearchInput,
   Skeleton,
   useToast,
@@ -380,45 +381,49 @@ export function BlacklistPage() {
         <p className="mono-label">[ BLACKLIST ]</p>
         <h2 className="font-display mt-1 text-[26px] sm:text-[30px]">Blacklist</h2>
         <p className="mt-1.5 max-w-[60ch] font-mono text-xs font-medium leading-relaxed text-muted-foreground">
-          Concrete URLs and IPs blacklisted from findings. Entries are stored as bare hosts (no protocol or path).
+          Blacklisted destinations, consumed as separate URL and IP feeds by the device firewall (nginx/fail2ban).
+          IP entries are destinations whose host is an IP address.
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex min-w-0 flex-1 gap-2">
-          <Input
-            value={addValue}
-            onChange={(e) => setAddValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") add()
-            }}
-            placeholder="Add URL or IP — saved as bare host"
-          />
-          <Button onClick={add} disabled={adding || !addValue.trim()}>
-            Add
+      <div className="brutal-card space-y-4 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-1 gap-2">
+            <Input
+              value={addValue}
+              onChange={(e) => setAddValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") add()
+              }}
+              placeholder="Add URL or IP — saved as bare host"
+            />
+            <Button onClick={add} disabled={adding || !addValue.trim()}>
+              {adding && <LoadingIcon />}
+              {adding ? "Adding…" : "Add"}
+            </Button>
+          </div>
+          <Button variant="outline" onClick={() => setBulkOpen(true)}>
+            <ListPlus className="h-4 w-4" />
+            Bulk add
           </Button>
         </div>
-        <Button variant="outline" onClick={() => setBulkOpen(true)}>
-          <ListPlus className="h-4 w-4" />
-          Bulk add
-        </Button>
-      </div>
 
-      {/* Search */}
-      <div className="flex flex-wrap items-center gap-3">
-        <SearchInput
-          placeholder="Search URLs or IPs..."
-          value={search}
-          onChange={setSearch}
-          className="w-72"
-          aria-label="Search blacklist entries"
-        />
-        {q && (
-          <span className="text-xs text-muted-foreground">
-            {filteredUrls.length + filteredIps.length} match
-            {filteredUrls.length + filteredIps.length === 1 ? "" : "es"} across both feeds
-          </span>
-        )}
+        {/* Search */}
+        <div className="flex flex-wrap items-center gap-3">
+          <SearchInput
+            placeholder="Search URLs or IPs..."
+            value={search}
+            onChange={setSearch}
+            className="w-72"
+            aria-label="Search blacklist entries"
+          />
+          {q && (
+            <span className="text-xs text-muted-foreground">
+              {filteredUrls.length + filteredIps.length} match
+              {filteredUrls.length + filteredIps.length === 1 ? "" : "es"} across both feeds
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -442,7 +447,7 @@ export function BlacklistPage() {
           disabled={deleting}
         />
         <FeedCard
-          title="IP blacklist"
+          title="Destination IP blacklist"
           path="/api/blacklist/ips.txt"
           kind="ip"
           entries={filteredIps}

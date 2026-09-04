@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  AlertTriangle,
   Ban,
   CheckCircle2,
   Copy,
@@ -9,12 +8,12 @@ import {
   Network,
   Play,
   RefreshCcw,
+  Search,
   SearchX,
   Server,
   ShieldAlert,
   Users,
   Zap,
-  type LucideIcon,
 } from "lucide-react"
 import { useDebounce, useAutoRefresh } from "../lib/utils"
 import { useFilter } from "../contexts/FilterContext"
@@ -33,6 +32,7 @@ import {
   CopyUrlButton,
   EmptyState,
   ListBadge,
+  LoadingIcon,
   PageHeader,
   Panel,
   RankedTable,
@@ -88,32 +88,7 @@ function isIpHost(url: string): boolean {
   )
 }
 
-/* ── De-boxed section: hairline + title + content (Query page) ──────── */
-
-function QuerySection({
-  title,
-  icon: Icon,
-  description,
-  children,
-}: {
-  title: string
-  icon?: LucideIcon
-  description?: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className="border-t-[3px] border-[#0A0A0A] pt-4 dark:border-[#F6F2E8]">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
-        <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">{title}</h3>
-        {description && (
-          <span className="ml-auto font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">{description}</span>
-        )}
-      </div>
-      {children}
-    </section>
-  )
-}
+/* ── Content sections use the shared Panel card (consistency) ─────── */
 
 function formatTime(iso: string) {
   const d = new Date(iso)
@@ -132,8 +107,12 @@ function formatFull(iso: string) {
  * onBlacklisted callback can still update component state. */
 const queryUI: {
   setResult: (fn: (prev: QueryResult | null) => QueryResult | null) => void
+  onInspectHost: (ip: string) => void
+  onInspectUrl: (url: string) => void
 } = {
   setResult: () => {},
+  onInspectHost: () => {},
+  onInspectUrl: () => {},
 }
 
 /** Stable row identity for the query-results table + bulk actions. */
@@ -146,6 +125,23 @@ function CopyCell({ value, label }: { value: string; label: string }) {
   return (
     <span onClick={(e) => e.stopPropagation()}>
       <CopyUrlButton value={value} label={label} />
+    </span>
+  )
+}
+
+/** Quick-nav icon button (opens Host Inspector / URL Investigation). */
+function QuickNavCell({ kind, value, label }: { kind: "host" | "url"; value: string; label: string }) {
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => (kind === "host" ? queryUI.onInspectHost(value) : queryUI.onInspectUrl(value))}
+        className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+        aria-label={label}
+        title={label}
+      >
+        <Search className="h-3 w-3" />
+      </button>
     </span>
   )
 }
@@ -173,6 +169,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     cell: (d) => (
       <span className="flex items-center gap-1.5">
         <span className="font-mono text-xs">{d.client_ip}</span>
+        <QuickNavCell kind="host" value={d.client_ip} label="Open in Host Inspector" />
         <CopyCell value={d.client_ip} label="Client IP" />
       </span>
     ),
@@ -199,6 +196,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
           {d.url}
         </span>
+        <QuickNavCell kind="url" value={d.url} label="Open in URL Investigation" />
         <CopyCell value={d.url} label="URL" />
       </span>
     ),
@@ -213,6 +211,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
           {d.base_url}
         </span>
+        <QuickNavCell kind="url" value={d.base_url} label="Open in URL Investigation" />
         <CopyCell value={d.base_url} label="Base URL" />
       </span>
     ),
@@ -275,13 +274,13 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     enableSorting: false,
     cell: (d) => (
       <div className="flex flex-wrap items-center gap-1">
-        {d.blocked_by.length > 0 && (
+        {d.blacklisted && d.action === "ALLOW" && (
           <ListBadge
-            tone="warning"
-            icon={AlertTriangle}
-            title={`Matched block pattern${d.blocked_by.length > 1 ? "s" : ""}: ${d.blocked_by.join(", ")}`}
+            tone="danger"
+            icon={ShieldAlert}
+            title="Blacklisted destination still allowed through — highest risk"
           >
-            block{d.blocked_by.length > 1 ? ` · ${d.blocked_by.length}` : ""}
+            blacklist risk
           </ListBadge>
         )}
         {d.whitelisted && (
@@ -293,20 +292,20 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
             whitelist
           </ListBadge>
         )}
-        {d.blacklisted && (
+        {d.blacklisted && d.action !== "ALLOW" && (
           <ListBadge
             tone="danger"
             icon={CheckCircle2}
             title={
               d.blacklist_source === "ip"
-                ? "IP address is on the blacklist"
+                ? "Destination IP is on the blacklist"
                 : "Host is on the blacklist"
             }
           >
             blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
           </ListBadge>
         )}
-        {d.blocked_by.length === 0 && !d.whitelisted && !d.blacklisted && (
+        {!d.whitelisted && !d.blacklisted && (
           <span className="text-xs text-muted-foreground/50">—</span>
         )}
       </div>
@@ -465,7 +464,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 
 /* ── Page ───────────────────────────────────────────────────────────── */
 
-export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs") => void } = {}) {
+export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void } = {}) {
   const { toast } = useToast()
   const { viewMode, setViewMode, setGlobalFilter } = useFilter()
   const [windowMinutes, setWindowMinutes] = useState("60")
@@ -481,6 +480,16 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
 
   // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
   queryUI.setResult = setResult
+  queryUI.onInspectHost = (ip: string) => {
+    setGlobalFilter(ip)
+    try { window.localStorage.setItem("unetwatch_view", "host") } catch { /* ignore */ }
+    onNavigate?.("host")
+  }
+  queryUI.onInspectUrl = (url: string) => {
+    setGlobalFilter(url)
+    try { window.localStorage.setItem("unetwatch_view", "url") } catch { /* ignore */ }
+    onNavigate?.("url")
+  }
   const columns: DataTableColumn<QueryDoc>[] = QUERY_COLUMNS
 
   const fetchQuery = useCallback(() => {
@@ -611,15 +620,15 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   // Single pass over the filtered rows for the footer counts (was three
   // separate .filter() sweeps on every render).
   const coverageCounts = useMemo(() => {
-    let blocked = 0
+    let risk = 0
     let whitelisted = 0
     let blacklisted = 0
     for (const d of actionFilteredItems) {
-      if (d.blocked_by.length > 0) blocked++
+      if (d.blacklisted && d.action === "ALLOW") risk++
       if (d.whitelisted) whitelisted++
       if (d.blacklisted) blacklisted++
     }
-    return { blocked, whitelisted, blacklisted }
+    return { risk, whitelisted, blacklisted }
   }, [actionFilteredItems])
 
   return (
@@ -627,7 +636,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
       {/* Header */}
       <PageHeader
         title="Query"
-        description="Live Elasticsearch queries against the block patterns — inspect raw matches, whitelisted and blacklisted coverage."
+        description="Live traffic matching block patterns."
       >
         <SearchInput
           placeholder="Filter inside ES (IP / URL)..."
@@ -693,12 +702,12 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           </button>
         </div>
         <Button onClick={handleRun} disabled={loading}>
-          <Play className="h-4 w-4" />
-          Run
+          {loading ? <LoadingIcon /> : <Play className="h-4 w-4" />}
+          {loading ? "Running…" : "Run"}
         </Button>
         <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
-          <RefreshCcw className="h-4 w-4" />
-          Refresh
+          {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
+          {loading ? "Refreshing…" : "Refresh"}
         </Button>
       </PageHeader>
 
@@ -771,7 +780,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
       ) : !result ? null : (
         <>
           {/* Timeline chart */}
-          <QuerySection title="Requests over time" icon={Network} description="Hover for details">
+          <Panel title="Requests over time" icon={Network}>
             {result.timeline.length > 0 ? (
               <TimelineChart points={result.timeline} />
             ) : (
@@ -779,16 +788,16 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 No timestamped matches in this window
               </p>
             )}
-          </QuerySection>
+          </Panel>
 
           {/* Top rankings */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <QuerySection title="Top URLs" icon={Globe}>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <Panel title="Top URLs" icon={Globe}>
               <RankedTable rows={result.top_urls.map((u) => ({ label: u.url, count: u.count }))} />
-            </QuerySection>
-            <QuerySection title="Top client IPs" icon={Users}>
+            </Panel>
+            <Panel title="Top client IPs" icon={Users}>
               <RankedTable rows={result.top_ips.map((u) => ({ label: u.client_ip, count: u.count }))} />
-            </QuerySection>
+            </Panel>
           </div>
 
           {/* Flow visualization — 4-column Sankey (Pattern → Source → Domain →
@@ -799,7 +808,8 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             description="Pattern → Source → Domain → Destination · click a node or ribbon to filter the table"
             action={
               <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
-                {loading ? "LOADING…" : "REFRESH"}
+                {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
+                {loading ? "Refreshing…" : "Refresh"}
               </Button>
             }
           >
@@ -824,21 +834,11 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           </Panel>
 
           {/* Documents table */}
-          <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b-[2.5px] border-[#0A0A0A] pb-3 dark:border-[#F6F2E8]">
-              <div>
-                <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Matching documents</h3>
-                <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                  {actionFilteredItems.length.toLocaleString()}
-                  {q ? ` of ${result.items.length.toLocaleString()}` : ""} matching doc
-                  {actionFilteredItems.length === 1 ? "" : "s"} ·{" "}
-                  <span className="text-warning">{coverageCounts.blocked} blocked</span>{" "}
-                  ·{" "}
-                  <span className="text-success">{coverageCounts.whitelisted} whitelisted</span>{" "}
-                  ·{" "}
-                  <span className="text-destructive">{coverageCounts.blacklisted} blacklisted</span>
-                </p>
-              </div>
+          <Panel
+            title="Matching documents"
+            icon={SearchX}
+            description={`${actionFilteredItems.length.toLocaleString()}${q ? ` of ${result.items.length.toLocaleString()}` : ""} · ${coverageCounts.risk} blacklist risk · ${coverageCounts.whitelisted} whitelisted · ${coverageCounts.blacklisted} blacklisted`}
+            action={
               <div className="flex flex-wrap items-center gap-2">
                 <SearchInput
                   placeholder="Filter by IP or URL..."
@@ -852,15 +852,15 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   {result.es_online ? "Elasticsearch online" : "Elasticsearch unreachable"}
                 </span>
               </div>
-            </div>
-
+            }
+          >
             {/* Badge legend */}
             <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-[2.5px] border-[#0A0A0A] bg-muted px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground brutal-shadow-sm dark:border-[#F6F2E8]">
               <span className="inline-flex items-center gap-1.5">
-                <ListBadge tone="warning" icon={AlertTriangle}>
-                  block
+                <ListBadge tone="danger" icon={ShieldAlert}>
+                  blacklist risk
                 </ListBadge>
-                matched a block pattern (why it is flagged)
+                blacklisted destination still allowed through
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <ListBadge tone="success" icon={CheckCircle2}>
@@ -872,7 +872,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 <ListBadge tone="danger" icon={CheckCircle2}>
                   blacklist
                 </ListBadge>
-                host, base IP or client IP already blacklisted
+                host or destination IP on the blacklist
               </span>
             </div>
             <DataTable
@@ -908,7 +908,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
               onRowClick={handleRowClick}
               ariaLabel="Query results"
             />
-          </div>
+          </Panel>
         </>
       )}
 

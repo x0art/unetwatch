@@ -112,8 +112,12 @@ def apply_filters(
     # ``parts = url.split("/"); parts[2] if len(parts) >= 3 else url``
     # (a split with no limit keeps the host in position 2; URLs without a
     # third segment — no scheme, bare host, empty — fall back to the url).
+    # The trailing :port is stripped so base_url matches the blacklist sets
+    # (normalized to bare hosts) consistently across badge/exclusion/count paths.
     urls = df["url"].astype(str)
-    df["base_url"] = urls.str.split("/").str[2].fillna(urls)
+    df["base_url"] = urls.str.split("/").str[2].fillna(urls).str.replace(
+        r":\d+$", "", regex=True
+    )
     if whitelist_regex and exclude_whitelist:
         df = df[~df["url"].astype(str).str.contains(whitelist_regex, case=False)]
     if actions is not None:
@@ -286,8 +290,8 @@ def build_items(
 
     Each row is annotated for the UI badges: which block pattern(s) matched
     (``blocked_by``), whether the URL matches a whitelist pattern
-    (``whitelisted``), and whether its host, base IP or client IP is already
-    on the blacklist (``blacklisted`` / ``blacklist_source``).
+    (``whitelisted``), and whether its destination host (``base_url``) is
+    already on the blacklist (``blacklisted`` / ``blacklist_source``).
     """
     now = datetime.now(UTC).isoformat()
     whitelist_matcher = (
@@ -328,9 +332,6 @@ def build_items(
             else "ip" if base_url in blacklist_ips
             else None
         )
-        if not blacklisted and client_ip in blacklist_ips:
-            blacklisted = True
-            blacklist_source = "ip"
 
         # Rich flat proxy fields ride along so the Query/Host tables can surface
         # category, method, status, country, bytes and rule. bytes_* stay numeric
