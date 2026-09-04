@@ -37,15 +37,22 @@ async def deliver_msteams(
     result: list[dict],
     matched_patterns: list[str],
     block_patterns: list[str],
+    *,
+    webhook_url: str | None = None,
 ) -> None:
     """Build and send the MS Teams Workflows Adaptive Card.
 
     Mutates ``log`` in-place to record ``msteams_preview``, ``msteams_payload``,
     ``msteams_status``, and ``msteams_error``. All failures are caught and
     logged — a Teams delivery failure must never break the poll.
+
+    ``webhook_url`` (optional) is the System Settings override — it wins over
+    the env var so a webhook configured in the UI actually drives delivery.
     """
     settings = get_settings()
-    if not settings.msteams_webhook_url:
+    if not webhook_url:
+        webhook_url = settings.msteams_webhook_url
+    if not webhook_url:
         return
 
     try:
@@ -81,9 +88,9 @@ async def deliver_msteams(
             pattern_names += f" +{len(effective_patterns) - 3} more"
 
         log["msteams_preview"] = {
-            "url": settings.msteams_webhook_url[:60] + "..."
-            if len(settings.msteams_webhook_url) > 60
-            else settings.msteams_webhook_url,
+            "url": webhook_url[:60] + "..."
+            if len(webhook_url) > 60
+            else webhook_url,
             "client_ip": first_client_ip,
             "pattern_match": pattern_names,
             "domains_count": len(unique_domains),
@@ -145,13 +152,20 @@ async def deliver_n8n(
     log: dict,
     payload: dict,
     total_sum: int,
+    *,
+    webhook_url: str | None = None,
 ) -> None:
     """Deliver the alert payload to the n8n webhook.
 
     Mutates ``log`` in-place to record ``webhook_status`` and ``webhook_error``.
+
+    ``webhook_url`` (optional) is the System Settings override — it wins over
+    the env var so a webhook configured in the UI actually drives delivery.
     """
     settings = get_settings()
-    if not settings.webhook_url:
+    if not webhook_url:
+        webhook_url = settings.webhook_url
+    if not webhook_url:
         log["webhook_reason"] = "Webhook URL not configured — nothing sent"
         print(
             f"[{datetime.now(UTC).isoformat()}][INFO] "
@@ -161,7 +175,7 @@ async def deliver_n8n(
 
     try:
         log["webhook_status"] = await send_logs(
-            settings.webhook_url, total_sum, payload
+            webhook_url, total_sum, payload
         )
     except Exception as e:
         log["webhook_error"] = str(e)

@@ -247,3 +247,64 @@ async def test_deliver_msteams_deduplicates_domains(monkeypatch):
     assert captured["domains"] == ["a.com", "b.com"]
     # http://a.com/x appears twice but should be deduplicated
     assert captured["urls"] == ["http://a.com/x", "http://a.com/y"]
+
+
+# ── DB alert-config wiring ─────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_deliver_n8n_uses_db_url_override(monkeypatch):
+    """A DB-configured webhook URL (from System Settings) wins over env."""
+    from app.services.delivery import deliver_n8n
+
+    log = {"webhook_status": None, "webhook_error": None}
+    fake_send = AsyncMock(return_value=200)
+    monkeypatch.setattr("app.services.delivery.send_logs", fake_send)
+    # Env has an old/legacy URL; the DB override must take precedence.
+    fake_settings = type("S", (), {"webhook_url": "https://env-hook/x"})()
+    monkeypatch.setattr("app.services.delivery.get_settings", lambda: fake_settings)
+
+    await deliver_n8n(log, {"summary": {"total_matches": 1}}, total_sum=1,
+                      webhook_url="https://db-hook/x")
+
+    assert log["webhook_status"] == 200
+    fake_send.assert_called_once_with(
+        "https://db-hook/x", 1, {"summary": {"total_matches": 1}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_n8n_falls_back_to_env_url(monkeypatch):
+    """Without a DB override, the legacy env webhook_url still works."""
+    from app.services.delivery import deliver_n8n
+
+    log = {"webhook_status": None, "webhook_error": None}
+    fake_send = AsyncMock(return_value=200)
+    monkeypatch.setattr("app.services.delivery.send_logs", fake_send)
+    fake_settings = type("S", (), {"webhook_url": "https://env-hook/x"})()
+    monkeypatch.setattr("app.services.delivery.get_settings", lambda: fake_settings)
+
+    await deliver_n8n(log, {"summary": {"total_matches": 2}}, total_sum=2)
+
+    assert log["webhook_status"] == 200
+    fake_send.assert_called_once_with(
+        "https://env-hook/x", 2, {"summary": {"total_matches": 2}}
+    )
+
+
+@pytest.mark.asyncio
+async def test_deliver_n8n_db_empty_still_skips(monkeypatch):
+    """A blank DB override must not resurrect delivery when env is empty."""
+    from app.services.delivery import deliver_n8n
+
+    log = {"webhook_status": None, "webhook_error": None, "webhook_reason": None}
+    fake_send = AsyncMock(return_value=200)
+    monkeypatch.setattr("app.services.delivery.send_logs", fake_send)
+    fake_settings = type("S", (), {"webhook_url": ""})()
+    monkeypatch.setattr("app.services.delivery.get_settings", lambda: fake_settings)
+
+    await deliver_n8n(log, {}, total_sum=0, webhook_url="")
+
+    assert log["webhook_status"] is None
+    assert "not configured" in log["webhook_reason"]
+    fake_send.assert_not_called()

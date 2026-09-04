@@ -117,6 +117,18 @@ async def load_field_map(db) -> FieldMap:
     return FieldMap(**data)
 
 
+async def load_alert_settings(db) -> AlertSettings:
+    """Public accessor for the persisted alert/threshold rules.
+
+    Returns the spec defaults when nothing has been saved yet. The monitor
+    poll (``fetch_logs``) reads this so a webhook configured in System
+    Settings (Alert Rules tab) actually drives delivery instead of the env
+    var only.
+    """
+    data = await _load(db, "alerts", AlertSettings())
+    return AlertSettings(**data)
+
+
 # ── Kibana connection ───────────────────────────────────────────────────────
 
 
