@@ -1,9 +1,10 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { motion } from "framer-motion"
-import { ExternalLink, X } from "lucide-react"
+import { Copy, ExternalLink, X } from "lucide-react"
 import { Badge, Button, useToast } from "./ui"
 import { useFilter } from "../contexts/FilterContext"
 import { formatBytes } from "../api"
+import { copyText } from "../lib/utils"
 import {
   getSrcIp,
   getSrcHost,
@@ -15,6 +16,43 @@ import {
   hostOfUrl,
   type LogRow,
 } from "../lib/logRow"
+
+/** Drawer field row — label, value, and a copy button for the value. */
+function CopyField({
+  label,
+  copyValue,
+  children,
+}: {
+  label: string
+  copyValue: string
+  children: React.ReactNode
+}) {
+  const { toast } = useToast()
+  const handleCopy = async () => {
+    const ok = await copyText(copyValue)
+    if (ok) toast({ title: "COPIED", description: copyValue, variant: "success" })
+    else toast({ title: "COPY FAILED", variant: "error" })
+  }
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="mono-label">{label}</p>
+        {copyValue ? (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            aria-label={`Copy ${label}`}
+            title={`Copy ${label}`}
+          >
+            <Copy className="h-3 w-3" />
+          </button>
+        ) : null}
+      </div>
+      <div className="mt-1">{children}</div>
+    </div>
+  )
+}
 
 export interface InspectionDrawerProps {
   row: LogRow
@@ -123,82 +161,78 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
 
             <div className="flex-1 overflow-y-auto px-5 py-5">
               <div className="space-y-4 font-mono text-xs">
-                <div>
-                  <p className="mono-label">Timestamp</p>
-                  <p className="mt-1 text-foreground">{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Source IP (Host)</p>
-                  <p className="mt-1 font-bold text-foreground">
+                <CopyField label="Timestamp" copyValue={row.timestamp ? new Date(row.timestamp).toLocaleString() : ""}>
+                  <p className="text-foreground">{row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}</p>
+                </CopyField>
+                <CopyField label="Source IP (Host)" copyValue={srcIp}>
+                  <p className="font-bold text-foreground">
                     {srcIp || "—"} {srcHost ? <span className="font-normal text-muted-foreground">(Host: {srcHost})</span> : <span className="font-normal text-muted-foreground">(Host: —)</span>}
                   </p>
-                </div>
-                <div>
-                  <p className="mono-label">Dest IP</p>
-                  <p className="mt-1 text-foreground">{destIp || "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Action</p>
-                  <p className="mt-1">
+                </CopyField>
+                <CopyField label="Dest IP" copyValue={destIp}>
+                  <p className="text-foreground">{destIp || "—"}</p>
+                </CopyField>
+                <CopyField label="Domain" copyValue={row.domain ?? row.base_url ?? hostOfUrl(row.url ?? "")}>
+                  <p className="text-foreground">{row.domain || row.base_url || hostOfUrl(row.url ?? "") || "—"}</p>
+                </CopyField>
+                <CopyField label="Action" copyValue={row.action ?? ""}>
+                  <p>
                     <Badge variant={actionVariant(row.action ?? "")}>{row.action || "—"}</Badge>
                   </p>
-                </div>
-                <div>
-                  <p className="mono-label">Duration</p>
-                  <p className="mt-1 tabular-nums">{durationMs != null ? `${durationMs}ms` : "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Full URL</p>
+                </CopyField>
+                <CopyField label="Duration" copyValue={durationMs != null ? `${durationMs}ms` : ""}>
+                  <p className="tabular-nums">{durationMs != null ? `${durationMs}ms` : "—"}</p>
+                </CopyField>
+                <CopyField label="Full URL" copyValue={row.url ?? ""}>
                   {row.url ? (
-                    <a href={row.url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-primary hover:underline">
+                    <a href={row.url} target="_blank" rel="noreferrer" className="block break-all text-primary hover:underline">
                       {row.url}
                       <ExternalLink className="ml-1 inline h-3 w-3 align-middle" aria-hidden="true" />
                     </a>
                   ) : (
-                    <p className="mt-1 text-muted-foreground">—</p>
+                    <p className="text-muted-foreground">—</p>
                   )}
-                </div>
-                <div>
-                  <p className="mono-label">Matched Rule</p>
-                  <p className="mt-1 text-muted-foreground">{matchedRule}</p>
-                </div>
+                </CopyField>
+                <CopyField label="Matched Rule" copyValue={matchedRule}>
+                  <p className="text-muted-foreground">{matchedRule}</p>
+                </CopyField>
                 {/* ── Rich flat proxy fields (logstash-proxy-* schema) ── */}
-                <div>
-                  <p className="mono-label">Category</p>
-                  <p className="mt-1 text-foreground">{row.category || "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">HTTP Method</p>
-                  <p className="mt-1 text-foreground">{row.http_method || "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Status Code</p>
-                  <p className="mt-1 tabular-nums">{row.http_status_code ?? "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Country</p>
-                  <p className="mt-1 text-foreground">{row.country_code || "—"}</p>
-                </div>
-                <div>
-                  <p className="mono-label">Bytes ↓ / ↑</p>
+                <CopyField label="Category" copyValue={row.category ?? ""}>
+                  <p className="text-foreground">{row.category || "—"}</p>
+                </CopyField>
+                <CopyField label="HTTP Method" copyValue={row.http_method ?? ""}>
+                  <p className="text-foreground">{row.http_method || "—"}</p>
+                </CopyField>
+                <CopyField label="Status Code" copyValue={row.http_status_code != null ? String(row.http_status_code) : ""}>
+                  <p className="tabular-nums">{row.http_status_code ?? "—"}</p>
+                </CopyField>
+                <CopyField label="Country" copyValue={row.country_code ?? ""}>
+                  <p className="text-foreground">{row.country_code || "—"}</p>
+                </CopyField>
+                <CopyField
+                  label="Bytes ↓ / ↑"
+                  copyValue={
+                    Number(row.bytes_downloaded) || Number(row.bytes_uploaded)
+                      ? `↓ ${formatBytes(Number(row.bytes_downloaded) || 0)} / ↑ ${formatBytes(Number(row.bytes_uploaded) || 0)}`
+                      : ""
+                  }
+                >
                   {Number(row.bytes_downloaded) || Number(row.bytes_uploaded) ? (
-                    <p className="mt-1 tabular-nums">
+                    <p className="tabular-nums">
                       ↓ {formatBytes(Number(row.bytes_downloaded) || 0)} / ↑ {formatBytes(Number(row.bytes_uploaded) || 0)}
                     </p>
                   ) : (
-                    <p className="mt-1 text-muted-foreground">—</p>
+                    <p className="text-muted-foreground">—</p>
                   )}
-                </div>
-                <div>
-                  <p className="mono-label">Rule</p>
-                  <p className="mt-1 text-muted-foreground">
+                </CopyField>
+                <CopyField label="Rule" copyValue={row.rule_name && row.rule_name !== "-" ? row.rule_name : row.rule_info || ""}>
+                  <p className="text-muted-foreground">
                     {row.rule_name && row.rule_name !== "-" ? row.rule_name : row.rule_info || "—"}
                   </p>
-                </div>
-                <div>
-                  <p className="mono-label">User ID</p>
-                  <p className="mt-1 text-foreground">{row.user_id || "—"}</p>
-                </div>
+                </CopyField>
+                <CopyField label="User ID" copyValue={row.user_id ?? ""}>
+                  <p className="text-foreground">{row.user_id || "—"}</p>
+                </CopyField>
               </div>
             </div>
 

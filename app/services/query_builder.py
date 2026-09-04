@@ -142,16 +142,19 @@ def build_all_query(
     minutes: int,
     size: int,
     search: str | None = None,
+    ip: str | None = None,
     fields: list[str] | None = None,
 ) -> dict:
     """ES query over the whole window with NO block-pattern clause.
 
     Range (+ optional substring search) only — returns ALL traffic so the
     Live Monitor can show the full proxy stream, not just flagged matches.
-    ``minutes <= 0`` is the all-time sentinel (no range clause). ``fields``
-    optionally projects ``_source`` to the listed names.
+    ``minutes <= 0`` is the all-time sentinel (no range clause). ``ip``
+    narrows to a single client via a ``term`` filter. ``fields`` optionally
+    projects ``_source`` to the listed names.
     """
     must: list[dict] = []
+    filters: list[dict] = []
     if minutes > 0:
         must.append(
             {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
@@ -172,8 +175,10 @@ def build_all_query(
                 }
             }
         )
+    if ip:
+        filters.append({"term": {"client_ip": ip}})
     body: dict = {
-        "query": {"bool": {"must": must}},
+        "query": {"bool": {"must": must, "filter": filters}},
         "size": size,
         "sort": [{"@timestamp": {"order": "desc"}}],
     }

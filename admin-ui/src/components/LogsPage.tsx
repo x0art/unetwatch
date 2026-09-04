@@ -25,12 +25,13 @@ import {
   ConfirmDialog,
   Dialog,
   PageHeader,
+  SearchInput,
   Select,
   Skeleton,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { cn } from "../lib/utils"
+import { cn, useDebounce } from "../lib/utils"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -288,7 +289,7 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
   )
 }
 
-export function LogsPage() {
+export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const { toast } = useToast()
   const [items, setItems] = useState<MonitorLog[]>([])
   const [total, setTotal] = useState(0)
@@ -296,6 +297,8 @@ export function LogsPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [kind, setKind] = useState("")
+  const [search, setSearch] = useState(externalSearch ?? "")
+  const debouncedSearch = useDebounce(search, 300)
   const [sortBy, setSortBy] = useState<SortKey | null>("started_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [busy, setBusy] = useState(false)
@@ -310,6 +313,7 @@ export function LogsPage() {
     setLoading(true)
     listLogs({
       kind: (kind || undefined) as "poll" | "query" | undefined,
+      search: debouncedSearch || undefined,
       limit: pageSize,
       offset: page * pageSize,
       sort_by: sortBy ?? "started_at",
@@ -332,9 +336,18 @@ export function LogsPage() {
     return () => {
       cancelled = true
     }
-  }, [kind, page, pageSize, sortBy, sortDir])
+  }, [kind, page, pageSize, sortBy, sortDir, debouncedSearch])
 
   useEffect(() => load(), [load])
+
+  // Sync an external search (Ctrl+K palette) into the local search box.
+  useEffect(() => {
+    if (externalSearch !== undefined && externalSearch !== search) {
+      setSearch(externalSearch)
+      setPage(0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSearch])
 
   const handleSortChange = (key: SortKey, dir: SortDir) => {
     setSortBy(key)
@@ -398,6 +411,16 @@ export function LogsPage() {
           options={KIND_OPTIONS}
           className="w-40"
           aria-label="Filter log kind"
+        />
+        <SearchInput
+          placeholder="Filter logs (URL / IP / pattern)…"
+          value={search}
+          onChange={(v) => {
+            setSearch(v)
+            setPage(0)
+          }}
+          className="w-56"
+          aria-label="Search logs"
         />
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
           <RefreshCcw className="h-4 w-4" />

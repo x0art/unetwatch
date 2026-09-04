@@ -71,6 +71,17 @@ function windowLabel(tr: string): string {
   return TIME_RANGE_OPTIONS.find((o) => o.value === tr)?.label ?? tr
 }
 
+/** True when a search string looks like a URL rather than a bare host/IP —
+ * used to keep the host page from reacting to a URL filter (and vice versa). */
+function looksLikeUrl(s: string): boolean {
+  return (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ||
+    s.includes("/") ||
+    s.includes("?") ||
+    s.startsWith("www.")
+  )
+}
+
 /** HH:MM label from an ISO bucket (mono, matches the wireframe axis). */
 function formatHour(iso: string): string {
   const d = new Date(iso)
@@ -144,8 +155,10 @@ async function fetchHostSections(ip: string, timeRange: string): Promise<HostSec
   // Prefer live ES rows filtered to this host — richest source (action-aware,
   // pattern matches, durations). Backend caps items at 500; total_requests is
   // the real window total and drives the "Showing 1-50 of 42,810" summary.
+  // The `ip` param uses an exact ES term filter so risk rows are found even
+  // when the generic substring search would miss them.
   try {
-    const res = await runQuery(minutes, { q: ip.trim() })
+    const res = await runQuery(minutes, { q: ip.trim(), ip: ip.trim() })
     if (res.items.length > 0) {
       const timeline = res.timeline.map((t) => ({ hour: formatHour(t.bucket), volume: t.count }))
       const topDomains = buildTopDomains(res.items)
@@ -332,10 +345,14 @@ export function HostInspectorPage({
   const [page, setPage] = useState(0)
   const pageSize = 50
 
-  // Pre-fill from FilterContext (?q=) so InspectionDrawer "View Host History" lands filled.
+  // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
+  // InspectionDrawer "View Host History" land on the right host. Re-runs on
+  // every globalFilter change (the page stays mounted across tabs now) — but
+  // only when the filter is a host/IP, not a URL.
   useEffect(() => {
-    if (globalFilter && !target) {
+    if (globalFilter && !looksLikeUrl(globalFilter) && globalFilter !== target) {
       setTarget(globalFilter)
+      void lookup(globalFilter)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter])

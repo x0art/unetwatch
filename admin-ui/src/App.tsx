@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react"
-import { AnimatePresence } from "framer-motion"
 import {
   type MonitorStatus,
   type PatternCounts,
@@ -16,7 +15,8 @@ import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialo
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { FilterProvider } from "./contexts/FilterContext"
 import { ToastProvider, useToast, Skeleton } from "./components/ui"
-import { MotionGate, MotionPage } from "./components/motion"
+import { MotionGate } from "./components/motion"
+import { GlobalSearchPalette } from "./components/GlobalSearchPalette"
 import { usePageVisible } from "./lib/utils"
 
 const BlockDomainPage = lazy(() =>
@@ -84,6 +84,10 @@ function AppRoutes() {
       : "dashboard",
   )
   const [findingsSearch, setFindingsSearch] = useState("")
+  const [patternSearch, setPatternSearch] = useState("")
+  const [logsSearch, setLogsSearch] = useState("")
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([storedView ?? "dashboard"]))
   const [loggedIn, setLoggedIn] = useState(!!getToken())
   const [status, setStatus] = useState<MonitorStatus | null>(null)
   const [counts, setCounts] = useState<PatternCounts | null>(null)
@@ -166,6 +170,18 @@ function AppRoutes() {
     localStorage.setItem(VIEW_KEY, view)
   }, [view])
 
+  // Ctrl/Cmd+K opens the global search palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
+
   // When the API receives a 401, flip to the login page instead of a hard reload.
   useEffect(() => {
     onSessionExpired(() => setLoggedIn(false))
@@ -177,12 +193,12 @@ function AppRoutes() {
     document.documentElement.toggleAttribute("data-paused", !pageVisible)
   }, [pageVisible])
 
-  // Navigation that can optionally pre-filter the Findings page
-  // (used by the Graph view when a node is clicked). Any other navigation
-  // resets the filter so a stale graph filter never leaks back in.
-  const handleNavigate = useCallback((next: View, search?: string) => {
-    setFindingsSearch(search ?? "")
+  // Navigation — keeps pages mounted so their content persists across switches
+  // (no reset on every tab change). The Ctrl+K palette applies its search via
+  // the dedicated external-search state AFTER navigation.
+  const handleNavigate = useCallback((next: View, _search?: string) => {
     setView(next)
+    setVisited((prev) => new Set(prev).add(next))
   }, [])
 
   if (!loggedIn) {
@@ -229,33 +245,78 @@ function AppRoutes() {
       }
     >
       <Suspense fallback={<PageFallback />}>
-        <AnimatePresence mode="wait">
-          <MotionPage key={view}>
-            {view === "dashboard" && (
-              <DashboardPage
-                remaining={remaining}
-                intervalSec={intervalSec}
-                status={status}
-                counts={counts}
-                loadingRun={loadingRun}
-                lastUpdated={lastUpdated}
-                onRefresh={fetchStats}
-                onManualRun={handleManualRun}
-                onNavigate={handleNavigate}
-              />
-            )}
-            {view === "query" && <QueryPage onNavigate={handleNavigate} />}
-            {view === "patterns" && <PatternTable />}
-            {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
-            {view === "blacklist" && <BlacklistPage />}
-            {view === "redirects" && <RedirectsPage />}
-            {view === "logs" && <LogsPage />}
-            {view === "host" && <HostInspectorPage onNavigate={handleNavigate} />}
-            {view === "url" && <UrlInvestigationPage onNavigate={handleNavigate} />}
-            {view === "analytics" && <AnalyticsPage />}
-          </MotionPage>
-        </AnimatePresence>
+        {/* Keep visited pages mounted so switching tabs never resets their
+            state — each renders in a hidden wrapper when inactive. */}
+        {visited.has("dashboard") && (
+          <div hidden={view !== "dashboard"}>
+            <DashboardPage
+              remaining={remaining}
+              intervalSec={intervalSec}
+              status={status}
+              counts={counts}
+              loadingRun={loadingRun}
+              lastUpdated={lastUpdated}
+              onRefresh={fetchStats}
+              onManualRun={handleManualRun}
+              onNavigate={handleNavigate}
+            />
+          </div>
+        )}
+        {visited.has("query") && (
+          <div hidden={view !== "query"}>
+            <QueryPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("patterns") && (
+          <div hidden={view !== "patterns"}>
+            <PatternTable externalSearch={patternSearch} />
+          </div>
+        )}
+        {visited.has("findings") && (
+          <div hidden={view !== "findings"}>
+            <FindingsPage initialSearch={findingsSearch} />
+          </div>
+        )}
+        {visited.has("blacklist") && (
+          <div hidden={view !== "blacklist"}>
+            <BlacklistPage />
+          </div>
+        )}
+        {visited.has("redirects") && (
+          <div hidden={view !== "redirects"}>
+            <RedirectsPage />
+          </div>
+        )}
+        {visited.has("logs") && (
+          <div hidden={view !== "logs"}>
+            <LogsPage externalSearch={logsSearch} />
+          </div>
+        )}
+        {visited.has("host") && (
+          <div hidden={view !== "host"}>
+            <HostInspectorPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("url") && (
+          <div hidden={view !== "url"}>
+            <UrlInvestigationPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("analytics") && (
+          <div hidden={view !== "analytics"}>
+            <AnalyticsPage />
+          </div>
+        )}
       </Suspense>
+
+      <GlobalSearchPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onNavigate={handleNavigate}
+        onFindingsSearch={setFindingsSearch}
+        onPatternSearch={setPatternSearch}
+        onLogsSearch={setLogsSearch}
+      />
     </AppShell>
   )
 }

@@ -99,6 +99,7 @@ def _query_cache_key(
     exclude_blacklist: bool,
     block_patterns: list[str],
     whitelist_patterns: list[str],
+    client_ip: str | None = None,
 ) -> str:
     """Stable cache key for a run_query invocation."""
     return "|".join(
@@ -107,6 +108,7 @@ def _query_cache_key(
             search or "",
             str(exclude_whitelist),
             str(exclude_blacklist),
+            client_ip or "",
             "|".join(block_patterns),
             "|".join(whitelist_patterns),
         ]
@@ -247,16 +249,18 @@ async def run_query(
     search: str | None = None,
     exclude_whitelist: bool = False,
     exclude_blacklist: bool = False,
+    client_ip: str | None = None,
 ) -> dict:
     """Run the block-pattern ES query and return a rich payload for the Query page.
 
     ``search`` narrows the query *inside Elasticsearch* (URL/IP substring)
-    instead of changing the time window; ``exclude_whitelist`` drops
-    whitelisted matches server-side so the whole result set (table, charts,
-    flow, stats) shrinks. Returns the matching documents (table), aggregates
-    (stat cards + charts) and a client_ip → base_url flow. Elasticsearch
-    failures degrade gracefully (``es_online: False``) and are recorded in
-    ``monitor_logs``.
+    instead of changing the time window; ``client_ip`` narrows to a single
+    client via the ES ``term`` filter (Host Inspector); ``exclude_whitelist``
+    drops whitelisted matches server-side so the whole result set (table,
+    charts, flow, stats) shrinks. Returns the matching documents (table),
+    aggregates (stat cards + charts) and a client_ip → base_url flow.
+    Elasticsearch failures degrade gracefully (``es_online: False``) and are
+    recorded in ``monitor_logs``.
     """
     started = datetime.now(UTC)
     settings = get_settings()
@@ -281,6 +285,7 @@ async def run_query(
         exclude_blacklist,
         block_patterns,
         whitelist_patterns,
+        client_ip,
     )
     hit = _query_cache.get(cache_key)
     if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
@@ -307,7 +312,11 @@ async def run_query(
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(
-            block_patterns, minutes, settings.es_query_size, search=search
+            block_patterns,
+            minutes,
+            settings.es_query_size,
+            search=search,
+            client_ip=client_ip,
         )
         result["query"] = query
         log["es_query"] = query
@@ -395,16 +404,18 @@ async def run_all_query(
     minutes: int = 60,
     limit: int = 500,
     search: str | None = None,
+    ip: str | None = None,
 ) -> dict:
     """Run an ES query over the WHOLE window — no block-pattern clause.
 
     Returns the same response shape as ``run_query`` (``items``, ``top_urls``,
     ``top_ips``, ``timeline``, ``flow``, ``total_requests``, ``unique_ips``,
     ``es_online``) so the Live Monitor can switch between the full proxy
-    stream and flagged-only with a single toggle. ``apply_filters`` keeps
-    EVERY action (``actions=None``) and does NOT exclude whitelist matches —
-    the full stream is exactly that. Elasticsearch failures degrade
-    gracefully (``es_online: False``), never 5xx.
+    stream and flagged-only with a single toggle. ``ip`` narrows to a single
+    client via a ``term`` filter. ``apply_filters`` keeps EVERY action
+    (``actions=None``) and does NOT exclude whitelist matches — the full
+    stream is exactly that. Elasticsearch failures degrade gracefully
+    (``es_online: False``), never 5xx.
     """
     started = datetime.now(UTC)
     settings = get_settings()
@@ -429,6 +440,7 @@ async def run_all_query(
         False,
         block_patterns,
         whitelist_patterns,
+        ip,
     )
     hit = _query_cache.get(cache_key)
     if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
@@ -451,7 +463,7 @@ async def run_all_query(
     try:
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_all_query(
-            minutes, settings.es_query_size, search=search
+            minutes, settings.es_query_size, search=search, ip=ip
         )
         result["query"] = query
         log["es_query"] = query

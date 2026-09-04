@@ -41,6 +41,17 @@ function formatCount(n: number): string {
   return n.toLocaleString()
 }
 
+/** True when a search string looks like a URL rather than a bare host/IP —
+ * used so the URL page only reacts to URL filters (not host/IP ones). */
+function looksLikeUrl(s: string): boolean {
+  return (
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ||
+    s.includes("/") ||
+    s.includes("?") ||
+    s.startsWith("www.")
+  )
+}
+
 /* ── Page ───────────────────────────────────────────────────────────── */
 
 export function UrlInvestigationPage({
@@ -76,15 +87,17 @@ export function UrlInvestigationPage({
     }
   }, [toast])
 
-  // Auto-investigate an incoming URL — Host Inspector's "Top URLs" navigates
-  // here with the URL pushed into the global filter. Run once on mount.
+  // Auto-investigate an incoming URL — Host Inspector's "Top URLs" and the
+  // Ctrl+K palette navigate here with the URL in the global filter. Re-runs on
+  // every globalFilter change (the page stays mounted across tabs now), but
+  // only when the filter is URL-like (not a bare host/IP filter).
   useEffect(() => {
-    if (globalFilter) {
+    if (globalFilter && looksLikeUrl(globalFilter)) {
       setUrl(globalFilter)
       void investigate(globalFilter)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [globalFilter])
 
   const handleViewHost = (ip: string) => {
     setGlobalFilter(ip)

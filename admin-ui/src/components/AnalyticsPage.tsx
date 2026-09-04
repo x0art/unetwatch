@@ -223,6 +223,14 @@ export function AnalyticsPage() {
         ),
       },
       {
+        id: "count",
+        header: "Requests",
+        accessor: (r) => r.count,
+        align: "right",
+        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>,
+        width: "w-20",
+      },
+      {
         id: "volume",
         header: "Volume",
         accessor: (r) => r.volume,
@@ -257,6 +265,14 @@ export function AnalyticsPage() {
             {r.domain}
           </span>
         ),
+      },
+      {
+        id: "count",
+        header: "Requests",
+        accessor: (r) => r.count,
+        align: "right",
+        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>,
+        width: "w-20",
       },
       {
         id: "enforcements",
@@ -385,15 +401,15 @@ export function AnalyticsPage() {
       sections.push("Top Bandwidth Consuming Domains")
       sections.push(
         csvRows(
-          ["domain", "volume_bytes", "pct"],
-          (topDomains?.items ?? []).map((r) => [r.domain, r.volume, r.pct]),
+          ["domain", "count", "volume_bytes", "pct"],
+          (topDomains?.items ?? []).map((r) => [r.domain, r.count, r.volume, r.pct]),
         ),
       )
       sections.push("Top Enforced Target Domains")
       sections.push(
         csvRows(
-          ["domain", "enforcements", "primaryRule"],
-          (topEnforced?.items ?? []).map((r) => [r.domain, r.enforcements, r.primaryRule]),
+          ["domain", "count", "enforcements", "primaryRule"],
+          (topEnforced?.items ?? []).map((r) => [r.domain, r.count, r.enforcements, r.primaryRule]),
         ),
       )
       sections.push("Raw Findings")

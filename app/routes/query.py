@@ -6,6 +6,9 @@ router = APIRouter(prefix="/api/query", tags=["query"])
 @router.get("/run")
 async def run_query(
     minutes: int = Query(60, ge=0, le=43200),
+    ip: str | None = Query(
+        None, max_length=64, description="Client IP filter (ES term filter, used by Host Inspector)"
+    ),
     q: str | None = Query(
         None, max_length=200, description="ES substring filter (URL / client IP / server IP)"
     ),
@@ -23,25 +26,27 @@ async def run_query(
 ):
     """Run the block-pattern ES query for the Query page.
 
-    `q` narrows the query inside Elasticsearch itself (instead of changing
-    the time window); `exclude_whitelist` drops whitelisted matches so fewer
-    documents come back; `exclude_blacklist` drops rows whose host or client
-    IP is on the blacklist. `view_mode=all` runs the full-stream query (no
-    block-pattern clause). Returns matching documents (table), aggregates
-    (charts) and a client_ip → base_url flow. Every run is recorded in the
-    Logs page.
+    ``ip`` narrows to a single client via the ES ``term`` filter (used by
+    Host Inspector so it finds risk rows by exact client). ``q`` narrows the
+    query inside Elasticsearch itself (instead of changing the time window);
+    ``exclude_whitelist`` drops whitelisted matches so fewer documents come
+    back; ``exclude_blacklist`` drops rows whose host or client IP is on the
+    blacklist. ``view_mode=all`` runs the full-stream query (no block-pattern
+    clause). Returns matching documents (table), aggregates (charts) and a
+    client_ip → base_url flow. Every run is recorded in the Logs page.
     """
     from app.services.monitor import run_all_query
     from app.services.monitor import run_query as run_query_service
 
     if view_mode == "all":
-        return await run_all_query(minutes, limit=500, search=q or None)
+        return await run_all_query(minutes, limit=500, search=q or None, ip=ip or None)
 
     return await run_query_service(
         minutes,
         search=q or None,
         exclude_whitelist=exclude_whitelist,
         exclude_blacklist=exclude_blacklist,
+        client_ip=ip or None,
     )
 
 

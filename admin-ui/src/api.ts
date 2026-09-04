@@ -272,6 +272,7 @@ export async function runQuery(
   minutes: number,
   opts?: {
     q?: string
+    ip?: string
     excludeWhitelist?: boolean
     excludeBlacklist?: boolean
     viewMode?: "all" | "flagged"
@@ -280,6 +281,8 @@ export async function runQuery(
   const params = new URLSearchParams({ minutes: String(minutes) })
   const q = opts?.q?.trim()
   if (q) params.set("q", q)
+  const ip = opts?.ip?.trim()
+  if (ip) params.set("ip", ip)
   if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
   if (opts?.excludeBlacklist) params.set("exclude_blacklist", "true")
   if (opts?.viewMode && opts.viewMode !== "flagged") params.set("view_mode", opts.viewMode)
@@ -1480,6 +1483,7 @@ export interface AnalyticsEnforcements {
 
 export interface TopDomainRow {
   domain: string
+  count: number // requests
   volume: number // bytes
   pct: number // % of window total
 }
@@ -1509,6 +1513,7 @@ export interface AnalyticsTopDenied {
 /** ADR 0001 — top enforced domains (DENY/FLAG handled by the proxy). */
 export interface TopEnforcedRow {
   domain: string
+  count: number // requests
   enforcements: number
   primaryRule: string
 }

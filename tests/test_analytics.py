@@ -128,14 +128,14 @@ async def test_top_enforced_endpoint(client, db_path):
     assert res.status_code == 200
     data = res.json()
     assert data["items"] == [
-        {"domain": "evil.example", "enforcements": 1, "primaryRule": "*evil*"}
+        {"domain": "evil.example", "count": 1, "enforcements": 1, "primaryRule": "*evil*"}
     ]
 
     legacy = client.get("/api/analytics/top-denied?range=7d")
     assert legacy.status_code == 200
     ldata = legacy.json()
     assert ldata["items"] == [
-        {"domain": "evil.example", "blocks": 1, "primaryRule": "*evil*"}
+        {"domain": "evil.example", "count": 1, "blocks": 1, "primaryRule": "*evil*"}
     ]
 
 

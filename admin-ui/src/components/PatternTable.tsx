@@ -122,11 +122,11 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   },
 ]
 
-export function PatternTable() {
+export function PatternTable({ externalSearch }: { externalSearch?: string } = {}) {
   const [patterns, setPatterns] = useState<Pattern[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(externalSearch ?? "")
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
   const [page, setPage] = useState(0)
@@ -188,6 +188,15 @@ export function PatternTable() {
   useEffect(() => {
     fetchPatterns()
   }, [fetchPatterns])
+
+  // Sync an external search (Ctrl+K palette) into the local search box.
+  useEffect(() => {
+    if (externalSearch !== undefined && externalSearch !== search) {
+      setSearch(externalSearch)
+      setPage(0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSearch])
 
   /* ── Handlers ───────────────────────────────────────────────────── */
 

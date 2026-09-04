@@ -25,7 +25,6 @@ import {
   addBaseUrlToBlacklist,
   buildFlowSankey,
   formatBytes,
-  liveSankeyTruncationNote,
   runQuery,
 } from "../api"
 import {
@@ -142,6 +141,15 @@ function queryRowId(d: QueryDoc): string {
   return `${d.timestamp}|${d.client_ip}|${d.url}`
 }
 
+/** Copy button wrapped so its click never bubbles to the row's InspectionDrawer. */
+function CopyCell({ value, label }: { value: string; label: string }) {
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <CopyUrlButton value={value} label={label} />
+    </span>
+  )
+}
+
 /* Module-scope column definitions — referentially stable, so DataTable never
  * re-sorts/re-renders when QueryPage re-renders. The actions cell updates
  * result state through the module-level queryUI handle. */
@@ -165,7 +173,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     cell: (d) => (
       <span className="flex items-center gap-1.5">
         <span className="font-mono text-xs">{d.client_ip}</span>
-        <CopyUrlButton value={d.client_ip} label="Client IP" />
+        <CopyCell value={d.client_ip} label="Client IP" />
       </span>
     ),
   },
@@ -177,7 +185,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     cell: (d) => (
       <span className="flex items-center gap-1.5">
         <span className="font-mono text-xs text-muted-foreground">{d.server_ip}</span>
-        <CopyUrlButton value={d.server_ip} label="Server IP" />
+        <CopyCell value={d.server_ip} label="Server IP" />
       </span>
     ),
   },
@@ -191,7 +199,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
           {d.url}
         </span>
-        <CopyUrlButton value={d.url} label="URL" />
+        <CopyCell value={d.url} label="URL" />
       </span>
     ),
   },
@@ -205,9 +213,39 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
           {d.base_url}
         </span>
-        <CopyUrlButton value={d.base_url} label="Base URL" />
+        <CopyCell value={d.base_url} label="Base URL" />
       </span>
     ),
+  },
+  {
+    id: "bytes_downloaded",
+    header: "↓ Bytes",
+    accessor: (d) => d.bytes_downloaded,
+    align: "right",
+    cell: (d) => {
+      const b = Number(d.bytes_downloaded) || 0
+      return b > 0 ? (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+    width: "w-24",
+  },
+  {
+    id: "bytes_uploaded",
+    header: "↑ Bytes",
+    accessor: (d) => d.bytes_uploaded,
+    align: "right",
+    cell: (d) => {
+      const b = Number(d.bytes_uploaded) || 0
+      return b > 0 ? (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+    width: "w-24",
   },
   {
     id: "duration",
@@ -489,11 +527,6 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     () => (result && result.items.length > 0 ? buildFlowSankey(result.items) : null),
     [result],
   )
-  const flowTruncationNote = useMemo(() => {
-    if (!result) return null
-    return liveSankeyTruncationNote(String(result.window_minutes))
-  }, [result])
-
   const handleBulkBlacklist = async (ids: Set<string | number>) => {
     const rows = (result?.items ?? []).filter((d) => ids.has(queryRowId(d)))
     const bases = [...new Set(rows.map((r) => r.base_url).filter(Boolean))]
@@ -775,12 +808,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 Flow unavailable — Elasticsearch unreachable.
               </p>
             ) : flowSankey && flowSankey.links.length > 0 ? (
-              <div className="cv-auto space-y-3">
-                {flowTruncationNote && (
-                  <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                    {flowTruncationNote}
-                  </p>
-                )}
+              <div className="cv-auto">
                 <SankeyDiagram
                   nodes={flowSankey.nodes}
                   links={flowSankey.links}

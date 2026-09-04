@@ -373,24 +373,29 @@ async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:
     )
     rows = [dict(r) for r in await cursor.fetchall()]
 
-    by_domain: dict[str, int] = {}
+    by_domain: dict[str, dict] = {}
     for r in rows:
         domain = _domain_of_base(r.get("base_url") or "")
+        entry = by_domain.setdefault(domain, {"count": 0, "volume": 0})
+        entry["count"] += 1
         if has_duration:
             dur = r.get("duration_seconds") or 0
             try:
-                by_domain[domain] = by_domain.get(domain, 0) + max(
-                    1, int(dur)
-                ) * DEFAULT_BYTES_PER_REQUEST
+                entry["volume"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
             except (TypeError, ValueError):
-                by_domain[domain] = by_domain.get(domain, 0) + DEFAULT_BYTES_PER_REQUEST
+                entry["volume"] += DEFAULT_BYTES_PER_REQUEST
         else:
-            by_domain[domain] = by_domain.get(domain, 0) + DEFAULT_BYTES_PER_REQUEST
+            entry["volume"] += DEFAULT_BYTES_PER_REQUEST
 
-    total = sum(by_domain.values()) or 1
+    total = sum(d["volume"] for d in by_domain.values()) or 1
     items = [
-        {"domain": domain, "volume": volume, "pct": round((volume / total) * 100, 1)}
-        for domain, volume in sorted(by_domain.items(), key=lambda kv: (-kv[1], kv[0]))
+        {
+            "domain": domain,
+            "count": entry["count"],
+            "volume": entry["volume"],
+            "pct": round((entry["volume"] / total) * 100, 1),
+        }
+        for domain, entry in sorted(by_domain.items(), key=lambda kv: (-kv[1]["volume"], kv[0]))
     ]
     return items[:limit]
 
@@ -421,10 +426,12 @@ async def _findings_top_enforced(db, minutes: int, limit: int) -> list[dict]:
             domain,
             {
                 "domain": domain,
+                "count": 0,
                 "enforcements": 0,
                 "primaryRule": _primary_rule(r.get("matched_patterns")),
             },
         )
+        entry["count"] += 1
         entry["enforcements"] += 1
 
     items = sorted(by_domain.values(), key=lambda d: (-d["enforcements"], d["domain"]))
@@ -702,10 +709,12 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
                 domain,
                 {
                     "domain": domain,
+                    "count": 0,
                     "enforcements": 0,
                     "primaryRule": _first_rule(r.get("matched_patterns")),
                 },
             )
+            entry["count"] += 1
             entry["enforcements"] += 1
 
         items = sorted(
@@ -912,6 +921,7 @@ async def top_denied(
         "items": [
             {
                 "domain": it["domain"],
+                "count": it["count"],
                 "blocks": it["enforcements"],
                 "primaryRule": it["primaryRule"],
             }
