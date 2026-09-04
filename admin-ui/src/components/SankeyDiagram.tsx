@@ -17,8 +17,8 @@ import type { ResolvedColors } from "../lib/echartsTheme"
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 
 // Re-export shared types and the shared theme resolver so existing
-// `from "./SankeyDiagram"` imports (RedirectFlowDiagram, RadialDiagram,
-// NetworkGraphDiagram) keep working unchanged.
+// `from "./SankeyDiagram"` imports (RedirectFlowDiagram, NetworkGraphDiagram)
+// keep working unchanged.
 export type { SankeyNode, SankeyLink } from "../types/sankey"
 export {
   FALLBACK_DARK,
@@ -30,10 +30,12 @@ export {
   type ResolvedColors,
 } from "../lib/echartsTheme"
 
-/** Neobrutalist palette — ink/paper/hazard on the 4-column flow. */
+/** Neobrutalist palette — ink/paper/hazard on the 4-column flow.
+ * Column order (user-confirmed): 0 Patterns · 1 Sources · 2 Domains · 3 Destinations.
+ */
 export const LAYER_COLORS: Record<number, string> = {
-  0: "#0A7AFF", // Sources — info blue
-  1: "#6B6560", // Patterns — muted slate
+  0: "#6B6560", // Patterns — muted slate
+  1: "#0A7AFF", // Sources — info blue
   2: "#0A0A0A", // Domains — overridden per action: ALLOW ink, DENY red, FLAG hazard
   3: "#9A9590", // Destinations — muted; high-risk override hazard red
 }

@@ -1,12 +1,12 @@
 /**
- * Shared Sankey types — single source for SankeyDiagram, api LiveSankey, and
- * LiveMonitorPage. Extracted to avoid SankeyDiagram ↔ api circular import and
- * to eliminate the LiveSankeyNode/Link duplication + unsafe double-cast.
+ * Shared Sankey types — single source for SankeyDiagram and api LiveSankey.
+ * Extracted to avoid SankeyDiagram ↔ api circular import and to eliminate the
+ * LiveSankeyNode/Link duplication + unsafe double-cast.
  */
 export interface SankeyNode {
   id: string
   name: string
-  /** Layer index 0=Sources, 1=Patterns, 2=Domains, 3=Destinations. */
+  /** Layer index 0=Patterns, 1=Sources, 2=Domains, 3=Destinations. */
   layer?: number
   /** Optional full detail shown in the tooltip (e.g. the full URL behind a host-only label). */
   detail?: string

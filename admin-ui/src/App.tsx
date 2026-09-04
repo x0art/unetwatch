@@ -32,9 +32,6 @@ const DashboardPage = lazy(() =>
 const FindingsPage = lazy(() =>
   import("./components/FindingsPage").then((m) => ({ default: m.FindingsPage })),
 )
-const GraphPage = lazy(() =>
-  import("./components/GraphPage").then((m) => ({ default: m.GraphPage })),
-)
 const BlacklistPage = lazy(() =>
   import("./components/BlacklistPage").then((m) => ({ default: m.BlacklistPage })),
 )
@@ -50,11 +47,11 @@ const LogsPage = lazy(() =>
 const PatternTable = lazy(() =>
   import("./components/PatternTable").then((m) => ({ default: m.PatternTable })),
 )
-const LiveMonitorPage = lazy(() =>
-  import("./components/LiveMonitorPage").then((m) => ({ default: m.LiveMonitorPage })),
-)
 const HostInspectorPage = lazy(() =>
   import("./components/HostInspectorPage").then((m) => ({ default: m.HostInspectorPage })),
+)
+const UrlInvestigationPage = lazy(() =>
+  import("./components/UrlInvestigationPage").then((m) => ({ default: m.UrlInvestigationPage })),
 )
 const AnalyticsPage = lazy(() =>
   import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
@@ -82,7 +79,7 @@ function AppRoutes() {
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
-    storedView && ["dashboard", "query", "patterns", "findings", "graph", "blacklist", "redirects", "logs"].includes(storedView)
+    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "redirects", "logs", "host", "url", "analytics"].includes(storedView)
       ? storedView
       : "dashboard",
   )
@@ -247,15 +244,14 @@ function AppRoutes() {
                 onNavigate={handleNavigate}
               />
             )}
-            {view === "query" && <QueryPage />}
+            {view === "query" && <QueryPage onNavigate={handleNavigate} />}
             {view === "patterns" && <PatternTable />}
             {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
-            {view === "graph" && <GraphPage />}
             {view === "blacklist" && <BlacklistPage />}
             {view === "redirects" && <RedirectsPage />}
             {view === "logs" && <LogsPage />}
-            {view === "live" && <LiveMonitorPage onNavigate={handleNavigate} />}
-            {view === "host" && <HostInspectorPage />}
+            {view === "host" && <HostInspectorPage onNavigate={handleNavigate} />}
+            {view === "url" && <UrlInvestigationPage onNavigate={handleNavigate} />}
             {view === "analytics" && <AnalyticsPage />}
           </MotionPage>
         </AnimatePresence>

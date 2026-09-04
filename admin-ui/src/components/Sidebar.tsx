@@ -16,11 +16,11 @@ import {
   FileSearch,
   GitBranch,
   LayoutDashboard,
+  Link2,
   ListFilter,
   LogOut,
   Menu,
   Moon,
-  Network,
   Radar,
   Users,
   ScrollText,
@@ -103,13 +103,12 @@ export type View =
   | "query"
   | "patterns"
   | "findings"
-  | "graph"
   | "blacklist"
   | "redirects"
   | "logs"
-  /* ── Kept NOC/SOC pages (grafted back onto neobrutalism) ── */
-  | "live"
+  /* ── Deep Dive pages ── */
   | "host"
+  | "url"
   | "analytics"
 
 export interface NavItem {
@@ -128,15 +127,14 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Monitor",
     items: [
       { view: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { view: "graph", label: "Traffic", icon: Network },
       { view: "query", label: "Query", icon: FileSearch },
     ],
   },
   {
     label: "Deep Dive",
     items: [
-      { view: "live", label: "Live Monitor", icon: Activity },
       { view: "host", label: "Host Inspector", icon: Users },
+      { view: "url", label: "URL Investigation", icon: Link2 },
       { view: "analytics", label: "Analytics", icon: BarChart3 },
     ],
   },

@@ -7,8 +7,10 @@ import {
   Download,
   Globe,
   Printer,
+  SearchX,
   Server,
   ShieldAlert,
+  ShieldCheck,
 } from "lucide-react"
 import {
   Button,
@@ -29,23 +31,27 @@ import {
   getAnalyticsBandwidth,
   getAnalyticsEnforcements,
   getAnalyticsTopDomains,
-  getAnalyticsTopDenied,
+  getAnalyticsTopEnforced,
+  getFindings,
   formatBytes,
   type AnalyticsSummary,
   type AnalyticsBandwidth,
   type AnalyticsEnforcements,
   type AnalyticsTopDomains,
-  type AnalyticsTopDenied,
+  type AnalyticsTopEnforced,
   type TopDomainRow,
-  type TopDeniedRow,
+  type TopEnforcedRow,
+  type Finding,
 } from "../api"
 
-/* ── Selector options (spec §3.4 controls) ─────────────────────────── */
+/* ── Selector options ─────────────────────────────────────────────── */
 
+// Ranges match the app-wide FilterContext presets (1h/24h/7d/30d).
 const RANGE_OPTIONS: SelectOption[] = [
+  { value: "1h", label: "Last 1h" },
+  { value: "24h", label: "Last 24h" },
   { value: "7d", label: "Last 7 Days" },
   { value: "30d", label: "Last 30 Days" },
-  { value: "24h", label: "Last 24h" },
 ]
 
 const COMPARE_OPTIONS: SelectOption[] = [
@@ -53,15 +59,7 @@ const COMPARE_OPTIONS: SelectOption[] = [
   { value: "previous", label: "Previous Period" },
 ]
 
-const HOST_GROUP_OPTIONS: SelectOption[] = [
-  { value: "all", label: "All Departments" },
-]
-
-/* ── Spec §3.4 wireframe fallbacks (empty window → demo numbers) ───── */
-const WIREFRAME_VOLUME = "1.42 TB"
-const WIREFRAME_BLOCKED = "48,210"
-const WIREFRAME_HOST = "Dev-Workstation-04"
-const WIREFRAME_PEAK = "Tue 14:00 EST"
+const RANGE_MINUTES: Record<string, number> = { "1h": 60, "24h": 1440, "7d": 10080, "30d": 43200 }
 
 function rangeLabel(r: string): string {
   return RANGE_OPTIONS.find((o) => o.value === r)?.label ?? r
@@ -91,6 +89,12 @@ function csvRows(header: string[], rows: unknown[][]): string {
   return [header.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n")
 }
 
+function formatWhen(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString()
+}
+
 /* ── Page ───────────────────────────────────────────────────────────── */
 
 export function AnalyticsPage() {
@@ -98,31 +102,36 @@ export function AnalyticsPage() {
 
   const [range, setRange] = useState("7d")
   const [compare, setCompare] = useState("none")
-  const [hostGroup, setHostGroup] = useState("all")
 
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null)
   const [bandwidth, setBandwidth] = useState<AnalyticsBandwidth | null>(null)
   const [enforcements, setEnforcements] = useState<AnalyticsEnforcements | null>(null)
   const [topDomains, setTopDomains] = useState<AnalyticsTopDomains | null>(null)
-  const [topDenied, setTopDenied] = useState<AnalyticsTopDenied | null>(null)
+  const [topEnforced, setTopEnforced] = useState<AnalyticsTopEnforced | null>(null)
+  const [raw, setRaw] = useState<Finding[]>([])
+  const [rawTotal, setRawTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [rawSearch, setRawSearch] = useState("")
+  const [rawPage, setRawPage] = useState(0)
+  const rawPageSize = 50
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, b, e, td, tden] = await Promise.all([
-        getAnalyticsSummary({ range, compare, hostGroup }),
-        getAnalyticsBandwidth({ range, compare, hostGroup }),
-        getAnalyticsEnforcements({ range, compare, hostGroup }),
-        getAnalyticsTopDomains({ range, compare, hostGroup, limit: 10 }),
-        getAnalyticsTopDenied({ range, compare, hostGroup, limit: 10 }),
+      const [s, b, e, td, ten] = await Promise.all([
+        getAnalyticsSummary({ range, compare }),
+        getAnalyticsBandwidth({ range, compare }),
+        getAnalyticsEnforcements({ range, compare }),
+        getAnalyticsTopDomains({ range, compare, limit: 10 }),
+        getAnalyticsTopEnforced({ range, compare, limit: 10 }),
       ])
       setSummary(s)
       setBandwidth(b)
       setEnforcements(e)
       setTopDomains(td)
-      setTopDenied(tden)
+      setTopEnforced(ten)
       setError(null)
     } catch (err) {
       const msg = (err as Error).message || "Failed to load analytics"
@@ -131,7 +140,7 @@ export function AnalyticsPage() {
     } finally {
       setLoading(false)
     }
-  }, [range, compare, hostGroup, toast])
+  }, [range, compare, toast])
 
   useEffect(() => {
     void fetchAll()
@@ -139,26 +148,50 @@ export function AnalyticsPage() {
 
   useAutoRefresh(fetchAll, "analytics", 0)
 
-  /* ── Stat card values: real data when present, spec wireframe otherwise ── */
+  // Raw-data table — the persisted findings in the selected window.
+  const fetchRaw = useCallback(async () => {
+    setRawLoading(true)
+    try {
+      const res = await getFindings({
+        search: rawSearch.trim() || undefined,
+        minutes: RANGE_MINUTES[range] ?? 1440,
+        limit: rawPageSize,
+        offset: rawPage * rawPageSize,
+      })
+      setRaw(res.items)
+      setRawTotal(res.total)
+    } catch (e) {
+      toast({ title: "Raw data load failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setRawLoading(false)
+    }
+  }, [range, rawSearch, rawPage, toast])
+
+  useEffect(() => {
+    void fetchRaw()
+  }, [fetchRaw])
+
+  // Refetch when search/range/page changes (search is server-side per page fetch).
+  /* ── Stat card values ──────────────────────────────────────────────── */
 
   const hasRealData = !!summary?.has_data
-  const volumeValue = hasRealData ? formatBytes(summary!.totalVolume) : WIREFRAME_VOLUME
-  const blockedValue = hasRealData ? summary!.totalBlocked.toLocaleString() : WIREFRAME_BLOCKED
-  const hostValue =
-    hasRealData && summary!.topBandwidthHost ? summary!.topBandwidthHost : WIREFRAME_HOST
-  const peakValue =
-    hasRealData && summary!.peakTrafficTime ? summary!.peakTrafficTime : WIREFRAME_PEAK
+  const volumeValue = hasRealData ? formatBytes(summary!.totalVolume) : "—"
+  const riskValue = hasRealData ? summary!.totalRisk.toLocaleString() : "—"
+  const enforcedValue = hasRealData ? summary!.totalEnforcements.toLocaleString() : "—"
+  const hostValue = hasRealData && summary!.topBandwidthHost ? summary!.topBandwidthHost : "—"
+  const peakValue = hasRealData && summary!.peakTrafficTime ? summary!.peakTrafficTime : "—"
 
   const volumeHint = hasRealData
     ? pctArrow(summary!.volumeDeltaPct) ?? (compare === "previous" ? "no prev data" : rangeLabel(range))
-    : "^ 12%"
-  const blockedHint = hasRealData
-    ? pctArrow(summary!.blockedDeltaPct) ?? (compare === "previous" ? "no prev data" : rangeLabel(range))
-    : "^ 4%"
-  const hostHint = hasRealData ? rangeLabel(range) : "Dev-Workstation-04 · Engineering Dept"
-  const peakHint = hasRealData ? "UTC hour with most requests" : "Tue 14:00 · busiest hour"
+    : rangeLabel(range)
+  const riskHint = hasRealData ? rangeLabel(range) : rangeLabel(range)
+  const enforcedHint = hasRealData
+    ? pctArrow(summary!.enforcementsDeltaPct) ?? (compare === "previous" ? "no prev data" : "handled")
+    : "handled"
+  const hostHint = hasRealData ? rangeLabel(range) : rangeLabel(range)
+  const peakHint = hasRealData ? "UTC hour with most requests" : "busiest hour"
 
-  /* ── Trend chart data (bytes → GB for the bandwidth panel) ────────── */
+  /* ── Trend chart data ──────────────────────────────────────────────── */
 
   const bandwidthPoints = useMemo<TrendPoint[]>(
     () =>
@@ -213,7 +246,7 @@ export function AnalyticsPage() {
     [],
   )
 
-  const deniedColumns = useMemo<DataTableColumn<TopDeniedRow>[]>(
+  const enforcedColumns = useMemo<DataTableColumn<TopEnforcedRow>[]>(
     () => [
       {
         id: "domain",
@@ -226,12 +259,12 @@ export function AnalyticsPage() {
         ),
       },
       {
-        id: "blocks",
-        header: "Blocks",
-        accessor: (r) => r.blocks,
+        id: "enforcements",
+        header: "Enforcements",
+        accessor: (r) => r.enforcements,
         align: "right",
-        cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.blocks.toLocaleString()}</span>,
-        width: "w-24",
+        cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.enforcements.toLocaleString()}</span>,
+        width: "w-28",
       },
       {
         id: "primaryRule",
@@ -247,6 +280,76 @@ export function AnalyticsPage() {
     [],
   )
 
+  const rawColumns = useMemo<DataTableColumn<Finding>[]>(
+    () => [
+      {
+        id: "log_timestamp",
+        header: "Timestamp",
+        accessor: (r) => r.log_timestamp,
+        cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.log_timestamp)}</span>,
+        width: "w-44",
+        defaultSortDir: "desc",
+      },
+      {
+        id: "client_ip",
+        header: "Client IP",
+        accessor: (r) => r.client_ip,
+        cell: (r) => <span className="font-mono text-xs font-semibold">{r.client_ip}</span>,
+      },
+      {
+        id: "url",
+        header: "URL",
+        accessor: (r) => r.url,
+        cell: (r) => (
+          <span className="block max-w-[320px] truncate font-mono text-xs" title={r.url}>
+            {r.url}
+          </span>
+        ),
+      },
+      {
+        id: "base_url",
+        header: "Domain",
+        accessor: (r) => r.base_url,
+        cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span>,
+      },
+      {
+        id: "action",
+        header: "Action",
+        accessor: (r) => r.action,
+        cell: (r) => <span className="font-mono text-xs">{r.action || "ALLOW"}</span>,
+        width: "w-24",
+      },
+      {
+        id: "bytes",
+        header: "Bytes ↓/↑",
+        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
+        align: "right",
+        cell: (r) => {
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+          return (
+            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
+              {formatBytes(dn + up)}
+            </span>
+          )
+        },
+        width: "w-24",
+      },
+      {
+        id: "rule",
+        header: "Rule",
+        accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
+        cell: (r) => {
+          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
+          return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+        },
+        width: "w-28",
+      },
+    ],
+    [],
+  )
+
   /* ── Export handlers ──────────────────────────────────────────────── */
 
   const handleExportCsv = () => {
@@ -257,10 +360,10 @@ export function AnalyticsPage() {
         csvRows(["Metric", "Value"], [
           ["Range", range],
           ["Compare", compare],
-          ["Host Group", hostGroup],
           ["Generated (UTC)", new Date().toISOString()],
           ["Total Volume Transferred (bytes)", summary?.totalVolume ?? ""],
-          ["Total Blocked Attempts", summary?.totalBlocked ?? ""],
+          ["Risks (ALLOW pattern matches)", summary?.totalRisk ?? ""],
+          ["Enforcements (DENY — handled)", summary?.totalEnforcements ?? ""],
           ["Top Bandwidth Host", summary?.topBandwidthHost ?? ""],
           ["Peak Traffic Time", summary?.peakTrafficTime ?? ""],
         ]),
@@ -286,11 +389,29 @@ export function AnalyticsPage() {
           (topDomains?.items ?? []).map((r) => [r.domain, r.volume, r.pct]),
         ),
       )
-      sections.push("Top Denied Target Domains")
+      sections.push("Top Enforced Target Domains")
       sections.push(
         csvRows(
-          ["domain", "blocks", "primaryRule"],
-          (topDenied?.items ?? []).map((r) => [r.domain, r.blocks, r.primaryRule]),
+          ["domain", "enforcements", "primaryRule"],
+          (topEnforced?.items ?? []).map((r) => [r.domain, r.enforcements, r.primaryRule]),
+        ),
+      )
+      sections.push("Raw Findings")
+      sections.push(
+        csvRows(
+          ["log_timestamp", "client_ip", "server_ip", "url", "base_url", "action", "category", "bytes_down", "bytes_up", "rule"],
+          raw.map((r) => [
+            r.log_timestamp,
+            r.client_ip,
+            r.server_ip,
+            r.url,
+            r.base_url,
+            r.action ?? "",
+            r.category ?? "",
+            Number(r.bytes_downloaded) || 0,
+            Number(r.bytes_uploaded) || 0,
+            r.rule_name ?? r.rule_info ?? "",
+          ]),
         ),
       )
       downloadCsv(`unetwatch-analytics-${range}-${Date.now()}.csv`, sections.join("\n\n"))
@@ -301,16 +422,13 @@ export function AnalyticsPage() {
   }
 
   const handleExportPdf = () => {
-    // Honest placeholder per brief: the browser print dialog lets the operator
-    // save the page as PDF (Print → Save as PDF). A server-side PDF renderer
-    // can replace this later without changing the button contract.
     toast({ title: "Opening print dialog — Save as PDF", variant: "info" })
     window.print()
   }
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Analytics & Reports" description="KPIs, trends, and exportable reports">
+      <PageHeader title="Analytics & Reports" description="KPIs, trends, enforcements, and raw data">
         <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           {rangeLabel(range)} · {summary?.source === "es" ? "live ES" : "findings table"}
         </span>
@@ -324,7 +442,7 @@ export function AnalyticsPage() {
         </Button>
       </PageHeader>
 
-      {/* ── Date range & scope controls (spec §3.4) ─────────────────── */}
+      {/* ── Date range & comparison controls ───────────────────────── */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
           <Label className="mb-0">Range</Label>
@@ -340,16 +458,6 @@ export function AnalyticsPage() {
             aria-label="Comparison period"
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <Label className="mb-0">Host Group</Label>
-          <Select
-            value={hostGroup}
-            onChange={setHostGroup}
-            options={HOST_GROUP_OPTIONS}
-            className="w-48"
-            aria-label="Host group"
-          />
-        </div>
       </div>
 
       {error && (
@@ -358,16 +466,17 @@ export function AnalyticsPage() {
         </div>
       )}
 
-      {/* ── High-level usage metrics ────────────────────────────────── */}
+      {/* ── High-level usage metrics ───────────────────────────────── */}
       {loading && !summary ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+          <Skeleton className="h-28 w-full" />
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-28 w-full" />
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
             icon={Database}
             label="Total Volume Transferred"
@@ -377,10 +486,17 @@ export function AnalyticsPage() {
           />
           <StatCard
             icon={ShieldAlert}
-            label="Total Blocked Attempts"
-            value={blockedValue}
+            label="Risks (ALLOW matches)"
+            value={riskValue}
             tone="danger"
-            hint={blockedHint}
+            hint={riskHint}
+          />
+          <StatCard
+            icon={ShieldCheck}
+            label="Enforcements (DENY)"
+            value={enforcedValue}
+            tone="success"
+            hint={enforcedHint}
           />
           <StatCard icon={Server} label="Top Bandwidth Host" value={hostValue} hint={hostHint} />
           <StatCard icon={Clock} label="Peak Traffic Time" value={peakValue} hint={peakHint} />
@@ -404,7 +520,7 @@ export function AnalyticsPage() {
             />
           )}
         </Panel>
-        <Panel title="Daily Policy Enforcements (Allow vs Deny)" icon={Activity} description={`${rangeLabel(range)} · stacked`}>
+        <Panel title="Daily Policy Enforcements (Allow vs Deny)" icon={Activity} description={`${rangeLabel(range)} · stacked — DENY are handled, not risk`}>
           {loading && !enforcements ? (
             <Skeleton className="h-64 w-full" />
           ) : (
@@ -437,28 +553,67 @@ export function AnalyticsPage() {
             ariaLabel="Top bandwidth consuming domains"
           />
         </Panel>
-        <Panel title="Top Denied Target Domains" icon={ShieldAlert} description="Domain · Blocks · Primary rule">
+        <Panel title="Top Enforced Target Domains" icon={ShieldCheck} description="Domain · Enforcements · Primary rule">
           <DataTable
-            columns={deniedColumns}
-            data={topDenied?.items ?? []}
+            columns={enforcedColumns}
+            data={topEnforced?.items ?? []}
             rowId={(r) => r.domain}
-            loading={loading && !topDenied}
+            loading={loading && !topEnforced}
             empty={{
-              icon: ShieldAlert,
-              title: "No denied domains in window",
-              description: "Try a broader date range.",
+              icon: ShieldCheck,
+              title: "No enforced domains in window",
+              description: "DENY rows appear here — the proxy handled them.",
             }}
-            ariaLabel="Top denied target domains"
+            ariaLabel="Top enforced target domains"
           />
         </Panel>
       </div>
+
+      {/* ── Raw data table ──────────────────────────────────────────── */}
+      <Panel
+        title="Raw Findings"
+        icon={Database}
+        description={`${rawTotal.toLocaleString()} docs · ${rangeLabel(range)} window`}
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            placeholder="Filter raw data (IP / URL)..."
+            value={rawSearch}
+            onChange={(e) => { setRawSearch(e.target.value); setRawPage(0) }}
+            className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Filter raw findings"
+          />
+          <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />
+            Findings are ALLOW risk rows only (ADR 0001)
+          </span>
+        </div>
+        <DataTable
+          columns={rawColumns}
+          data={raw}
+          rowId={(r) => String(r.id)}
+          loading={rawLoading}
+          internalPagination
+          total={rawTotal}
+          page={rawPage}
+          pageSize={rawPageSize}
+          onPageChange={setRawPage}
+          empty={{
+            icon: SearchX,
+            title: "No findings in window",
+            description: "Try a broader date range or clear the filter.",
+          }}
+          ariaLabel="Raw findings"
+        />
+      </Panel>
 
       {/* ── Source note ─────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3">
         <ArrowDownToLine className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
           Aggregated from {summary?.source === "es" ? "live Elasticsearch" : "the persisted findings table"} —
-          bandwidth is approximated (8 KiB/request) until byte accounting lands.
+          risk = ALLOW pattern matches, enforcements = DENY (handled). Bandwidth approximated (8 KiB/request) until byte accounting lands.
         </p>
       </div>
     </div>

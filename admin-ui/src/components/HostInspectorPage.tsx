@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Activity, Search, SearchX, Settings2, Download } from "lucide-react"
+import { Activity, Link2, Search, SearchX, Settings2, Download, ShieldAlert, ShieldCheck } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
 import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, useToast } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
@@ -7,6 +7,8 @@ import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
 import { TopDestinations, type TopDomain, type TriggeredPattern } from "./TopDestinations"
 import {
+  addBaseUrlToBlacklist,
+  bulkImport,
   getHostProfile,
   runQuery,
   timeRangeToMinutesLive,
@@ -47,6 +49,7 @@ interface HostSectionData {
   anomaly?: string
   topDomains: TopDomain[]
   triggeredPatterns: TriggeredPattern[]
+  topUrls: { url: string; count: number }[]
   logs: LogRow[]
   logTotal: number
   window: string
@@ -58,6 +61,7 @@ const EMPTY_SECTIONS: HostSectionData = {
   timeline: [],
   topDomains: [],
   triggeredPatterns: [],
+  topUrls: [],
   logs: [],
   logTotal: 0,
   window: "24h",
@@ -107,6 +111,19 @@ function buildTriggeredPatterns(items: QueryDoc[]): TriggeredPattern[] {
     .map(([pattern, hits]) => ({ pattern, hits }))
 }
 
+/** Ranked URLs for the host — each row links into URL Investigation. */
+function buildTopUrls(items: QueryDoc[], limit = 8): { url: string; count: number }[] {
+  const counts = new Map<string, number>()
+  for (const it of items) {
+    const url = it.url || hostOfUrl(it.url) || "unknown"
+    counts.set(url, (counts.get(url) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([url, count]) => ({ url, count }))
+}
+
 /** Flag the largest hourly bucket when it towers over the rest. */
 function detectSpike(points: TimelinePoint[]): string | undefined {
   if (points.length < 2) return undefined
@@ -133,12 +150,14 @@ async function fetchHostSections(ip: string, timeRange: string): Promise<HostSec
       const timeline = res.timeline.map((t) => ({ hour: formatHour(t.bucket), volume: t.count }))
       const topDomains = buildTopDomains(res.items)
       const triggeredPatterns = buildTriggeredPatterns(res.items)
+      const topUrls = buildTopUrls(res.items)
       const logs = (res.items as unknown as LogRow[]).map((r) => ({ ...r }))
       return {
         timeline,
         anomaly: detectSpike(timeline),
         topDomains,
         triggeredPatterns,
+        topUrls,
         logs,
         logTotal: res.total_requests || res.items.length,
         window: timeRange,
@@ -179,6 +198,12 @@ function buildDemoSections(timeRange: string): HostSectionData {
     { pattern: "*/login*", hits: 512 },
   ]
 
+  const topUrls = [
+    { url: "https://api.internal.corp/v1/data/pull?token=abc", count: 19264 },
+    { url: "https://s3.amazonaws.com/releases/client-installer.exe", count: 8562 },
+    { url: "https://zoom.us/j/82461730291", count: 5140 },
+  ]
+
   // Demo window is synthesize-only; keep logs deterministic via a single
   // factory so pagination can materialize lazily across the full 42,810 count.
   const demoBaseNow = Date.now()
@@ -202,6 +227,7 @@ function buildDemoSections(timeRange: string): HostSectionData {
     anomaly: detectSpike(timeline),
     topDomains: domains,
     triggeredPatterns: patterns,
+    topUrls,
     logs: firstPageLogs,
     logTotal: DEMO_TOTAL,
     window: timeRange,
@@ -285,8 +311,12 @@ function buildDemoRowsFiltered(
 
 /* ── Page ────────────────────────────────────────────────────────────── */
 
-export function HostInspectorPage() {
-  const { globalFilter } = useFilter()
+export function HostInspectorPage({
+  onNavigate,
+}: {
+  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void
+} = {}) {
+  const { globalFilter, setGlobalFilter } = useFilter()
   const { toast } = useToast()
 
   const [target, setTarget] = useState(() => globalFilter || "")
@@ -374,6 +404,43 @@ export function HostInspectorPage() {
 
   const handleGear = () => {
     toast({ title: "Table settings", description: "Column visibility coming soon.", variant: "info" })
+  }
+
+  /* ── Per-host enforcement actions (ADR 0001) ── */
+  const handleWhitelist = async () => {
+    if (!target.trim()) return
+    const host = target.trim()
+    const pattern = `*.${host}/*`
+    try {
+      await bulkImport({ patterns: [pattern], pattern_type: "whitelist" })
+      toast({ title: "Whitelisted", description: `${pattern} added to whitelist — excluded from risk.`, variant: "success" })
+    } catch (e) {
+      toast({ title: "Whitelist failed", description: (e as Error).message, variant: "error" })
+    }
+  }
+
+  const handleBlacklist = async () => {
+    if (!target.trim()) return
+    try {
+      const res = await addBaseUrlToBlacklist(target.trim())
+      toast({
+        title: res.added.length ? "Blacklisted" : "Already blacklisted",
+        description: `${target.trim()} added to the block feed.`,
+        variant: res.added.length ? "success" : "info",
+      })
+    } catch (e) {
+      toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
+    }
+  }
+
+  const handleOpenUrl = (url: string) => {
+    setGlobalFilter(url)
+    try {
+      window.localStorage.setItem("unetwatch_view", "url")
+    } catch {
+      /* ignore */
+    }
+    onNavigate?.("url")
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -553,6 +620,18 @@ export function HostInspectorPage() {
           <Download className="h-4 w-4" aria-hidden="true" />
           Export Report
         </Button>
+        {host && (
+          <>
+            <Button variant="outline" onClick={handleWhitelist}>
+              <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+              Whitelist host
+            </Button>
+            <Button variant="outline" onClick={handleBlacklist} className="text-destructive hover:text-destructive">
+              <ShieldAlert className="h-4 w-4" aria-hidden="true" />
+              Blacklist host
+            </Button>
+          </>
+        )}
       </PageHeader>
 
       <div className="flex gap-2">
@@ -636,6 +715,40 @@ export function HostInspectorPage() {
           ) : sections ? (
             <TopDestinations topDomains={sections.topDomains} triggeredPatterns={sections.triggeredPatterns} />
           ) : null}
+
+          {/* 3) Ranked URLs — each row links into URL Investigation */}
+          <Panel
+            title="Top URLs Accessed"
+            icon={Link2}
+            description="Click a URL to investigate who else reached it"
+          >
+            {sectionsLoading ? (
+              <Skeleton className="h-48 w-full" />
+            ) : sections && sections.topUrls.length > 0 ? (
+              <div className="divide-y divide-border">
+                {sections.topUrls.map((u) => (
+                  <button
+                    key={u.url}
+                    type="button"
+                    onClick={() => handleOpenUrl(u.url)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
+                  >
+                    <span className="block max-w-[60%] flex-1 truncate font-mono text-[13px] font-semibold" title={u.url}>
+                      {u.url}
+                    </span>
+                    <span className="ml-auto font-mono text-[13px] font-bold tabular-nums">
+                      {u.count.toLocaleString()}
+                    </span>
+                    <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                NO DATA IN WINDOW
+              </p>
+            )}
+          </Panel>
 
           {/* 3) Chronological Kibana Request Logs */}
           <Panel

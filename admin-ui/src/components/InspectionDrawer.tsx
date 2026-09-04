@@ -20,7 +20,7 @@ export interface InspectionDrawerProps {
   row: LogRow
   onClose: () => void
   /** Optional navigation callback — when provided, drawer actions navigate directly to the target view. */
-  onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void
+  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs") => void
 }
 
 export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerProps) {

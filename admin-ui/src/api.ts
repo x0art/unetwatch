@@ -656,8 +656,8 @@ export async function getLiveMetrics(opts?: {
   if (query) {
     // Prefer server-side aggregation when available (accurate over the full
     // window); fall back to sampled count from fetched items only when no
-    // aggregation field exists. Sampled fallback is window-truncated (LogInspector
-    // caps at 50 / runQuery paginates) so deny-rate hint is understated.
+    // aggregation field exists. Sampled fallback is window-truncated (runQuery
+    // paginates) so deny-rate hint is understated.
     const m = metrics as Record<string, unknown> | null
     const q = query as unknown as Record<string, unknown>
     const aggDenied =
@@ -713,11 +713,13 @@ export async function triggerManualRun(
 
 export async function getFindings(params?: {
   search?: string
+  minutes?: number
   limit?: number
   offset?: number
 }): Promise<FindingsResponse> {
   const qs = new URLSearchParams()
   if (params?.search) qs.set("search", params.search)
+  if (params?.minutes) qs.set("minutes", String(params.minutes))
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
   return request(`/findings/?${qs}`)
@@ -787,17 +789,17 @@ export function timeRangeToMinutesLive(tr: string): number {
 }
 
 /**
- * Build a 4-layer Sankey graph for the Live Monitor.
+ * Build a 4-layer Sankey graph for the Query page (single live-traffic surface).
  *
- * Implementation choice: reuses the existing `runQuery` (+ `getFindingsGraph`
- * fallback) and reshapes on the client. No dedicated `GET /api/graph` endpoint
- * is required — the comment documents the alternative the brief allowed.
+ * Implementation choice: reuses the `runQuery` result items and reshapes on the
+ * client. No dedicated `GET /api/graph` endpoint is required.
  *
- * Layers (spec §4.1):
- *  0 Sources — client IPs / hosts (blue #3B82F6)
- *  1 Patterns — matched block patterns + "Unmatched" (slate #64748B)
- *  2 Domains — base_url/domain, colored by action: ALLOW #10B981 / DENY #EF4444 / FLAG #F59E0B
- *  3 Destinations — dest IPs, high-risk orange #F97316 vs standard purple #8B5CF6
+ * Layers (user-confirmed order):
+ *  0 Patterns — matched block patterns + "Unmatched" (slate)
+ *  1 Sources — client IPs / hosts (info blue)
+ *  2 Domains — base_url/domain, colored by action: ALLOW ink / DENY red / FLAG hazard
+ *  3 Destinations — dest IPs; blacklisted destinations high-risk (ADR 0001:
+ *    DENY is an enforcement, not a risk, so it no longer flags a destination).
  *
  * Ribbon thickness ∝ value (aggregated counts).
  */
@@ -815,15 +817,15 @@ export async function getLiveSankey(
   try {
     const res = await runQuery(clamped, { viewMode })
     if (res.items.length > 0) {
-      return buildLiveSankeyFromQuery(res.items)
+      return buildFlowSankey(res.items)
     }
     // If ES returned no items but flow exists (older backend), try shaping flow as 2-col fallback
     if (res.flow.nodes.length > 0) {
-      // No pattern/action data — degrade to 2 layers mapped into 0 and 3
+      // No pattern/action data — degrade to 2 layers mapped into Sources(1) and Destinations(3)
       const nodes: LiveSankeyNode[] = res.flow.nodes.map((n) => ({
         id: n.id,
         name: n.label,
-        layer: n.kind === "ip" ? 0 : 3,
+        layer: n.kind === "ip" ? 1 : 3,
         // Destinations without action stay standard purple; SankeyDiagram will use LAYER_COLORS[3]
       }))
       const links: LiveSankeyLink[] = res.flow.links.map((l) => ({
@@ -849,16 +851,21 @@ export async function getLiveSankey(
   return { nodes: [], links: [] }
 }
 
-function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
+/**
+ * Build a 4-column Sankey from a QueryPage result's items.
+ * Column order (user-confirmed): Pattern → Source → Domain → Destination.
+ * Exported so Query renders the flow from its own result (no duplicate ES call).
+ */
+export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
   // Cap per-layer breadth so the diagram stays readable.
-  const MAX_SRC = 20
   const MAX_PAT = 12
+  const MAX_SRC = 20
   const MAX_DOM = 20
   const MAX_DST = 20
 
   // Frequency maps for capping
-  const srcCount = new Map<string, number>()
   const patCount = new Map<string, number>()
+  const srcCount = new Map<string, number>()
   const domCount = new Map<string, number>()
   const dstCount = new Map<string, number>()
   const domAction = new Map<string, string>()
@@ -866,10 +873,10 @@ function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
   const dstRisk = new Map<string, boolean>()
 
   for (const it of items) {
-    const src = it.client_ip || "unknown"
-    srcCount.set(src, (srcCount.get(src) ?? 0) + 1)
     const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
     for (const p of pats) patCount.set(p, (patCount.get(p) ?? 0) + 1)
+    const src = it.client_ip || "unknown"
+    srcCount.set(src, (srcCount.get(src) ?? 0) + 1)
     const dom = it.base_url || it.url || "unknown"
     domCount.set(dom, (domCount.get(dom) ?? 0) + 1)
     const act = it.action || "ALLOW"
@@ -877,16 +884,18 @@ function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
     domActionCounts.get(dom)!.set(act, (domActionCounts.get(dom)!.get(act) ?? 0) + 1)
     const dst = it.server_ip || "unknown"
     dstCount.set(dst, (dstCount.get(dst) ?? 0) + 1)
-    const risky = it.action === "DENY" || it.blacklisted === true
+    // ADR 0001: DENY is an enforcement (handled), not risk — only a
+    // blacklisted destination stays flagged as a risk surface.
+    const risky = it.blacklisted === true
     if (risky) dstRisk.set(dst, true)
     else if (!dstRisk.has(dst)) dstRisk.set(dst, false)
   }
 
-  const topSrc = new Set(
-    [...srcCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_SRC).map(([k]) => k),
-  )
   const topPat = new Set(
     [...patCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_PAT).map(([k]) => k),
+  )
+  const topSrc = new Set(
+    [...srcCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_SRC).map(([k]) => k),
   )
   const topDom = new Set(
     [...domCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DOM).map(([k]) => k),
@@ -905,39 +914,39 @@ function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
     domAction.set(dom, best)
   }
 
-  const idSrc = (ip: string) => `src:${ip}`
   const idPat = (p: string) => `pat:${p}`
+  const idSrc = (ip: string) => `src:${ip}`
   const idDom = (d: string) => `dom:${d}`
   const idDst = (ip: string) => `dst:${ip}`
 
   const nodes: LiveSankeyNode[] = []
-  for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 0 })
-  for (const p of topPat) nodes.push({ id: idPat(p), name: p, layer: 1 })
+  for (const p of topPat) nodes.push({ id: idPat(p), name: p, layer: 0 })
+  for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 1 })
   for (const d of topDom) nodes.push({ id: idDom(d), name: d, layer: 2, action: domAction.get(d) ?? "ALLOW" })
   for (const d of topDst) nodes.push({ id: idDst(d), name: d, layer: 3, isHighRisk: dstRisk.get(d) ?? false })
 
   const linkKey = (a: string, b: string) => `${a}\0${b}`
-  const srcPat = new Map<string, number>()
-  const patDom = new Map<string, number>()
+  const patSrc = new Map<string, number>()
+  const srcDom = new Map<string, number>()
   const domDst = new Map<string, number>()
   const domDstMeta = new Map<string, { action: string; isHighRisk: boolean }>()
 
   for (const it of items) {
+    const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
     const src = it.client_ip || "unknown"
     if (!topSrc.has(src)) continue
-    const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
     const dom = it.base_url || it.url || "unknown"
     if (!topDom.has(dom)) continue
     const dst = it.server_ip || "unknown"
     if (!topDst.has(dst)) continue
     const act = it.action || "ALLOW"
-    const risky = it.action === "DENY" || it.blacklisted === true
+    const risky = it.blacklisted === true
     for (const pat of pats) {
       if (!topPat.has(pat)) continue
-      const k1 = linkKey(idSrc(src), idPat(pat))
-      srcPat.set(k1, (srcPat.get(k1) ?? 0) + 1)
-      const k2 = linkKey(idPat(pat), idDom(dom))
-      patDom.set(k2, (patDom.get(k2) ?? 0) + 1)
+      const k1 = linkKey(idPat(pat), idSrc(src))
+      patSrc.set(k1, (patSrc.get(k1) ?? 0) + 1)
+      const k2 = linkKey(idSrc(src), idDom(dom))
+      srcDom.set(k2, (srcDom.get(k2) ?? 0) + 1)
     }
     const k3 = linkKey(idDom(dom), idDst(dst))
     domDst.set(k3, (domDst.get(k3) ?? 0) + 1)
@@ -947,11 +956,11 @@ function buildLiveSankeyFromQuery(items: QueryDoc[]): LiveSankeyGraph {
   }
 
   const links: LiveSankeyLink[] = []
-  for (const [k, v] of srcPat) {
+  for (const [k, v] of patSrc) {
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
-  for (const [k, v] of patDom) {
+  for (const [k, v] of srcDom) {
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
@@ -1207,19 +1216,19 @@ export async function getUrlRedirectHistory(id: number): Promise<UrlRedirectHist
 
 export interface HostIdentity {
   hostname: string
-  mac: string
   primaryIp: string
-  assignedDept: string
-  user: string
 }
 
 export interface HostRisk {
   riskScore: number
   riskLevel: "HIGH" | "MEDIUM" | "LOW"
   totalRequests: number
-  deniedFlagged: number
-  /** 0..100 */
-  deniedPct: number
+  /** ADR 0001: ALLOW pattern-matches — the requests that need attention. */
+  riskRequests: number
+  /** DENY/FLAG — the proxy already handled these (not risk). */
+  enforcements: number
+  /** 0..100 share of total that was enforced (proxy handled). */
+  enforcementsPct: number
   bandwidth: string
 }
 
@@ -1228,22 +1237,15 @@ export interface HostProfile extends HostIdentity {
   risk: HostRisk
 }
 
-function hostRiskFromDeniedPct(pct: number): { level: HostRisk["riskLevel"]; score: number } {
-  // Heuristic per brief: 0–2% Low, 2–5% Medium, >5% High on a 78/100 scale example.
-  // Map continuously so badge and score track together.
-  if (pct > 5) {
-    // 5% → ~78, 20%+ → 95+
-    const score = Math.min(95, 78 + Math.round((pct - 5) * 1.2))
-    return { level: "HIGH", score }
-  }
-  if (pct >= 2) {
-    // 2% → 45, 5% → 68
-    const score = Math.round(45 + ((pct - 2) / 3) * 23)
-    return { level: "MEDIUM", score }
-  }
-  // 0% → 12, 2% → 38
-  const score = Math.round(12 + (pct / 2) * 26)
-  return { level: "LOW", score }
+function hostRiskFromShares(totalRequests: number, riskRequests: number): { level: HostRisk["riskLevel"]; score: number } {
+  // ADR 0001: risk = the share of the host's traffic that reached a blocked
+  // pattern and was ALLOWed (the proxy did NOT handle it). A host whose
+  // traffic is mostly enforced is low-risk; mostly-ALLOW matches are high.
+  if (totalRequests <= 0) return { level: "LOW", score: 12 }
+  const share = riskRequests / totalRequests
+  if (share > 0.5) return { level: "HIGH", score: Math.min(95, 72 + Math.round((share - 0.5) * 40)) }
+  if (share > 0.2) return { level: "MEDIUM", score: Math.round(45 + ((share - 0.2) / 0.3) * 25) }
+  return { level: "LOW", score: Math.round(12 + (share / 0.2) * 32) }
 }
 
 function synthesizeBandwidth(totalRequests: number): string {
@@ -1256,33 +1258,24 @@ function synthesizeBandwidth(totalRequests: number): string {
 }
 
 function hostIdentityFromFindings(ip: string, items: Finding[]): HostIdentity {
-  // Derive what we can from findings; fall back to wireframe placeholders.
+  // ADR 0001: a host is an IP + optional hostname — no MAC/dept/user identity.
   const first = items[0] as unknown as Record<string, unknown> | undefined
   const hostname =
     (first?.["hostname"] as string) ||
     (first?.["src_host"] as string) ||
     (first?.["client_host"] as string) ||
     `Host-${ip.split(".").pop() ?? ip.slice(-4)}`
-  // MAC / dept / user are not in findings yet — placeholder dash until inventory joins.
-  const mac = (first?.["mac"] as string) || (first?.["src_mac"] as string) || "00:1A:2B:3C:4D:5E"
-  const assignedDept = (first?.["assigned_dept"] as string) || (first?.["dept"] as string) || "Engineering Dept"
-  const user = (first?.["assigned_user"] as string) || (first?.["user"] as string) || (first?.["client_user"] as string) || "j.doe"
-  return {
-    hostname: hostname || `Dev-Workstation-${ip.split(".").pop() ?? ""}`.trim() || "Dev-Workstation-04",
-    mac: mac || "00:1A:2B:3C:4D:5E",
-    primaryIp: ip,
-    assignedDept: assignedDept || "Engineering Dept",
-    user: user || "j.doe",
-  }
+  return { hostname: hostname || `Host-${ip.split(".").pop() ?? ""}`, primaryIp: ip }
 }
 
 function hostProfileFromFindings(ip: string, items: Finding[], total: number): HostProfile {
   const totalRequests = total || items.length
-  // findings store only flagged (DENY) hits; without an action field we treat
-  // all returned rows as flagged. When runQuery is used this is refined.
-  const deniedFlagged = items.length
-  const deniedPct = totalRequests > 0 ? (deniedFlagged / totalRequests) * 100 : 0
-  const { level, score } = hostRiskFromDeniedPct(deniedPct)
+  // Findings store ALLOW risk rows only (ADR 0001) — every row is a risk,
+  // enforcements are 0 from this source.
+  const riskRequests = items.length
+  const enforcements = 0
+  const enforcementsPct = 0
+  const { level, score } = hostRiskFromShares(totalRequests, riskRequests)
   const identity = hostIdentityFromFindings(ip, items)
   return {
     ...identity,
@@ -1291,8 +1284,9 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
       riskScore: score,
       riskLevel: level,
       totalRequests: totalRequests || 0,
-      deniedFlagged,
-      deniedPct,
+      riskRequests,
+      enforcements,
+      enforcementsPct,
       bandwidth: synthesizeBandwidth(totalRequests),
     },
   }
@@ -1300,33 +1294,32 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
 
 function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
   const totalRequests = res.total_requests
-  const deniedFlagged = res.items.filter((d) => d.action === "DENY" || d.action === "FLAG").length
+  const allItems = res.items
+  const enforcements = allItems.filter((d) => d.action === "DENY" || d.action === "FLAG").length
+  const riskRequests = allItems.filter((d) => d.action === "ALLOW" || d.action === "").length
   // Prefer server-side totals when available; fall back to sampled window.
-  // When totalRequests is 0 (offline), fall back to sampled length so the card still renders.
-  const effectiveTotal = totalRequests || res.items.length || 0
-  const effectiveDenied = totalRequests > 0 ? deniedFlagged : res.items.length
-  const deniedPct = effectiveTotal > 0 ? (effectiveDenied / effectiveTotal) * 100 : 0
-  const { level, score } = hostRiskFromDeniedPct(deniedPct)
-  // Try to derive hostname from query docs
-  const first = res.items[0] as unknown as Record<string, unknown> | undefined
+  const effectiveTotal = totalRequests || allItems.length || 0
+  const effectiveEnforcements = totalRequests > 0 ? enforcements : allItems.length
+  const enforcementsPct = effectiveTotal > 0 ? (effectiveEnforcements / effectiveTotal) * 100 : 0
+  const { level, score } = hostRiskFromShares(effectiveTotal, riskRequests)
+  // Try to derive hostname from query docs (ADR 0001: IP + hostname only).
+  const first = allItems[0] as unknown as Record<string, unknown> | undefined
   const hostname =
     (first?.["hostname"] as string) ||
     (first?.["src_host"] as string) ||
     (first?.["client_host"] as string) ||
     `Host-${ip.split(".").pop() ?? ip.slice(-4)}`
   return {
-    hostname: (hostname as string) || `Dev-Workstation-${ip.split(".").pop() ?? ""}`.trim() || "Dev-Workstation-04",
-    mac: (first?.["mac"] as string) || (first?.["src_mac"] as string) || "00:1A:2B:3C:4D:5E",
+    hostname: (hostname as string) || `Host-${ip.split(".").pop() ?? ""}`,
     primaryIp: ip,
-    assignedDept: (first?.["assigned_dept"] as string) || (first?.["dept"] as string) || "Engineering Dept",
-    user: (first?.["assigned_user"] as string) || (first?.["user"] as string) || "j.doe",
     ip,
     risk: {
       riskScore: score,
       riskLevel: level,
       totalRequests: effectiveTotal,
-      deniedFlagged: effectiveDenied,
-      deniedPct,
+      riskRequests,
+      enforcements: effectiveEnforcements,
+      enforcementsPct,
       bandwidth: synthesizeBandwidth(effectiveTotal),
     },
   }
@@ -1345,12 +1338,20 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   if (!cleanIp) throw new Error("IP required")
   const minutes = timeRangeToMinutesLive(timeRange)
 
-  // 1) Try dedicated host endpoint (future backend task). 404/501 falls through.
+  // 1) Try dedicated host endpoint (backend GET /api/hosts/{ip}). 404/501 falls through.
   try {
-    const data = await request<Record<string, unknown>>(`/hosts/${encodeURIComponent(cleanIp)}`)
-    // Accept either { host, risk } or flat HostProfile shape
+    const data = await request<Record<string, unknown>>(
+      `/hosts/${encodeURIComponent(cleanIp)}?timeRange=${encodeURIComponent(timeRange)}`,
+    )
+    // Accept either { host, risk } or flat HostProfile shape. When the backend
+    // reports es_online false + zero traffic, fall through so the client-side
+    // live-ES / findings paths can still fill the profile.
     if (data && typeof data === "object") {
-      if ("risk" in data && "hostname" in data) {
+      const endpointOffline = (data as Record<string, unknown>).es_online === false
+      const zeroTraffic =
+        ((data as Record<string, unknown>)?.risk as Record<string, unknown> | undefined)
+          ?.totalRequests === 0
+      if ("risk" in data && "hostname" in data && !(endpointOffline && zeroTraffic)) {
         return data as unknown as HostProfile
       }
       if ("host" in data) {
@@ -1359,10 +1360,7 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
         if (r && typeof r.riskScore === "number") {
           return {
             hostname: (h.hostname as string) ?? `Host-${cleanIp.split(".").pop()}`,
-            mac: (h.mac as string) ?? "00:1A:2B:3C:4D:5E",
             primaryIp: (h.primaryIp as string) ?? (h.primary_ip as string) ?? cleanIp,
-            assignedDept: (h.assignedDept as string) ?? (h.assigned_dept as string) ?? "Engineering Dept",
-            user: (h.user as string) ?? "j.doe",
             ip: cleanIp,
             risk: r as unknown as HostRisk,
           }
@@ -1396,17 +1394,15 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   if (isWireframeIp) {
     return {
       hostname: "Dev-Workstation-04",
-      mac: "00:1A:2B:3C:4D:5E",
       primaryIp: "192.168.1.45",
-      assignedDept: "Engineering Dept",
-      user: "j.doe",
       ip: cleanIp,
       risk: {
         riskScore: 78,
         riskLevel: "HIGH",
         totalRequests: 42810,
-        deniedFlagged: 312,
-        deniedPct: 0.7,
+        riskRequests: 42118,
+        enforcements: 692,
+        enforcementsPct: 1.6,
         bandwidth: "4.2 GB",
       },
     }
@@ -1415,17 +1411,15 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   // Generic empty host
   return {
     hostname: `Host-${cleanIp.split(".").pop() ?? cleanIp.slice(-4)}`,
-    mac: "—",
     primaryIp: cleanIp,
-    assignedDept: "—",
-    user: "—",
     ip: cleanIp,
     risk: {
       riskScore: 12,
       riskLevel: "LOW",
       totalRequests: 0,
-      deniedFlagged: 0,
-      deniedPct: 0,
+      riskRequests: 0,
+      enforcements: 0,
+      enforcementsPct: 0,
       bandwidth: "—",
     },
   }
@@ -1436,6 +1430,11 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
 export interface AnalyticsSummary {
   has_data: boolean
   totalVolume: number // bytes (approximate when duration_seconds absent — see backend docstring)
+  /** ADR 0001: ALLOW pattern-matches — the requests that need attention. */
+  totalRisk: number
+  /** DENY/FLAG — the proxy already handled these (not risk). */
+  totalEnforcements: number
+  /** Back-compat alias of totalEnforcements for older consumers. */
   totalBlocked: number
   topBandwidthHost: string
   peakTrafficTime: string
@@ -1444,9 +1443,11 @@ export interface AnalyticsSummary {
   hostGroup: string
   source: string
   es_online: boolean
-  previous: { totalVolume: number; totalBlocked: number } | null
+  previous: { totalVolume: number; totalBlocked: number; totalEnforcements?: number } | null
   volumeDeltaPct: number | null
+  /** Back-compat alias of enforcementsDeltaPct. */
   blockedDeltaPct: number | null
+  enforcementsDeltaPct: number | null
 }
 
 export interface BandwidthPoint {
@@ -1499,6 +1500,21 @@ export interface TopDeniedRow {
 
 export interface AnalyticsTopDenied {
   items: TopDeniedRow[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
+/** ADR 0001 — top enforced domains (DENY/FLAG handled by the proxy). */
+export interface TopEnforcedRow {
+  domain: string
+  enforcements: number
+  primaryRule: string
+}
+
+export interface AnalyticsTopEnforced {
+  items: TopEnforcedRow[]
   range: string
   compare: string
   hostGroup: string
@@ -1574,6 +1590,20 @@ export async function getAnalyticsTopDenied(params: {
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
   return request(`/analytics/top-denied?${qs}`)
+}
+
+export async function getAnalyticsTopEnforced(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+  limit?: number
+} = {}): Promise<AnalyticsTopEnforced> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  if (params.limit) qs.set("limit", String(params.limit))
+  return request(`/analytics/top-enforced?${qs}`)
 }
 
 /* ── System & Kibana Settings (Task 11 — spec §3.5) ─────────────────── */

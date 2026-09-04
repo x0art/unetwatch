@@ -11,16 +11,21 @@ import {
   RefreshCcw,
   SearchX,
   Server,
+  ShieldAlert,
   Users,
   Zap,
   type LucideIcon,
 } from "lucide-react"
-import { useDebounce } from "../lib/utils"
+import { useDebounce, useAutoRefresh } from "../lib/utils"
+import { useFilter } from "../contexts/FilterContext"
+import { type LogRow } from "../lib/logRow"
 import {
   type QueryDoc,
-  type QueryFlow,
   type QueryResult,
   addBaseUrlToBlacklist,
+  buildFlowSankey,
+  formatBytes,
+  liveSankeyTruncationNote,
   runQuery,
 } from "../api"
 import {
@@ -30,6 +35,7 @@ import {
   EmptyState,
   ListBadge,
   PageHeader,
+  Panel,
   RankedTable,
   SearchInput,
   Select,
@@ -39,7 +45,8 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
-import { SankeyDiagram, type SankeyLink, type SankeyNode } from "./SankeyDiagram"
+import { SankeyDiagram } from "./SankeyDiagram"
+import { InspectionDrawer } from "./InspectionDrawer"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -273,23 +280,25 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     header: "",
     enableSorting: false,
     cell: (d) => (
-      <ListActionCell
-        baseUrl={d.base_url}
-        onBlacklisted={() =>
-          queryUI.setResult((prev) => {
-            if (!prev) return prev
-            const source = isIpHost(d.base_url) ? ("ip" as const) : ("url" as const)
-            return {
-              ...prev,
-              items: prev.items.map((item) =>
-                item.base_url === d.base_url
-                  ? { ...item, blacklisted: true, blacklist_source: source }
-                  : item,
-              ),
-            }
-          })
-        }
-      />
+      <span onClick={(e) => e.stopPropagation()}>
+        <ListActionCell
+          baseUrl={d.base_url}
+          onBlacklisted={() =>
+            queryUI.setResult((prev) => {
+              if (!prev) return prev
+              const source = isIpHost(d.base_url) ? ("ip" as const) : ("url" as const)
+              return {
+                ...prev,
+                items: prev.items.map((item) =>
+                  item.base_url === d.base_url
+                    ? { ...item, blacklisted: true, blacklist_source: source }
+                    : item,
+                ),
+              }
+            })
+          }
+        />
+      </span>
     ),
     width: "w-12",
   },
@@ -416,26 +425,11 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
   )
 }
 
-/* ── Flow: client IPs → destination host sankey ──────────────────────── */
-
-function toSankey(flow: QueryFlow): { nodes: SankeyNode[]; links: SankeyLink[] } {
-  const nodes: SankeyNode[] = flow.nodes.map((n) => ({
-    id: n.id,
-    name: n.label,
-    layer: n.kind === "ip" ? 0 : 1,
-  }))
-  const links: SankeyLink[] = flow.links.map((l) => ({
-    source: l.source,
-    target: l.target,
-    value: Math.max(1, l.count),
-  }))
-  return { nodes, links }
-}
-
 /* ── Page ───────────────────────────────────────────────────────────── */
 
-export function QueryPage() {
+export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs") => void } = {}) {
   const { toast } = useToast()
+  const { viewMode, setViewMode, setGlobalFilter } = useFilter()
   const [windowMinutes, setWindowMinutes] = useState("60")
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
   const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
@@ -445,6 +439,7 @@ export function QueryPage() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
 
   // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
   queryUI.setResult = setResult
@@ -459,6 +454,7 @@ export function QueryPage() {
       q,
       excludeWhitelist: whitelistMode === "exclude",
       excludeBlacklist: blacklistMode === "exclude",
+      viewMode,
     })
       .then((res) => {
         if (!cancelled) setResult(res)
@@ -475,14 +471,28 @@ export function QueryPage() {
     return () => {
       cancelled = true
     }
-  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch])
+  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => fetchQuery(), [fetchQuery])
 
+  // Auto-refresh — every 30s by default when the tab is visible; skips when
+  // hidden so background tabs don't hammer ES. Persists per-key in localStorage.
+  const { refreshSeconds: _queryRefresh } = useAutoRefresh(fetchQuery, "query", 0)
+  void _queryRefresh
+
   const handleRun = () => fetchQuery()
 
-  const flowSankey = useMemo(() => (result?.flow ? toSankey(result.flow) : null), [result])
+  // 4-column flow (Pattern → Source → Domain → Destination) built from this
+  // page's own result items — no second ES round-trip.
+  const flowSankey = useMemo(
+    () => (result && result.items.length > 0 ? buildFlowSankey(result.items) : null),
+    [result],
+  )
+  const flowTruncationNote = useMemo(() => {
+    if (!result) return null
+    return liveSankeyTruncationNote(String(result.window_minutes))
+  }, [result])
 
   const handleBulkBlacklist = async (ids: Set<string | number>) => {
     const rows = (result?.items ?? []).filter((d) => ids.has(queryRowId(d)))
@@ -542,6 +552,29 @@ export function QueryPage() {
 
   const esOffline = result !== null && !result.es_online
 
+  // ADR 0001 metrics: enforcements (DENY — proxy handled) + real bandwidth,
+  // aggregated from the fetched items (was Live Monitor MetricCards).
+  const deniedCount = useMemo(
+    () => (result?.items ?? []).filter((d) => d.action === "DENY").length,
+    [result],
+  )
+  const bandwidthValue = useMemo(() => {
+    let total = 0
+    for (const it of result?.items ?? []) {
+      total += Number(it.bytes_downloaded) || 0
+      total += Number(it.bytes_uploaded) || 0
+    }
+    return total > 0 ? formatBytes(total) : "—"
+  }, [result])
+
+  // Row click opens the InspectionDrawer for deep row detail (was Live Monitor).
+  const handleRowClick = useCallback(
+    (row: QueryDoc) => {
+      setDrawerRow(row as unknown as LogRow)
+    },
+    [],
+  )
+
   // Single pass over the filtered rows for the footer counts (was three
   // separate .filter() sweeps on every render).
   const coverageCounts = useMemo(() => {
@@ -591,7 +624,7 @@ export function QueryPage() {
           className="w-40"
           aria-label="Filter by action"
         />
-        <span className="text-xs text-muted-foreground">Window</span>
+        <span className="text-xs text-muted-foreground">Time window</span>
         <Select
           value={windowMinutes}
           onChange={setWindowMinutes}
@@ -599,6 +632,33 @@ export function QueryPage() {
           className="w-44"
           aria-label="Query time window"
         />
+        {/* Full stream / Flagged only — shared workspace view mode (was Live Monitor). */}
+        <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="View mode">
+          <button
+            type="button"
+            onClick={() => setViewMode("all")}
+            aria-pressed={viewMode === "all"}
+            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              viewMode === "all"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Full stream
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("flagged")}
+            aria-pressed={viewMode === "flagged"}
+            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+              viewMode === "flagged"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Flagged only
+          </button>
+        </div>
         <Button onClick={handleRun} disabled={loading}>
           <Play className="h-4 w-4" />
           Run
@@ -610,7 +670,7 @@ export function QueryPage() {
       </PageHeader>
 
       {/* Summary chips */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatCard
           icon={Zap}
           label="Total requests"
@@ -626,6 +686,13 @@ export function QueryPage() {
           hint="Distinct clients in window"
         />
         <StatCard
+          icon={ShieldAlert}
+          label="Enforcements (handled)"
+          value={result ? deniedCount.toLocaleString() : "—"}
+          tone="success"
+          hint="DENY — proxy already blocked"
+        />
+        <StatCard
           icon={Globe}
           label="Distinct URLs"
           value={result ? result.distinct_urls.toLocaleString() : "—"}
@@ -634,6 +701,13 @@ export function QueryPage() {
         />
         <StatCard
           icon={Database}
+          label="Bandwidth"
+          value={result ? bandwidthValue : "—"}
+          tone="default"
+          hint="Download + upload, fetched window"
+        />
+        <StatCard
+          icon={Server}
           label="ES status"
           value={result ? (result.es_online ? "Online" : "Offline") : "—"}
           tone={result ? (result.es_online ? "success" : "danger") : "default"}
@@ -684,36 +758,34 @@ export function QueryPage() {
             </QuerySection>
           </div>
 
-          {/* Flow visualization — cv-auto skips the sankey panel's paint
-              until it's scrolled into view. */}
-          <div className="cv-auto overflow-hidden border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b-[2.5px] border-[#0A0A0A] bg-muted/40 px-4 py-3 dark:border-[#F6F2E8]">
-              <div>
-                <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Access flow</h3>
-                <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                  Client IPs clustered by destination host
-                </p>
-              </div>
-              {flowSankey && flowSankey.links.length > 0 && (
-                <span className="border-[2px] border-[#0A0A0A] bg-secondary px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
-                  {flowSankey.links.length.toLocaleString()} flow{flowSankey.links.length === 1 ? "" : "s"}
-                </span>
-              )}
-            </div>
+          {/* Flow visualization — 4-column Sankey (Pattern → Source → Domain →
+              Destination). cv-auto skips the panel's paint until scrolled into view. */}
+          <Panel
+            title="Traffic flow"
+            icon={Network}
+            description="Pattern → Source → Domain → Destination · click a node or ribbon to filter the table"
+            action={
+              <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
+                {loading ? "LOADING…" : "REFRESH"}
+              </Button>
+            }
+          >
             {esOffline ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 Flow unavailable — Elasticsearch unreachable.
               </p>
             ) : flowSankey && flowSankey.links.length > 0 ? (
-              <div className="p-4 sm:p-6">
+              <div className="cv-auto space-y-3">
+                {flowTruncationNote && (
+                  <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 font-mono text-[11px] text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                    {flowTruncationNote}
+                  </p>
+                )}
                 <SankeyDiagram
                   nodes={flowSankey.nodes}
                   links={flowSankey.links}
-                  layerColors={{
-                    0: "var(--color-info)",
-                    1: "var(--color-danger)",
-                  }}
-                  ariaLabel="Client IP to destination host flow"
+                  onNodeClick={(q) => setGlobalFilter(q)}
+                  ariaLabel="Traffic flow — Pattern to Source to Domain to Destination"
                 />
               </div>
             ) : (
@@ -721,7 +793,7 @@ export function QueryPage() {
                 No traffic in this window to visualize
               </p>
             )}
-          </div>
+          </Panel>
 
           {/* Documents table */}
           <div>
@@ -805,10 +877,24 @@ export function QueryPage() {
               pageSize={pageSize}
               onPageChange={setPage}
               onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
+              onRowClick={handleRowClick}
               ariaLabel="Query results"
             />
           </div>
         </>
+      )}
+
+      {/* Deep row inspection (was Live Monitor) — click a row to open. */}
+      {drawerRow && (
+        <InspectionDrawer
+          row={drawerRow}
+          onClose={() => setDrawerRow(null)}
+          onNavigate={(v) => {
+            window.localStorage.setItem("unetwatch_view", v)
+            onNavigate?.(v)
+            setDrawerRow(null)
+          }}
+        />
       )}
     </div>
   )

@@ -335,7 +335,7 @@ export function DashboardPage({
         <div className="grid grid-cols-1 gap-3 lg:col-span-2">
           <button
             type="button"
-            onClick={() => onNavigate("graph")}
+            onClick={() => onNavigate("query")}
             className="group flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-card p-4 text-left brutal-shadow-sm brutal-press dark:border-[#F6F2E8]"
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-secondary text-[#0A0A0A]">

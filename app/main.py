@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
 from app.routes import auth as auth_routes
-from app.routes import analytics, blacklist, findings, logs, monitor, patterns, query, redirects
+from app.routes import analytics, blacklist, findings, hosts, logs, monitor, patterns, query, redirects
 from app.services.feeds import sync_regenerate
 
 scheduler = AsyncIOScheduler()
@@ -157,6 +157,7 @@ app.include_router(blacklist.router)
 app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
 app.include_router(analytics.router, dependencies=[Depends(verify_admin)])
+app.include_router(hosts.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 

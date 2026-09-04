@@ -469,10 +469,16 @@ async def delete_finding(finding_id: int, db=Depends(get_db_conn)):
 async def list_findings(
     db=Depends(get_db_conn),
     search: str | None = Query(None, max_length=200),
+    minutes: int | None = Query(None, ge=0, le=43200),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """List persisted findings, newest first, with total count for pagination."""
+    """List persisted findings, newest first, with total count for pagination.
+
+    ``minutes`` narrows to the last N minutes (SQLite UTC window, same trick as
+    the analytics endpoints) so the Analytics raw-data table can honor the
+    selected range.
+    """
     where = []
     params: list = []
     if search:
@@ -480,6 +486,9 @@ async def list_findings(
             "(client_ip LIKE ? OR server_ip LIKE ? OR url LIKE ? OR base_url LIKE ?)"
         )
         params.extend([f"%{search}%"] * 4)
+    if minutes:
+        where.append("log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
+        params.append(f"-{minutes} minutes")
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
 
