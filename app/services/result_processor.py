@@ -93,18 +93,6 @@ def apply_filters(
     "matched_patterns",
     "user_agent",
     "duration_seconds",
-    # Rich flat proxy fields — default-filled so a doc missing one never
-    # crashes store_findings/build_items (df[col] on a missing column raises).
-    "domain",
-    "category",
-    "http_method",
-    "http_status_code",
-    "country_code",
-    "bytes_downloaded",
-    "bytes_uploaded",
-    "rule_info",
-    "rule_name",
-    "user_id",
 ):
         if col not in df.columns:
             df[col] = ""
@@ -128,41 +116,24 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
     overlapping poll windows never create duplicate rows. Returns the number of
     rows actually inserted.
 
-    ``action``/``duration_seconds`` and the rich flat proxy fields (domain,
-    category, http_method, http_status_code, country_code, bytes_*, rule_*,
-    user_id) are always written — the flat logstash-proxy index carries them.
-    ``user_agent`` remains mode-gated (UC-A/UC-B only).
+    Schema S2/S3 columns (user_agent, action, duration_seconds) are only written
+    when mode_has_extended_findings() returns True (UC-A/UC-B). In COLLAPSED mode
+    these columns don't exist in the DB and are left ES-only.
     """
     rows = []
     now = datetime.now(UTC).isoformat()
-    # Guard every column we read — a DataFrame built directly from ES hits
-    # (bypassing apply_filters) may be missing server_ip or the rich flat
-    # proxy fields, and df[col].itertuples raises KeyError on a missing one.
-    # Numeric columns default to 0; text columns to "" (apply_filters fills
-    # duration_seconds as "", so coercion below must tolerate both).
-    for _col in (
-        "client_ip", "server_ip", "url", "base_url", "@timestamp",
-        "domain", "category", "http_method", "http_status_code",
-        "country_code", "bytes_downloaded", "bytes_uploaded",
-        "rule_info", "rule_name", "user_id",
-        "action", "duration_seconds", "user_agent",
-    ):
-        if _col not in df.columns:
-            df[_col] = 0 if _col == "duration_seconds" else ""
+    # Guard the one column apply_filters doesn't guarantee (server_ip may be
+    # absent from a doc's _source), then iterate as tuples — much cheaper
+    # than df.iterrows() for large batches.
+    if "server_ip" not in df.columns:
+        df["server_ip"] = ""
     matched_json = json.dumps(matched_patterns or [])
 
     # Check if extended findings columns exist in DB (UC-A/UC-B mode)
     extended = mode_has_extended_findings()
 
-    # Base columns (always present) - DataFrame column names. The rich flat
-    # proxy fields ride along so Query/Findings/Host/Analytics can surface
-    # them (migration in database.py adds the columns idempotently).
-    base_cols = [
-        "client_ip", "server_ip", "url", "base_url", "@timestamp",
-        "domain", "category", "http_method", "http_status_code",
-        "country_code", "bytes_downloaded", "bytes_uploaded",
-        "rule_info", "rule_name", "user_id",
-    ]
+    # Base columns (always present) - DataFrame column names
+    base_cols = ["client_ip", "server_ip", "url", "base_url", "@timestamp"]
     # Database column names (log_timestamp instead of @timestamp, plus matched_patterns)
     db_base_cols = [
         "client_ip",
@@ -171,19 +142,9 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
         "base_url",
         "log_timestamp",
         "matched_patterns",
-    ] + [
-        "domain", "category", "http_method", "http_status_code",
-        "country_code", "bytes_downloaded", "bytes_uploaded",
-        "rule_info", "rule_name", "user_id",
-    ] + [
-        # action + duration_seconds are persisted unconditionally now — the
-        # flat logstash-proxy index carries both, and COLLAPSED mode previously
-        # dropped them (starving analytics). database.py ALTERs the columns in.
-        "action",
-        "duration_seconds",
     ]
-    # Extended column (only in UC-A/UC-B) — user_agent remains mode-gated.
-    ext_cols = ["user_agent"] if extended else []
+    # Extended columns (only in UC-A/UC-B)
+    ext_cols = ["user_agent", "action", "duration_seconds"] if extended else []
 
     all_cols = db_base_cols + ext_cols
     placeholders = ", ".join(["?"] * len(all_cols))
@@ -199,20 +160,14 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
             normalize_timestamp(r[4], now),
             matched_json,
         ]
-        # Rich flat proxy fields (positions 5..14 of base_cols)
-        for j in range(5, len(base_cols)):
-            vals.append(str(r[j] if r[j] is not None else ""))
-        # action + duration_seconds — always persisted from the flat index.
-        vals.append(str(df.iloc[i].get("action", "")) if "action" in df.columns else "")
-        dur = df.iloc[i].get("duration_seconds") if "duration_seconds" in df.columns else None
-        try:
-            dur_int = int(dur) if dur not in (None, "") else 0
-        except (TypeError, ValueError):
-            dur_int = 0
-        vals.append(dur_int)
         if extended:
             # user_agent defaults to ""
             vals.append(str(df.iloc[i].get("user_agent", "")) if "user_agent" in df.columns else "")
+            # action defaults to ""
+            vals.append(str(df.iloc[i].get("action", "")) if "action" in df.columns else "")
+            # duration_seconds defaults to 0
+            dur = df.iloc[i].get("duration_seconds") if "duration_seconds" in df.columns else None
+            vals.append(int(dur) if dur is not None else 0)
         rows.append(tuple(vals))
 
     if not rows:
@@ -332,24 +287,6 @@ def build_items(
             blacklisted = True
             blacklist_source = "ip"
 
-        # Rich flat proxy fields ride along so the Query/Live Monitor tables
-        # can surface category, method, status, country, bytes and rule.
-        # bytes_* stay numeric so the frontend can sum them for real bandwidth.
-        rich: dict = {
-            key: (str(row.get(key) or "") if row.get(key) is not None else "")
-            for key in (
-                "domain",
-                "category",
-                "http_method",
-                "http_status_code",
-                "country_code",
-                "rule_info",
-                "rule_name",
-                "user_id",
-            )
-        }
-        rich["bytes_downloaded"] = safe_number(row.get("bytes_downloaded"))
-        rich["bytes_uploaded"] = safe_number(row.get("bytes_uploaded"))
         items.append(
             {
                 "timestamp": normalize_timestamp(row.get("@timestamp"), now),
@@ -363,7 +300,6 @@ def build_items(
                 "whitelisted": whitelisted,
                 "blacklisted": blacklisted,
                 "blacklist_source": blacklist_source,
-                **rich,
             }
         )
     return items

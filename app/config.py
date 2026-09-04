@@ -43,14 +43,6 @@ class Settings(BaseSettings):
     admin_pass: str = "changeme"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
-    # Kibana connection bootstrap defaults (spec §3.5). These are the
-    # .env-overridable fallbacks; the admin UI edits the live values via
-    # GET/PUT /api/settings/kibana (persisted in the `settings` table).
-    kibana_host_url: str = "https://kibana-internal.corp.net:5601"
-    kibana_index_pattern: str = "logstash-network-traffic-*"
-    kibana_auth_type: str = "apiKey"
-    kibana_api_key: str = ""
-
     # Risk scoring weights (env: RISK_WEIGHT_<CLASS> or risk_weight_<class> in .env)
     # Default 1.0 per class if not specified.
     risk_weight_malware: float | None = None

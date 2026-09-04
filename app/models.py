@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field
 class UrlPatternBase(BaseModel):
     pattern: str = Field(..., min_length=1, max_length=500)
     pattern_type: str = Field(default="block", pattern="^(block|whitelist)$")
-    name: str | None = Field(None, max_length=200)
-    category: str | None = Field(None, max_length=100)
-    notes: str | None = Field(None, max_length=2000)
 
 
 class UrlPatternCreate(UrlPatternBase):
@@ -18,9 +15,6 @@ class UrlPatternCreate(UrlPatternBase):
 class UrlPatternUpdate(BaseModel):
     pattern: str | None = Field(None, min_length=1, max_length=500)
     pattern_type: str | None = Field(None, pattern="^(block|whitelist)$")
-    name: str | None = Field(None, max_length=200)
-    category: str | None = Field(None, max_length=100)
-    notes: str | None = Field(None, max_length=2000)
 
 
 class UrlPatternResponse(UrlPatternBase):
@@ -54,19 +48,6 @@ class UrlWhitelistResponse(UrlWhitelistBase):
 class PatternBulkImport(BaseModel):
     patterns: list[str] = Field(..., min_length=1, max_length=1000)
     pattern_type: str = Field(default="block", pattern="^(block|whitelist)$")
-
-
-class PatternSimulateRequest(BaseModel):
-    """Body for the Live Kibana pattern simulation (spec §3.3).
-
-    ``pattern`` may contain wildcards (``*``/``?`` — matched via
-    ``fnmatch``) or full regex syntax (fallback ``re.search``).
-    ``timeRange`` is a UI label such as ``"24h"`` / ``"7d"``; it is
-    translated to minutes server-side (defaults to 1440 = 24h).
-    """
-
-    pattern: str = Field(..., min_length=1, max_length=500)
-    timeRange: str = Field(default="24h", max_length=32)  # noqa: N815 — interface uses camelCase
 
 
 class BlacklistEntryCreate(BaseModel):
@@ -121,31 +102,3 @@ class RedirectCheckRequest(BaseModel):
 
 class LogBulkDelete(BaseModel):
     ids: list[int] = Field(..., min_length=1, max_length=500)
-
-
-# ── Data architecture schemas (spec §5.2 — Kibana pipeline, Task 12) ───────
-
-
-class NormalizedAppState(BaseModel):
-    """Canonical app row produced by ``Normalizer.to_app_state`` (spec §5.2).
-
-    ``id`` is the ES hit id; ``timestamp`` is ``@timestamp`` (or the mapped
-    timestamp field when a custom ``FieldMap`` is configured). ``action`` is
-    always uppercased (ALLOW/DENY/FLAG) to match the UI badge contract.
-    ``matched_pattern_*`` are the ``rule`` document fields when a Kibana rule
-    fired for this event; ``bytes`` is ``source.bytes`` when the log records
-    it.
-    """
-
-    id: str | None = None
-    timestamp: str | None = None
-    src_ip: str | None = None
-    src_host: str | None = None
-    dest_ip: str | None = None
-    domain: str | None = None
-    url: str | None = None
-    action: str = ""
-    duration_ms: int | float | None = None  # noqa: UP045 — keep compatible with ES duration mix
-    bytes: int | None = None
-    matched_pattern_id: str | None = None
-    matched_pattern_name: str | None = None

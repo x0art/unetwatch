@@ -14,18 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings, verify_admin
 from app.database import init_db, seed_defaults
-from app.routes import (
-    analytics,
-    blacklist,
-    findings,
-    logs,
-    monitor,
-    patterns,
-    query,
-    redirects,
-    settings,
-)
 from app.routes import auth as auth_routes
+from app.routes import analytics, blacklist, findings, logs, monitor, patterns, query, redirects
 from app.services.feeds import sync_regenerate
 
 scheduler = AsyncIOScheduler()
@@ -161,14 +151,13 @@ async def security_headers(request: Request, call_next):
 app.include_router(patterns.router, dependencies=[Depends(verify_admin)])
 app.include_router(monitor.router, dependencies=[Depends(verify_admin)])
 app.include_router(findings.router, dependencies=[Depends(verify_admin)])
-app.include_router(analytics.router, dependencies=[Depends(verify_admin)])
 # Blacklist router is mounted without auth: the .txt feed routes are public
 # for external integrations; write/list routes opt back in per-route.
 app.include_router(blacklist.router)
 app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
+app.include_router(analytics.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
-app.include_router(settings.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 
 from app.routes import readout as readout_routes

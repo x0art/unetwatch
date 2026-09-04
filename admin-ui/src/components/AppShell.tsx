@@ -1,15 +1,6 @@
 import { useState, type ReactNode, useRef } from "react"
 import { MobileSidebar, MobileMenuButton, Sidebar, useTheme, type View } from "./Sidebar"
-import { useFilter, type TimeRange } from "../contexts/FilterContext"
-import { Input, Select } from "./ui"
 import { cn } from "../lib/utils"
-
-const TIME_RANGE_OPTIONS = [
-  { value: "1h", label: "1h" },
-  { value: "24h", label: "24h" },
-  { value: "7d", label: "7d" },
-  { value: "30d", label: "30d" },
-]
 
 export function AppShell({
   currentView,
@@ -34,7 +25,6 @@ export function AppShell({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { theme, toggle } = useTheme()
-  const { globalFilter, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const mainRef = useRef<HTMLElement>(null)
 
   const handleNavigate = (view: View) => {
@@ -83,22 +73,6 @@ export function AppShell({
             {description && (
               <p className="truncate font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{description}</p>
             )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Global Search: src_ip, domain, url..."
-              className="w-64"
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              aria-label="Global Search"
-            />
-            <Select
-              value={timeRange}
-              onChange={(v) => setTimeRange(v as TimeRange)}
-              options={TIME_RANGE_OPTIONS}
-              className="w-24"
-              aria-label="Time range"
-            />
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
         </header>

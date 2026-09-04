@@ -27,15 +27,6 @@ async def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Migration: add Rule Definition metadata (Task 9 — spec §3.3) to existing
-    # databases that predate the columns. `name` is the rule's display name,
-    # `category` the threat-class tag, `notes` free-text context. All optional
-    # (nullable) so pre-existing rows and bare bulk imports keep working.
-    cursor = await db.execute("PRAGMA table_info(url_patterns)")
-    columns = {row[1] for row in await cursor.fetchall()}
-    for col in ("name", "category", "notes"):
-        if col not in columns:
-            await db.execute(f"ALTER TABLE url_patterns ADD COLUMN {col} TEXT")
     await db.execute("""
         CREATE TABLE IF NOT EXISTS url_whitelist (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,36 +74,19 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN user_agent TEXT NOT NULL DEFAULT ''"
         )
 
-    # Migration: action + duration_seconds always persisted (flat logstash-proxy
-    # index carries both; COLLAPSED mode previously dropped them, starving
-    # analytics). Added unconditionally — a missing column is ALTERed in.
-    if "action" not in columns:
-        await db.execute(
-            "ALTER TABLE findings ADD COLUMN action TEXT NOT NULL DEFAULT ''"
-        )
-    if "duration_seconds" not in columns:
-        await db.execute(
-            "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
-        )
+    # Migration: add action and duration_seconds (Schema S3 — OPTIONAL, UC-A/UC-B only).
+    # These columns round out the retained view only if F1 wants them (UC-A/UC-B mode).
+    # Anti-scope: leave them ES-only if not needed (COLLAPSED mode).
+    from app.services.es_fields import mode_has_extended_findings
 
-    # Migration: rich flat proxy fields — carry the full logstash-proxy schema
-    # into the findings table so Query/Findings/Host/Analytics can surface them.
-    rich_findings_columns = [
-        "domain",
-        "category",
-        "http_method",
-        "http_status_code",
-        "country_code",
-        "bytes_downloaded",
-        "bytes_uploaded",
-        "rule_info",
-        "rule_name",
-        "user_id",
-    ]
-    for col in rich_findings_columns:
-        if col not in columns:
+    if mode_has_extended_findings():
+        if "action" not in columns:
             await db.execute(
-                f"ALTER TABLE findings ADD COLUMN {col} TEXT NOT NULL DEFAULT ''"
+                "ALTER TABLE findings ADD COLUMN action TEXT NOT NULL DEFAULT ''"
+            )
+        if "duration_seconds" not in columns:
+            await db.execute(
+                "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
             )
 
     # Indexes for the findings graph + list queries (url/base_url lookups,
@@ -261,15 +235,6 @@ async def init_db():
         "'10.0.0.4', '10.0.0.5', '10.0.0.6', '10.0.0.7', '10.0.0.8'"
         ")"
     )
-
-    # Generic key/value settings store for System Settings (kibana,
-    # field-map, alerts). Task 11+ — single TEXT JSON column.
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL
-        )
-    """)
 
     await db.commit()
     await db.close()

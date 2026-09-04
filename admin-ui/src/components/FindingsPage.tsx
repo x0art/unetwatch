@@ -15,7 +15,6 @@ import {
   bulkDeleteFindings,
   clearFindings,
   deleteFinding,
-  formatBytes,
   getFindings,
   getBlacklistSet,
   listPatterns,
@@ -166,85 +165,6 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
       <span className="whitespace-nowrap text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
     ),
     defaultSortDir: "desc",
-  },
-  /* ── Rich flat proxy fields (persisted by store_findings) ── */
-  {
-    id: "category",
-    header: "Category",
-    accessor: (f) => f.category,
-    cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.category || "—"}</span>,
-    width: "w-24",
-  },
-  {
-    id: "method",
-    header: "Method",
-    accessor: (f) => f.http_method,
-    cell: (f) => <span className="font-mono text-xs">{f.http_method || "—"}</span>,
-    width: "w-20",
-  },
-  {
-    id: "status",
-    header: "Status",
-    accessor: (f) => f.http_status_code,
-    cell: (f) => <span className="font-mono text-xs tabular-nums">{f.http_status_code ?? "—"}</span>,
-    width: "w-20",
-    align: "right",
-  },
-  {
-    id: "country",
-    header: "Country",
-    accessor: (f) => f.country_code,
-    cell: (f) => <span className="font-mono text-xs">{f.country_code || "—"}</span>,
-    width: "w-20",
-  },
-  {
-    id: "bytes",
-    header: "Bytes",
-    accessor: (f) => (Number(f.bytes_downloaded) || 0) + (Number(f.bytes_uploaded) || 0),
-    cell: (f) => {
-      const dn = Number(f.bytes_downloaded) || 0
-      const up = Number(f.bytes_uploaded) || 0
-      if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
-      return (
-        <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
-          {formatBytes(dn + up)}
-        </span>
-      )
-    },
-    align: "right",
-    width: "w-24",
-  },
-  {
-    id: "rule",
-    header: "Rule",
-    accessor: (f) => f.rule_name ?? f.rule_info ?? "—",
-    cell: (f) => {
-      const rule = f.rule_name && f.rule_name !== "-" ? f.rule_name : f.rule_info
-      return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
-    },
-    width: "w-28",
-  },
-  {
-    id: "action",
-    header: "Action",
-    accessor: (f) => f.action,
-    cell: (f) => {
-      const a = (f.action || "").toUpperCase()
-      return <span className="font-mono text-xs">{a || "—"}</span>
-    },
-    width: "w-20",
-  },
-  {
-    id: "duration",
-    header: "Duration",
-    accessor: (f) => f.duration_seconds,
-    cell: (f) => {
-      const s = Number(f.duration_seconds)
-      if (!Number.isFinite(s) || s <= 0) return <span className="text-xs text-muted-foreground">—</span>
-      return <span className="font-mono text-xs tabular-nums">{Math.round(s * 1000)}ms</span>
-    },
-    align: "right",
-    width: "w-20",
   },
   {
     id: "actions",

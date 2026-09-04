@@ -577,15 +577,6 @@ async def fetch_logs(minutes: int = 10):
         block_patterns = await get_block_patterns(db)
         whitelist_patterns = await get_whitelist_patterns(db)
 
-        # System Settings Alert Rules (DB) override env webhooks when set.
-        from app.routes.settings import load_alert_settings
-
-        alerts = await load_alert_settings(db)
-        webhook_url = alerts.webhook_url or None
-        msteams_url = (
-            alerts.webhook_url if alerts.webhook_type == "msteams" else None
-        )
-
         if not block_patterns:
             log["error"] = "No block patterns configured."
             print(
@@ -684,13 +675,11 @@ async def fetch_logs(minutes: int = 10):
             pass
 
         # ── n8n webhook delivery ─────────────────────────────────────
-        await deliver_n8n(log, payload, total_sum, webhook_url=webhook_url)
+        await deliver_n8n(log, payload, total_sum)
 
         # ── MS Teams Workflows delivery ──────────────────────────────
         matched_pats = log.get("matched_patterns", block_patterns)
-        await deliver_msteams(
-            log, result, matched_pats, block_patterns, webhook_url=msteams_url
-        )
+        await deliver_msteams(log, result, matched_pats, block_patterns)
 
     except Exception as e:
         log["error"] = str(e)

@@ -1,9 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
   type Pattern,
-  type PatternStats,
-  getPatternStats,
-  patternAction,
   listPatterns,
   deletePattern,
   updatePattern,
@@ -23,32 +20,16 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
-import { actionVariant } from "../lib/logRow"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
-import { PatternSummaryCards } from "./PatternSummaryCards"
-import { PatternSimulationDrawer } from "./PatternSimulationDrawer"
 import {
   Upload,
   Pencil,
   Trash2,
   Loader2,
   ListFilter,
-  FlaskConical,
 } from "lucide-react"
 
 const DEFAULT_PAGE_SIZE = 50
-
-/** A pattern row enriched with the Pattern Manager display fields (spec §3.3).
- *  The backend registry exposes only id/pattern/pattern_type/timestamps, so
- *  CATEGORY, ACTION and STATUS are derived client-side from pattern_type. */
-interface PatternRow extends Pattern {
-  category: string
-  action: "ALLOW" | "DENY" | "FLAG"
-  /** Per-pattern hits in the 24h window — not yet exposed by the backend, so
-   *  always "—" until Task 9/10 lands per-pattern aggregation. */
-  matches24h: number | null
-  status: "active" | "draft"
-}
 
 /* Module-level handles to component state, synced each render, so
  * PATTERNS_COLUMNS stays referentially stable at module scope while its
@@ -64,11 +45,11 @@ const PATTERNS_UI: {
 }
 
 /** Stable row identity for the patterns table. */
-const PATTERNS_ROW_ID = (p: PatternRow) => p.id
+const PATTERNS_ROW_ID = (p: Pattern) => p.id
 
 /* Module-scope columns for the patterns table — referentially stable so
  * DataTable never re-sorts/re-renders when PatternTable re-renders. */
-const PATTERNS_COLUMNS: DataTableColumn<PatternRow>[] = [
+const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
     id: "id",
     header: "ID",
@@ -78,7 +59,7 @@ const PATTERNS_COLUMNS: DataTableColumn<PatternRow>[] = [
   },
   {
     id: "pattern",
-    header: "Pattern Regex/Wildcard",
+    header: "Pattern",
     accessor: (p) => p.pattern,
     defaultSortDir: "asc",
     cell: (p) => (
@@ -88,44 +69,13 @@ const PATTERNS_COLUMNS: DataTableColumn<PatternRow>[] = [
     ),
   },
   {
-    id: "category",
-    header: "Category",
-    accessor: (p) => p.category,
+    id: "pattern_type",
+    header: "Type",
+    accessor: (p) => p.pattern_type,
     defaultSortDir: "asc",
     cell: (p) => (
-      <Badge variant="secondary">{p.category}</Badge>
-    ),
-    width: "w-28",
-  },
-  {
-    id: "action",
-    header: "Action",
-    accessor: (p) => p.action,
-    defaultSortDir: "asc",
-    cell: (p) => (
-      <Badge variant={actionVariant(p.action)}>{p.action}</Badge>
-    ),
-    width: "w-24",
-  },
-  {
-    id: "matches_24h",
-    header: "Matches (24h)",
-    accessor: (p) => p.matches24h ?? 0,
-    cell: (p) => (
-      <span className="font-mono text-xs tabular-nums text-muted-foreground">
-        {p.matches24h === null ? "—" : p.matches24h.toLocaleString()}
-      </span>
-    ),
-    width: "w-24",
-  },
-  {
-    id: "status",
-    header: "Status",
-    accessor: (p) => p.status,
-    defaultSortDir: "asc",
-    cell: (p) => (
-      <Badge variant={p.status === "active" ? "success" : "outline"} className={p.status === "active" ? "" : "text-muted-foreground"}>
-        {p.status === "active" ? "[Active]" : "Draft"}
+      <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
+        {p.pattern_type}
       </Badge>
     ),
     width: "w-24",
@@ -173,21 +123,12 @@ const PATTERNS_COLUMNS: DataTableColumn<PatternRow>[] = [
 ]
 
 export function PatternTable() {
-  const [patterns, setPatterns] = useState<PatternRow[]>([])
+  const [patterns, setPatterns] = useState<Pattern[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const debouncedSearch = useDebounce(search, 300)
   const [filterType, setFilterType] = useState("all")
-  const [filterCategory, setFilterCategory] = useState("all")
-  const [filterAction, setFilterAction] = useState("all")
-  const [filterActive, setFilterActive] = useState("all")
-  const [stats, setStats] = useState<PatternStats>({
-    totalActive: 0,
-    flagged24h: 0,
-    highRisk: 0,
-    pendingDrafts: 0,
-  })
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
@@ -203,44 +144,6 @@ export function PatternTable() {
 
   // ── Create dialog (shared AddPatternDialog) ──
   const [createOpen, setCreateOpen] = useState(false)
-
-  // ── Live Kibana simulation drawer (Task 9 — spec §3.3) ──
-  // Pattern draft handed off from InspectionDrawer (Task 13 click-to-filter):
-  // read ?pattern= (or the stored draft) on mount and auto-open the drawer
-  // pre-filled so Rule Generation continues the spec §7 workflow seamlessly.
-  const [simulateOpen, setSimulateOpen] = useState(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      if (params.has("pattern")) return true
-      return !!window.localStorage.getItem("unetwatch_pattern_draft")
-    } catch {
-      return false
-    }
-  })
-  const [initialPattern, setInitialPattern] = useState<string | undefined>(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      const p = params.get("pattern")
-      if (p) return p
-      return window.localStorage.getItem("unetwatch_pattern_draft") ?? undefined
-    } catch {
-      return undefined
-    }
-  })
-
-  /* Consume the one-shot ?pattern= draft after mount (not in the useState
-   * initializer — StrictMode double-invokes initializers, and history writes
-   * are a side effect that does not belong there). */
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search)
-      if (!params.has("pattern")) return
-      params.delete("pattern")
-      window.history.replaceState(null, "", `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`)
-    } catch {
-      /* ignore */
-    }
-  }, [])
 
   // ── Bulk import dialog ──
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -261,13 +164,7 @@ export function PatternTable() {
     .map((l) => l.trim())
     .filter(Boolean).length
 
-  /* ── Data fetching ────────────────────────────────────────────────
-   * Server-side: pattern_type (block/whitelist) + search + sort.
-   * Client-side (documented in Task 8 report): the Category/Action/Active
-   * filters operate on derived fields the backend does not expose, so they
-   * apply over the fetched registry page below. The table stays server-
-   * paginated by the base pattern_type/search; rows hidden by a derived
-   * filter are simply not rendered. */
+  /* ── Data fetching ──────────────────────────────────────────────── */
   const fetchPatterns = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -280,56 +177,13 @@ export function PatternTable() {
         sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
         sort_order: sortDir,
       })
-      const rows: PatternRow[] = data.map((p) => {
-        const action = patternAction(p)
-        return {
-          ...p,
-          category: p.pattern_type === "block" ? "Block" : "Whitelist",
-          action,
-          matches24h: null,
-          status: p.pattern_type === "block" ? "active" : "draft",
-        }
-      })
-      setPatterns(rows)
+      setPatterns(data)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
   }, [debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
-
-  /* ── Pattern Manager summary cards (spec §3.3) ──────────────────── */
-  const fetchStats = useCallback(async () => {
-    try {
-      setStats(await getPatternStats())
-    } catch {
-      /* leave the last known values in place */
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchStats()
-  }, [fetchStats])
-
-  /* Mutations change the registry rows AND the summary-card aggregates, so
-   * every successful create/edit/delete/import refreshes both in parallel
-   * (the cards are documented as live in spec §3.3). */
-  const refreshPatternsAndStats = () => {
-    fetchPatterns()
-    fetchStats()
-  }
-
-  /* Category/Action/Active filters are client-side (derived fields). When one
-   * is active the fetched page is smaller than pageSize, so drop to page 0 to
-   * avoid showing an empty page while matching rows exist on earlier pages. */
-  useEffect(() => {
-    if (
-      (filterCategory !== "all" || filterAction !== "all" || filterActive !== "all") &&
-      page > 0
-    ) {
-      setPage(0)
-    }
-  }, [filterCategory, filterAction, filterActive, page])
 
   useEffect(() => {
     fetchPatterns()
@@ -360,7 +214,7 @@ export function PatternTable() {
       await deletePattern(deleteTarget)
       toast({ title: "Pattern deleted", variant: "success" })
       setDeleteTarget(null)
-      refreshPatternsAndStats()
+      fetchPatterns()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -377,10 +231,8 @@ export function PatternTable() {
     try {
       await Promise.all(idList.map((id) => deletePattern(id)))
       toast({ title: `Deleted ${idList.length} pattern${idList.length === 1 ? "" : "s"}`, variant: "success" })
-      if (idList.length >= patterns.length && page > 0) {
-        setPage(page - 1)
-        fetchStats()
-      } else refreshPatternsAndStats()
+      if (idList.length >= patterns.length && page > 0) setPage(page - 1)
+      else fetchPatterns()
     } catch (e) {
       toast({ title: "Bulk delete failed", description: (e as Error).message, variant: "error" })
     } finally {
@@ -406,7 +258,7 @@ export function PatternTable() {
       })
       toast({ title: "Pattern updated", variant: "success" })
       setEditOpen(false)
-      refreshPatternsAndStats()
+      fetchPatterns()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -427,7 +279,7 @@ export function PatternTable() {
       toast({ title: `Imported ${result.length} patterns`, variant: "success" })
       setBulkOpen(false)
       setBulkValue("")
-      refreshPatternsAndStats()
+      fetchPatterns()
     } catch (e) {
       toast({ title: "Error", description: (e as Error).message, variant: "error" })
     } finally {
@@ -442,30 +294,6 @@ export function PatternTable() {
     { value: "whitelist", label: "Whitelist" },
   ]
 
-  const categoryOptions = [
-    { value: "all", label: "Category: All" },
-    { value: "Block", label: "Category: Block" },
-    { value: "Whitelist", label: "Category: Whitelist" },
-  ]
-
-  /* Only the actions patternAction actually emits (block→FLAG, whitelist→ALLOW)
-   * are listed — DENY never matches a derived row, so offering it would be a
-   * filter that silently returns nothing. */
-  const actionOptions = [
-    { value: "all", label: "Action: All" },
-    { value: "FLAG", label: "Action: FLAG" },
-    { value: "ALLOW", label: "Action: ALLOW" },
-  ]
-
-  /* Status filter — spec §3.3 renders this as `[Active v]`. The "all" (no
-   * filter) state is not a dropdown entry: the closed trigger falls back to
-   * the placeholder "Active" so it reads exactly like the spec, while the
-   * dropdown offers Active / Draft as explicit filters. */
-  const activeOptions = [
-    { value: "active", label: "Active" },
-    { value: "draft", label: "Draft" },
-  ]
-
   const editTypeOptions = [
     { value: "block", label: "Block" },
     { value: "whitelist", label: "Whitelist" },
@@ -475,78 +303,30 @@ export function PatternTable() {
   PATTERNS_UI.busy = busy
   PATTERNS_UI.onEdit = openEdit
   PATTERNS_UI.onDelete = (id) => setDeleteTarget(id)
-  const columns: DataTableColumn<PatternRow>[] = PATTERNS_COLUMNS
-
-  const filteredPatterns = useMemo(() => {
-    let rows = patterns
-    if (filterCategory !== "all") {
-      const want = filterCategory.toLowerCase()
-      rows = rows.filter((p) => p.category.toLowerCase() === want)
-    }
-    if (filterAction !== "all") {
-      rows = rows.filter((p) => p.action === filterAction)
-    }
-    if (filterActive !== "all") {
-      rows = rows.filter((p) => p.status === filterActive)
-    }
-    return rows
-  }, [patterns, filterCategory, filterAction, filterActive])
-
-  const anyDerivedFilter =
-    filterCategory !== "all" || filterAction !== "all" || filterActive !== "all"
+  const columns: DataTableColumn<Pattern>[] = PATTERNS_COLUMNS
 
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
     <div className="space-y-4">
       {/* ── Header + Toolbar ── */}
       <PageHeader
-        title="Pattern Manager"
-        description="Block and whitelist patterns used for URL matching — summary cards, filters and the pattern registry (spec §3.3)"
+        title="Patterns"
+        description="Manage block and whitelist patterns used for URL matching"
       >
+        <SearchInput
+          placeholder="Search patterns..."
+          value={search}
+          onChange={handleSearchChange}
+          className="w-56"
+          aria-label="Search patterns"
+        />
+        <Select value={filterType} onChange={handleFilterChange} options={typeOptions} />
         <AddPatternButton onOpen={() => setCreateOpen(true)} />
-        <Button variant="outline" onClick={() => setSimulateOpen(true)}>
-          <FlaskConical className="h-4 w-4 mr-1.5" />
-          Run Simulation
-        </Button>
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk Import
         </Button>
       </PageHeader>
-
-      {/* ── Pattern Manager summary cards (spec §3.3) ── */}
-      <PatternSummaryCards stats={stats} />
-
-      {/* ── Search + Category/Action/Active filter bar ── */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3 shadow-sm">
-        <SearchInput
-          placeholder="Search patterns, tags, domain..."
-          value={search}
-          onChange={handleSearchChange}
-          className="w-64"
-          aria-label="Search patterns"
-        />
-        <Select value={filterCategory} onChange={setFilterCategory} options={categoryOptions} aria-label="Filter by category" />
-        <Select value={filterAction} onChange={setFilterAction} options={actionOptions} aria-label="Filter by action" />
-        <Select value={filterActive} onChange={setFilterActive} options={activeOptions} placeholder="Active" aria-label="Filter by status" />
-        <Select value={filterType} onChange={handleFilterChange} options={typeOptions} aria-label="Filter by type" />
-        {(debouncedSearch || filterType !== "all" || anyDerivedFilter) && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setSearch("")
-              setFilterType("all")
-              setFilterCategory("all")
-              setFilterAction("all")
-              setFilterActive("all")
-              setPage(0)
-            }}
-          >
-            Reset
-          </Button>
-        )}
-      </div>
 
       {/* ── Error banner ── */}
       {error && (
@@ -561,7 +341,7 @@ export function PatternTable() {
       {/* ── Table ── */}
       <DataTable
         columns={columns}
-        data={filteredPatterns}
+        data={patterns}
         rowId={PATTERNS_ROW_ID}
         loading={loading}
         selectable
@@ -579,12 +359,9 @@ export function PatternTable() {
         ]}
         empty={{
           icon: ListFilter,
-          title:
-            debouncedSearch || filterType !== "all" || anyDerivedFilter
-              ? "No patterns match your filters"
-              : "No patterns yet",
+          title: debouncedSearch || filterType !== "all" ? "No patterns match your search" : "No patterns yet",
           description:
-            debouncedSearch || filterType !== "all" || anyDerivedFilter
+            debouncedSearch || filterType !== "all"
               ? "Try adjusting your search or filter"
               : "Add your first pattern to get started",
         }}
@@ -655,24 +432,7 @@ export function PatternTable() {
       <AddPatternDialog
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={refreshPatternsAndStats}
-      />
-
-      {/* ── Live Kibana simulation drawer (Task 9 — spec §3.3) ── */}
-      <PatternSimulationDrawer
-        open={simulateOpen}
-        onClose={() => {
-          setSimulateOpen(false)
-          // Draft consumed — clear both the stored and in-flight handoff.
-          try {
-            window.localStorage.removeItem("unetwatch_pattern_draft")
-          } catch {
-            /* ignore */
-          }
-          setInitialPattern(undefined)
-        }}
-        onCreated={refreshPatternsAndStats}
-        initialUrl={initialPattern}
+        onCreated={fetchPatterns}
       />
 
       {/* ── Bulk Import Dialog ── */}

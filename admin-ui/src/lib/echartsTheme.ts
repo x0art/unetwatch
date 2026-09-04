@@ -4,27 +4,27 @@
 // parsing fix cannot drift between diagrams.
 
 export const FALLBACK_DARK: Record<string, string> = {
-  "--color-info": "#5b8def",
-  "--color-warning": "#e8a33d",
-  "--color-danger": "#ef6a6a",
-  "--color-success": "#4fbf7a",
-  "--color-primary": "#5b8def",
-  "--color-foreground": "#e8e8ee",
-  "--color-muted-foreground": "#a0a0ac",
-  "--color-card": "#232331",
-  "--color-border": "#3f3f4d",
+  "--color-info": "#0A7AFF",
+  "--color-warning": "#FFD60A",
+  "--color-danger": "#FF3B30",
+  "--color-success": "#0A0A0A",
+  "--color-primary": "#FF3B30",
+  "--color-foreground": "#F6F2E8",
+  "--color-muted-foreground": "#9A9590",
+  "--color-card": "#141414",
+  "--color-border": "#F6F2E8",
 }
 
 export const FALLBACK_LIGHT: Record<string, string> = {
-  "--color-info": "#006398",
-  "--color-warning": "#8A5700",
-  "--color-danger": "#C10000",
-  "--color-success": "#006C15",
-  "--color-primary": "#006398",
-  "--color-foreground": "#070B14",
-  "--color-muted-foreground": "#454E5B",
+  "--color-info": "#0A7AFF",
+  "--color-warning": "#FFD60A",
+  "--color-danger": "#FF3B30",
+  "--color-success": "#0A0A0A",
+  "--color-primary": "#FF3B30",
+  "--color-foreground": "#0A0A0A",
+  "--color-muted-foreground": "#6B6560",
   "--color-card": "#FFFFFF",
-  "--color-border": "#D0D4DB",
+  "--color-border": "#0A0A0A",
 }
 
 /** Parse an oklch() light/color/hue triple. Accepts both the decimal form

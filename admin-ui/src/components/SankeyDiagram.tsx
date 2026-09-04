@@ -30,22 +30,22 @@ export {
   type ResolvedColors,
 } from "../lib/echartsTheme"
 
-/** Spec palette §4.1 + §6 — verbatim values. */
+/** Neobrutalist palette — ink/paper/hazard on the 4-column flow. */
 export const LAYER_COLORS: Record<number, string> = {
-  0: "#3B82F6", // Sources — desaturated blue
-  1: "#64748B", // Patterns — neutral slate
-  2: "#10B981", // Domains — overridden per action: ALLOW #10B981, DENY #EF4444, FLAG #F59E0B
-  3: "#8B5CF6", // Destinations — standard purple; high-risk override #F97316
+  0: "#0A7AFF", // Sources — info blue
+  1: "#6B6560", // Patterns — muted slate
+  2: "#0A0A0A", // Domains — overridden per action: ALLOW ink, DENY red, FLAG hazard
+  3: "#9A9590", // Destinations — muted; high-risk override hazard red
 }
 
 function domainColor(action?: string): string {
-  if (action === "DENY") return "#EF4444"
-  if (action === "FLAG") return "#F59E0B"
-  return "#10B981"
+  if (action === "DENY") return "#FF3B30"
+  if (action === "FLAG") return "#FFD60A"
+  return "#0A0A0A"
 }
 
 function destColor(isHighRisk?: boolean): string {
-  return isHighRisk ? "#F97316" : "#8B5CF6"
+  return isHighRisk ? "#FF3B30" : "#9A9590"
 }
 
 function stripSankeyPrefix(id: string): string {

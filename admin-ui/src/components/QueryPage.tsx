@@ -16,13 +16,11 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useDebounce } from "../lib/utils"
-import { useFilter } from "../contexts/FilterContext"
 import {
   type QueryDoc,
   type QueryFlow,
   type QueryResult,
   addBaseUrlToBlacklist,
-  formatBytes,
   runQuery,
 } from "../api"
 import {
@@ -270,63 +268,6 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     ),
     width: "w-44",
   },
-  /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
-  {
-    id: "category",
-    header: "Category",
-    accessor: (d) => d.category,
-    cell: (d) => <span className="font-mono text-xs text-muted-foreground">{d.category || "—"}</span>,
-    width: "w-24",
-  },
-  {
-    id: "method",
-    header: "Method",
-    accessor: (d) => d.http_method,
-    cell: (d) => <span className="font-mono text-xs">{d.http_method || "—"}</span>,
-    width: "w-20",
-  },
-  {
-    id: "status",
-    header: "Status",
-    accessor: (d) => d.http_status_code,
-    cell: (d) => <span className="font-mono text-xs tabular-nums">{d.http_status_code ?? "—"}</span>,
-    width: "w-20",
-    align: "right",
-  },
-  {
-    id: "country",
-    header: "Country",
-    accessor: (d) => d.country_code,
-    cell: (d) => <span className="font-mono text-xs">{d.country_code || "—"}</span>,
-    width: "w-20",
-  },
-  {
-    id: "bytes",
-    header: "↓/↑ Bytes",
-    accessor: (d) => (Number(d.bytes_downloaded) || 0) + (Number(d.bytes_uploaded) || 0),
-    cell: (d) => {
-      const dn = Number(d.bytes_downloaded) || 0
-      const up = Number(d.bytes_uploaded) || 0
-      if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
-      return (
-        <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
-          {formatBytes(dn + up)}
-        </span>
-      )
-    },
-    align: "right",
-    width: "w-24",
-  },
-  {
-    id: "rule",
-    header: "Rule",
-    accessor: (d) => d.rule_name ?? d.rule_info ?? "—",
-    cell: (d) => {
-      const rule = d.rule_name && d.rule_name !== "-" ? d.rule_name : d.rule_info
-      return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
-    },
-    width: "w-28",
-  },
   {
     id: "actions",
     header: "",
@@ -495,7 +436,6 @@ function toSankey(flow: QueryFlow): { nodes: SankeyNode[]; links: SankeyLink[] }
 
 export function QueryPage() {
   const { toast } = useToast()
-  const { viewMode, setViewMode } = useFilter()
   const [windowMinutes, setWindowMinutes] = useState("60")
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
   const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
@@ -519,7 +459,6 @@ export function QueryPage() {
       q,
       excludeWhitelist: whitelistMode === "exclude",
       excludeBlacklist: blacklistMode === "exclude",
-      viewMode,
     })
       .then((res) => {
         if (!cancelled) setResult(res)
@@ -536,7 +475,7 @@ export function QueryPage() {
     return () => {
       cancelled = true
     }
-  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
+  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => fetchQuery(), [fetchQuery])
@@ -652,32 +591,6 @@ export function QueryPage() {
           className="w-40"
           aria-label="Filter by action"
         />
-        <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="View mode">
-          <button
-            type="button"
-            onClick={() => setViewMode("all")}
-            aria-pressed={viewMode === "all"}
-            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
-              viewMode === "all"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Full stream
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("flagged")}
-            aria-pressed={viewMode === "flagged"}
-            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
-              viewMode === "flagged"
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Flagged only
-          </button>
-        </div>
         <span className="text-xs text-muted-foreground">Window</span>
         <Select
           value={windowMinutes}

@@ -50,7 +50,6 @@ const LogsPage = lazy(() =>
 const PatternTable = lazy(() =>
   import("./components/PatternTable").then((m) => ({ default: m.PatternTable })),
 )
-
 const LiveMonitorPage = lazy(() =>
   import("./components/LiveMonitorPage").then((m) => ({ default: m.LiveMonitorPage })),
 )
@@ -60,19 +59,6 @@ const HostInspectorPage = lazy(() =>
 const AnalyticsPage = lazy(() =>
   import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
 )
-const SystemSettingsPage = lazy(() =>
-  import("./components/SystemSettingsPage").then((m) => ({ default: m.SystemSettingsPage })),
-)
-
-export const VIEW_ALIASES: Record<string, View> = {
-  dashboard: "live",
-  query: "live",
-  findings: "live",
-  graph: "live",
-  blacklist: "patterns",
-  redirects: "patterns",
-  logs: "settings",
-}
 
 function PageFallback() {
   return (
@@ -95,12 +81,11 @@ function AppRoutes() {
   const [standalonePath] = useState(isStandalonePath)
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
-  const ALL_VIEWS: View[] = ["live", "host", "patterns", "analytics", "settings", "dashboard", "query", "findings", "graph", "blacklist", "redirects", "logs"]
-  const resolveView = (v: string): View => (VIEW_ALIASES[v] as View) ?? (v as View)
-  const [view, setView] = useState<View>(() => {
-    if (storedView && ALL_VIEWS.includes(storedView)) return resolveView(storedView)
-    return "live"
-  })
+  const [view, setView] = useState<View>(
+    storedView && ["dashboard", "query", "patterns", "findings", "graph", "blacklist", "redirects", "logs"].includes(storedView)
+      ? storedView
+      : "dashboard",
+  )
   const [findingsSearch, setFindingsSearch] = useState("")
   const [loggedIn, setLoggedIn] = useState(!!getToken())
   const [status, setStatus] = useState<MonitorStatus | null>(null)
@@ -249,11 +234,6 @@ function AppRoutes() {
       <Suspense fallback={<PageFallback />}>
         <AnimatePresence mode="wait">
           <MotionPage key={view}>
-            {view === "live" && <LiveMonitorPage onNavigate={handleNavigate} />}
-            {view === "host" && <HostInspectorPage />}
-            {view === "patterns" && <PatternTable />}
-            {view === "analytics" && <AnalyticsPage />}
-            {view === "settings" && <SystemSettingsPage />}
             {view === "dashboard" && (
               <DashboardPage
                 remaining={remaining}
@@ -268,11 +248,15 @@ function AppRoutes() {
               />
             )}
             {view === "query" && <QueryPage />}
+            {view === "patterns" && <PatternTable />}
             {view === "findings" && <FindingsPage initialSearch={findingsSearch} />}
             {view === "graph" && <GraphPage />}
             {view === "blacklist" && <BlacklistPage />}
             {view === "redirects" && <RedirectsPage />}
             {view === "logs" && <LogsPage />}
+            {view === "live" && <LiveMonitorPage onNavigate={handleNavigate} />}
+            {view === "host" && <HostInspectorPage />}
+            {view === "analytics" && <AnalyticsPage />}
           </MotionPage>
         </AnimatePresence>
       </Suspense>
@@ -283,13 +267,13 @@ function AppRoutes() {
 function App() {
   return (
     <ThemeProvider>
-      <FilterProvider>
-        <ToastProvider>
-          <MotionGate>
+      <ToastProvider>
+        <MotionGate>
+          <FilterProvider>
             <AppRoutes />
-          </MotionGate>
-        </ToastProvider>
-      </FilterProvider>
+          </FilterProvider>
+        </MotionGate>
+      </ToastProvider>
     </ThemeProvider>
   )
 }

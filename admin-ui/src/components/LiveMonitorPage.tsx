@@ -136,7 +136,7 @@ function SankeySection({
   )
 }
 
-export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "settings" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void } = {}) {
+export function LiveMonitorPage({ onNavigate }: { onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void } = {}) {
   const { globalFilter, setGlobalFilter, timeRange, viewMode, setViewMode } = useFilter()
   const [metrics, setMetrics] = useState<LiveMetrics | null>(null)
   const [loading, setLoading] = useState(true)

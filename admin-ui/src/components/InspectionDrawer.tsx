@@ -20,7 +20,7 @@ export interface InspectionDrawerProps {
   row: LogRow
   onClose: () => void
   /** Optional navigation callback — when provided, drawer actions navigate directly to the target view. */
-  onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "settings" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void
+  onNavigate?: (view: "live" | "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "graph" | "blacklist" | "redirects" | "logs") => void
 }
 
 export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerProps) {
@@ -97,7 +97,7 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
   return (
     <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#0F172A]/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
         <DialogPrimitive.Content asChild>
           <motion.div
             initial={{ x: "100%" }}
