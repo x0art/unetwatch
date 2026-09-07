@@ -147,7 +147,11 @@ export function ClientReportPage({ onNavigate }: { onNavigate?: (view: "host" | 
     { id: "base_url", header: "Domain", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
     { id: "pattern", header: "Pattern", enableSorting: false, accessor: (r) => r.matched_patterns, cell: (r) => {
       let pats: string[] = []
-      try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch { pats = [] }
+      try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch {}
+      // Findings-backed report: every finding was stored because it matched a block pattern.
+      // If the row somehow has no matched_patterns (legacy / empty array), fall back to
+      // the report-level top pattern for this client so the cell never reads as "—".
+      if (pats.length === 0 && report?.top_pattern) pats = [report.top_pattern]
       if (pats.length === 0) return <span className="text-xs text-muted-foreground">—</span>
       return (
         <span className="flex flex-wrap gap-1">
@@ -161,7 +165,7 @@ export function ClientReportPage({ onNavigate }: { onNavigate?: (view: "host" | 
       const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
       return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><span className={`border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]" : "border-border bg-muted text-muted-foreground"}`}>{hasBytes ? "real" : "est."}</span></span>
     }, width: "w-32" },
-  ], [])
+  ], [report?.top_pattern])
 
   return (
     <div className="space-y-5">
