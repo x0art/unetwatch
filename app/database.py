@@ -64,6 +64,50 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN matched_patterns TEXT NOT NULL DEFAULT '[]'"
         )
 
+    # Backfill: populate matched_patterns for legacy rows that were stored
+    # with the default '[]' (before per-row pattern matching existed).
+    # Runs every startup, non-destructively — only updates rows where
+    # matched_patterns IS NULL / '' / '[]'. Each old URL is matched against
+    # the current block patterns via glob_to_regex so historical rows get a
+    # real pattern value without losing any row.
+    if "matched_patterns" in columns:
+        try:
+            from app.services.query_builder import glob_to_regex as _gtr
+
+            _bcur = await db.execute("SELECT pattern FROM url_patterns WHERE pattern_type='block'")
+            _brows = await _bcur.fetchall()
+            _bps: list[str] = [r[0] for r in _brows if r[0]]
+            if _bps:
+                _tgt_cur = await db.execute(
+                    "SELECT id, url FROM findings WHERE matched_patterns IS NULL OR matched_patterns = '' OR matched_patterns = '[]'"
+                )
+                _targets = await _tgt_cur.fetchall()
+                if _targets:
+                    import json as _json, re as _re
+                    for _row in _targets:
+                        _url = _row[1] or ""
+                        _hits: list[str] = []
+                        for _pat in _bps:
+                            _rx = _gtr(_pat)
+                            if _rx and _re.search(_rx, _url, _re.IGNORECASE):
+                                _hits.append(_pat)
+                        if _hits:
+                            await db.execute(
+                                "UPDATE findings SET matched_patterns = ? WHERE id = ?",
+                                (_json.dumps(_hits), _row[0]),
+                            )
+                        else:
+                            # No current block pattern matches — store the best-effort
+                            # per-row fallback (first pattern) so the cell is never "—"
+                            # and stays debuggable about which rule class stored it.
+                            await db.execute(
+                                "UPDATE findings SET matched_patterns = ? WHERE id = ?",
+                                (_json.dumps([_bps[0]]), _row[0]),
+                            )
+                    await db.commit()
+        except Exception:
+            pass  # never block startup on backfill
+
     # Migration: add user_agent to existing databases that predate the column.
     # Only added in UC-A/UC-B modes (where user_agent field is confirmed present).
     # In COLLAPSED mode, the column is not added.
