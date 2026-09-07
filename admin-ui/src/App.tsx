@@ -55,6 +55,9 @@ const UrlInvestigationPage = lazy(() =>
 const AnalyticsPage = lazy(() =>
   import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
 )
+const ClientReportPage = lazy(() =>
+  import("./components/ClientReportPage").then((m) => ({ default: m.ClientReportPage })),
+)
 
 function PageFallback() {
   return (
@@ -77,7 +80,7 @@ function AppRoutes() {
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
-    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "redirects", "logs", "host", "url", "analytics"].includes(storedView)
+    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "redirects", "logs", "host", "url", "analytics", "client-report"].includes(storedView)
       ? storedView
       : "dashboard",
   )
@@ -286,6 +289,11 @@ function AppRoutes() {
         {visited.has("analytics") && (
           <div hidden={view !== "analytics"}>
             <AnalyticsPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("client-report") && (
+          <div hidden={view !== "client-report"}>
+            <ClientReportPage onNavigate={handleNavigate} />
           </div>
         )}
       </Suspense>

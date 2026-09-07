@@ -1747,3 +1747,68 @@ export async function getAlerts(): Promise<AlertSettings> {
 export async function putAlerts(data: AlertSettings): Promise<AlertSettings> {
   return request("/settings/alerts", { method: "PUT", body: JSON.stringify(data) })
 }
+
+/* ── Client IP Report (Deep Dive — findings-only) ─────────────────── */
+
+export interface ClientReportBandwidthPoint { bucket: string; inbound: number; outbound: number }
+export interface ClientReportEnforcementPoint { bucket: string; allow: number; deny: number }
+export interface ClientReportTopDomain { domain: string; count: number; volume: number; pct: number }
+export interface ClientReportTopUrl { url: string; base_url: string; count: number; last_seen: string }
+export interface ClientReportTopPattern { pattern: string; hits: number }
+
+export interface ClientReport {
+  client_ip: string
+  range: string
+  window_minutes: number
+  has_data: boolean
+  source: "findings"
+  es_online: boolean
+  generated_at: string
+  total_requests: number
+  total_risk: number
+  total_enforcements: number
+  total_volume: number
+  distinct_urls: number
+  distinct_domains: number
+  top_pattern: string | null
+  top_domain: string | null
+  peak_hour: string
+  bandwidth: { points: ClientReportBandwidthPoint[] }
+  enforcements: { points: ClientReportEnforcementPoint[] }
+  top_domains: ClientReportTopDomain[]
+  top_urls: ClientReportTopUrl[]
+  top_patterns: ClientReportTopPattern[]
+}
+
+export async function getClientReport(
+  clientIp: string,
+  params: { range?: string } = {},
+): Promise<ClientReport> {
+  const qs = new URLSearchParams()
+  if (params.range) qs.set("range", params.range)
+  const q = qs.toString() ? `?${qs}` : ""
+  return request(`/client-report/${encodeURIComponent(clientIp)}${q}`)
+}
+
+export async function getClientReportFindings(
+  clientIp: string,
+  params: { range?: string; search?: string; limit?: number; offset?: number; sort_by?: string; sort_order?: "asc" | "desc" } = {},
+): Promise<FindingsResponse> {
+  const qs = new URLSearchParams()
+  if (params.range) qs.set("range", params.range)
+  if (params.search) qs.set("search", params.search)
+  if (params.limit != null) qs.set("limit", String(params.limit))
+  if (params.offset != null) qs.set("offset", String(params.offset))
+  if (params.sort_by) qs.set("sort_by", params.sort_by)
+  if (params.sort_order) qs.set("sort_order", params.sort_order)
+  const q = qs.toString() ? `?${qs}` : ""
+  return request(`/client-report/${encodeURIComponent(clientIp)}/findings${q}`)
+}
+
+export function getClientReportCsvUrl(clientIp: string, params: { range?: string } = {}): string {
+  const qs = new URLSearchParams()
+  if (params.range) qs.set("range", params.range)
+  const q = qs.toString() ? `?${qs}` : ""
+  return `/api/client-report/${encodeURIComponent(clientIp)}/export.csv${q}`
+}
+

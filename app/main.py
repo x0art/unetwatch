@@ -165,6 +165,10 @@ from app.routes import readout as readout_routes
 
 app.include_router(readout_routes.router, dependencies=[Depends(verify_admin)])
 
+from app.routes import client_report as client_report_routes
+
+app.include_router(client_report_routes.router, dependencies=[Depends(verify_admin)])
+
 # ── ES Field Inventory Debug Endpoint ───────────────────────────────────────
 from app.services.es_fields import fetch_field_inventory
 
