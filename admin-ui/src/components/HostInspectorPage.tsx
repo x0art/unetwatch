@@ -147,10 +147,52 @@ function detectSpike(points: TimelinePoint[]): string | undefined {
   return undefined
 }
 
-async function fetchHostSections(ip: string, timeRange: string): Promise<HostSectionData> {
+type HostSource = "live" | "findings"
+
+async function fetchHostSectionsFindings(ip: string, timeRange: string): Promise<HostSectionData> {
+  const minutes = timeRangeToMinutesLive(timeRange)
+  const { getFindings } = await import("../api")
+  const res = await getFindings({ search: ip.trim(), minutes, limit: 500 })
+  if (res.items.length === 0) return { ...EMPTY_SECTIONS, window: timeRange }
+  // Build same aggregates but from findings (QueryDoc-shaped items from Finding coords)
+  const items = res.items.map((f) => {
+    let pats: string[] = []
+    try { const p = f.matched_patterns ? JSON.parse(f.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch { pats = [] }
+    return {
+      client_ip: f.client_ip,
+      server_ip: f.server_ip,
+      url: f.url,
+      base_url: f.base_url,
+      timestamp: f.log_timestamp,
+      action: (f.action as string) || "ALLOW",
+      blocked_by: pats,
+      duration_seconds: Number(f.duration_seconds) || null,
+      bytes_downloaded: f.bytes_downloaded as unknown as number,
+      bytes_uploaded: f.bytes_uploaded as unknown as number,
+      blacklisted: false,
+      blacklist_source: null as null,
+      whitelisted: false,
+    } as unknown as QueryDoc
+  })
+  // Bucket timeline from findings timestamps
+  const byBucket = new Map<string, number>()
+  for (const it of items) { const ts = (it as unknown as LogRow).timestamp as string; const key = ts.slice(0,13)+":00"; byBucket.set(key, (byBucket.get(key) ?? 0)+1) }
+  const timeline: TimelinePoint[] = [...byBucket.entries()].sort((a,b)=>a[0].localeCompare(b[0])).map(([bucket, count])=>({ hour: formatHour(bucket), volume: count }))
+  const topDomains = buildTopDomains(items as unknown as QueryDoc[])
+  const triggeredPatterns = buildTriggeredPatterns(items as unknown as QueryDoc[])
+  const topUrls = buildTopUrls(items as unknown as QueryDoc[])
+  const logs = (items as unknown as LogRow[]).map((r) => ({ ...r }))
+  return { timeline, anomaly: detectSpike(timeline), topDomains, triggeredPatterns, topUrls, logs, logTotal: res.total || items.length, window: timeRange }
+}
+
+async function fetchHostSections(ip: string, timeRange: string, source: HostSource = "live"): Promise<HostSectionData> {
   const minutes = timeRangeToMinutesLive(timeRange)
   const isDemo = ip.trim() === DEMO_IP
-
+  if (source === "findings") {
+    try { const data = await fetchHostSectionsFindings(ip, timeRange); if (data.logs.length > 0) return data } catch { /* fallback below */ }
+    if (isDemo) return buildDemoSections(timeRange)
+    return { ...EMPTY_SECTIONS, window: timeRange }
+  }
   // Prefer live ES rows filtered to this host — richest source (action-aware,
   // pattern matches, durations). Backend caps items at 500; total_requests is
   // the real window total and drives the "Showing 1-50 of 42,810" summary.
@@ -176,13 +218,11 @@ async function fetchHostSections(ip: string, timeRange: string): Promise<HostSec
       }
     }
   } catch {
-    /* fall through to demo/empty */
+    /* fall through to findings fallback */
   }
-
-  // ES offline / no matches — synthesize the wireframe demo section so the
-  // spec IP (192.168.1.45) still renders the full layout with its numbers.
+  // Live found nothing — try findings before demo/empty
+  try { const fb = await fetchHostSectionsFindings(ip, timeRange); if (fb.logs.length > 0) return fb } catch { /* ignore */ }
   if (isDemo) return buildDemoSections(timeRange)
-
   return { ...EMPTY_SECTIONS, window: timeRange }
 }
 
@@ -340,6 +380,7 @@ export function HostInspectorPage({
   const [sections, setSections] = useState<HostSectionData | null>(null)
   const [sectionsLoading, setSectionsLoading] = useState(false)
   const [actionFilter, setActionFilter] = useState("All")
+  const [hSource, setHSource] = useState<HostSource>("live")
   const [page, setPage] = useState(0)
   const pageSize = 50
 
@@ -359,6 +400,17 @@ export function HostInspectorPage({
   useEffect(() => {
     setPage(0)
   }, [host, actionFilter])
+  // Re-fetch sections when data source toggle flips (if a host is already selected)
+  useEffect(() => {
+    if (host && !loading) {
+      setSectionsLoading(true)
+      void fetchHostSections((host as unknown as { primaryIp: string }).primaryIp || target, timeRange, hSource)
+        .then((data) => setSections(data))
+        .catch(() => setSections({ ...EMPTY_SECTIONS, window: timeRange }))
+        .finally(() => setSectionsLoading(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hSource])
 
   const lookup = async (ip: string) => {
     const clean = ip.trim()
@@ -388,7 +440,7 @@ export function HostInspectorPage({
     // Sections load independently so the entity card paints immediately.
     setSectionsLoading(true)
     try {
-      const data = await fetchHostSections(clean, timeRange)
+      const data = await fetchHostSections(clean, timeRange, hSource)
       setSections(data)
     } catch {
       setSections({ ...EMPTY_SECTIONS, window: timeRange })
@@ -684,6 +736,10 @@ export function HostInspectorPage({
           className="w-36 shrink-0"
           aria-label="Time range"
         />
+        <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
+          <button type="button" onClick={() => setHSource("live")} aria-pressed={hSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
+          <button type="button" onClick={() => setHSource("findings")} aria-pressed={hSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+        </div>
       </div>
 
       {loading && (

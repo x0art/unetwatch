@@ -1174,11 +1174,12 @@ export interface UrlBreakdown {
 
 export async function getUrlBreakdown(
   url: string,
-  opts?: { minutes?: number; limit?: number },
+  opts?: { minutes?: number; limit?: number; source?: "findings" | "live" },
 ): Promise<UrlBreakdown> {
   const qs = new URLSearchParams()
   if (opts?.minutes) qs.set("minutes", String(opts.minutes))
   if (opts?.limit) qs.set("limit", String(opts.limit))
+  if (opts?.source) qs.set("source", opts.source)
   return request(`/findings/url/${encodeURIComponent(url)}?${qs}`)
 }
 

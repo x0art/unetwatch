@@ -182,13 +182,53 @@ async def url_breakdown(
     db=Depends(get_db_conn),
     minutes: int | None = Query(None, ge=0, le=43200),
     limit: int = Query(50, ge=1, le=200),
+    source: str = Query("findings", pattern="^(findings|live)$"),
 ):
     """Per-URL client IP breakdown — reverse of client_breakdown.
+    ``source=live`` pulls from ES via run_query (windowed, flagged only);
+    ``source=findings`` (default) uses persisted findings as today.
 
     Returns all client IPs that accessed the given URL (or base_url),
     with counts and last-seen timestamps. Used by the Traffic page's
     URL drill-down mode.
     """
+    if source == "live":
+        try:
+            from app.config import get_settings as _gs
+            from app.database import get_db as _get_db
+            from app.services.es_client import es_client as _esc
+            from app.services.monitor import _build_pattern_regex as _bpr, build_logs_query as _blq, get_block_patterns as _gbp, get_whitelist_patterns as _gwp
+            from app.services.result_processor import apply_filters as _af
+
+            _settings = _gs()
+            _db = await _get_db()
+            try:
+                _bps = await _gbp(_db)
+                _wps = await _gwp(_db)
+            finally:
+                await _db.close()
+            if _bps:
+                _wregex = _bpr(_wps)
+                _q = _blq(_bps, minutes or 1440, _settings.es_query_size, search=url)
+                import pandas as _pd
+
+                async with _esc(_settings, timeout=30) as _es:
+                    _res = await _es.search(index=_settings.elastic_index, body=_q)
+                _hits = _res.get("hits", {}).get("hits", [])
+                if _hits:
+                    _df = _af(_pd.DataFrame([h["_source"] for h in _hits]), _wregex, actions=None)
+                    # keep only rows whose url/base_url contains the target (same rule as findings reverse)
+                    _low = url.lower()
+                    _df = _df[_df["url"].astype(str).str.lower().str.contains(_low, na=False) | _df["base_url"].astype(str).str.lower().str.contains(_low, na=False)]
+                    if not _df.empty:
+                        _max = _df["@timestamp"].astype(str).max() if "@timestamp" in _df.columns else ""
+                        _grp = _df.groupby("client_ip").agg(count=("client_ip","size"), last_seen=("@timestamp","max")).reset_index().sort_values(["count","client_ip"], ascending=[False, True])
+                        _clients = [{"client_ip": str(r.client_ip), "count": int(r.count), "last_seen": str(r.last_seen)} for r in _grp.head(limit).itertuples()]
+                        _total = int(len(_df))
+                        return {"url": url, "source": "es", "total_accesses": _total, "es_online": True, "clients": _clients}
+        except Exception:
+            pass  # fall through to findings path
+
     wl_cursor = await db.execute(
         "SELECT pattern FROM url_patterns WHERE pattern_type = 'whitelist'"
     )

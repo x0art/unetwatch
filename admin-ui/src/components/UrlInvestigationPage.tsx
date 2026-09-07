@@ -59,6 +59,8 @@ function looksLikeUrl(s: string): boolean {
 
 /* ── Page ───────────────────────────────────────────────────────────── */
 
+type UrlSource = "live" | "findings"
+
 export function UrlInvestigationPage({
   onNavigate,
 }: {
@@ -69,6 +71,7 @@ export function UrlInvestigationPage({
   const [url, setUrl] = useState("")
   const [searched, setSearched] = useState("")
   const [result, setResult] = useState<UrlBreakdown | null>(null)
+  const [uSource, setUSource] = useState<UrlSource>("findings")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,7 +85,7 @@ export function UrlInvestigationPage({
     setError(null)
     setSearched(trimmed)
     try {
-      const res = await getUrlBreakdown(trimmed, { limit: 100 })
+      const res = await getUrlBreakdown(trimmed, { limit: 100, source: uSource })
       setResult(res)
     } catch (e) {
       setError((e as Error).message)
@@ -90,7 +93,7 @@ export function UrlInvestigationPage({
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, uSource])
 
   // Auto-investigate an incoming URL — Host Inspector's "Top URLs" and the
   // Ctrl+K palette navigate here with the URL in the global filter. Re-runs on
@@ -103,6 +106,11 @@ export function UrlInvestigationPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter])
+
+  useEffect(() => {
+    if (searched && !loading) void investigate(searched)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uSource])
 
   const handleViewHost = (ip: string) => {
     setGlobalFilter(ip)
@@ -211,6 +219,10 @@ export function UrlInvestigationPage({
             {loading ? <LoadingIcon /> : <Search className="h-4 w-4" />}
             {loading ? "Investigating…" : "Investigate"}
           </Button>
+          <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
+            <button type="button" onClick={() => setUSource("findings")} aria-pressed={uSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+            <button type="button" onClick={() => setUSource("live")} aria-pressed={uSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
+          </div>
         </form>
       </PageHeader>
 
