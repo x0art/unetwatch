@@ -97,6 +97,19 @@ function formatWhen(iso: string): string {
   return d.toLocaleString()
 }
 
+/** Collapse rows to one per unique domain (base_url), keeping the first. */
+function dedupeByDomain<T extends { base_url?: string; url?: string }>(rows: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const r of rows) {
+    const key = r.base_url || r.url || ""
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(r)
+  }
+  return out
+}
+
 /* ── Page ───────────────────────────────────────────────────────────── */
 
 export function AnalyticsPage({
@@ -104,10 +117,9 @@ export function AnalyticsPage({
 }: {
   onNavigate?: (view: "host" | "url") => void
 } = {}) {
-  const { setGlobalFilter } = useFilter()
+  const { setGlobalFilter, timeRange: range, setTimeRange: setRange } = useFilter()
   const { toast } = useToast()
 
-  const [range, setRange] = useState("7d")
   const [compare, setCompare] = useState("none")
 
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null)
@@ -133,6 +145,7 @@ export function AnalyticsPage({
   const [rawLoading, setRawLoading] = useState(false)
   const [rawSearch, setRawSearch] = useState("")
   const [rawPage, setRawPage] = useState(0)
+  const [rawUniqueDomains, setRawUniqueDomains] = useState(false)
   const rawPageSize = 50
 
   const fetchAll = useCallback(async () => {
@@ -395,31 +408,26 @@ export function AnalyticsPage({
         width: "w-24",
       },
       {
-        id: "bytes",
-        header: "Bytes ↓/↑",
-        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
-        align: "right",
+        id: "pattern",
+        header: "Pattern",
+        enableSorting: false,
+        accessor: (r) => r.matched_patterns,
         cell: (r) => {
-          const dn = Number(r.bytes_downloaded) || 0
-          const up = Number(r.bytes_uploaded) || 0
-          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+          let pats: string[] = []
+          try {
+            const parsed = r.matched_patterns ? JSON.parse(r.matched_patterns) : []
+            pats = Array.isArray(parsed) ? parsed : []
+          } catch {
+            pats = []
+          }
+          const label = pats.join(", ") || "—"
           return (
-            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
-              {formatBytes(dn + up)}
+            <span className="block max-w-[180px] truncate font-mono text-xs text-muted-foreground" title={label}>
+              {label}
             </span>
           )
         },
-        width: "w-24",
-      },
-      {
-        id: "rule",
-        header: "Rule",
-        accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
-        cell: (r) => {
-          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
-          return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
-        },
-        width: "w-28",
+        width: "w-40",
       },
     ],
     [openHost, openUrl],
@@ -522,7 +530,7 @@ export function AnalyticsPage({
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
             <Label className="mb-0">Range</Label>
-            <Select value={range} onChange={setRange} options={RANGE_OPTIONS} className="w-44" aria-label="Date range" />
+            <Select value={range} onChange={(v) => setRange(v as typeof range)} options={RANGE_OPTIONS} className="w-44" aria-label="Date range" />
           </div>
           <div className="flex flex-col gap-1">
             <Label className="mb-0">Compare to</Label>
@@ -661,6 +669,14 @@ export function AnalyticsPage({
             className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label="Filter raw findings"
           />
+          <Button
+            variant={rawUniqueDomains ? "default" : "outline"}
+            size="sm"
+            onClick={() => setRawUniqueDomains((v) => !v)}
+            aria-pressed={rawUniqueDomains}
+          >
+            {rawUniqueDomains ? "Unique domains" : "Unique domains"}
+          </Button>
           <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />
             Findings are ALLOW risk rows only (ADR 0001)
@@ -668,7 +684,7 @@ export function AnalyticsPage({
         </div>
         <DataTable
           columns={rawColumns}
-          data={raw}
+          data={rawUniqueDomains ? dedupeByDomain(raw) : raw}
           rowId={(r) => String(r.id)}
           loading={rawLoading}
           internalPagination

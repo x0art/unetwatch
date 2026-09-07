@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CheckCircle2,
   Copy,
@@ -191,6 +191,28 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     ),
   },
   {
+    id: "pattern",
+    header: "Pattern",
+    enableSorting: false,
+    accessor: (f) => f.matched_patterns,
+    cell: (f) => {
+      let pats: string[] = []
+      try {
+        const parsed = f.matched_patterns ? JSON.parse(f.matched_patterns) : []
+        pats = Array.isArray(parsed) ? parsed : []
+      } catch {
+        pats = []
+      }
+      const label = pats.join(", ") || "—"
+      return (
+        <span className="block max-w-[180px] truncate font-mono text-xs text-muted-foreground" title={label}>
+          {label}
+        </span>
+      )
+    },
+    width: "w-40",
+  },
+  {
     id: "log_timestamp",
     header: "Detected",
     accessor: (f) => f.log_timestamp,
@@ -243,6 +265,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState(initialSearch ?? "")
+  const [uniqueDomainsOnly, setUniqueDomainsOnly] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
@@ -490,6 +513,20 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   }
   const columns: DataTableColumn<Finding>[] = FINDINGS_COLUMNS
 
+  // Optional dedupe to one row per unique domain (base_url).
+  const tableFindings = useMemo(() => {
+    if (!uniqueDomainsOnly) return findings
+    const seen = new Set<string>()
+    const out: Finding[] = []
+    for (const f of findings) {
+      const key = f.base_url || f.url
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(f)
+    }
+    return out
+  }, [findings, uniqueDomainsOnly])
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -503,6 +540,14 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
           className="w-64"
           aria-label="Search findings"
         />
+        <Button
+          variant={uniqueDomainsOnly ? "default" : "outline"}
+          size="sm"
+          onClick={() => setUniqueDomainsOnly((v) => !v)}
+          aria-pressed={uniqueDomainsOnly}
+        >
+          {uniqueDomainsOnly ? "Unique domains" : "Unique domains"}
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -522,7 +567,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
 
       <DataTable
         columns={columns}
-        data={findings}
+        data={tableFindings}
         rowId={FINDINGS_ROW_ID}
         loading={loading}
         selectable

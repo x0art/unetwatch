@@ -328,11 +328,10 @@ export function HostInspectorPage({
 }: {
   onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void
 } = {}) {
-  const { globalFilter, setGlobalFilter } = useFilter()
+  const { globalFilter, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const { toast } = useToast()
 
   const [target, setTarget] = useState(() => globalFilter || "")
-  const [timeRange, setTimeRange] = useState("24h")
   const [host, setHost] = useState<HostProfile | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -680,7 +679,7 @@ export function HostInspectorPage({
         </Button>
         <Select
           value={timeRange}
-          onChange={setTimeRange}
+          onChange={(v) => setTimeRange(v as typeof timeRange)}
           options={TIME_RANGE_OPTIONS}
           className="w-36 shrink-0"
           aria-label="Time range"

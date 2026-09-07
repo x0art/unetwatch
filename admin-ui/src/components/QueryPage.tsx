@@ -25,6 +25,7 @@ import {
   buildFlowSankey,
   formatBytes,
   runQuery,
+  timeRangeToMinutesLive,
 } from "../api"
 import {
   Badge,
@@ -49,18 +50,12 @@ import { InspectionDrawer } from "./InspectionDrawer"
 
 const DEFAULT_PAGE_SIZE = 25
 
-const WINDOW_OPTIONS = [
-  { value: "30", label: "Last 30 minutes" },
-  { value: "60", label: "Last hour" },
-  { value: "360", label: "Last 6 hours" },
-  { value: "720", label: "Last 12 hours" },
-  { value: "1440", label: "Last 24 hours" },
-  { value: "2880", label: "Last 2 days" },
-  { value: "4320", label: "Last 3 days" },
-  { value: "10080", label: "Last 7 days" },
-  { value: "20160", label: "Last 14 days" },
-  { value: "43200", label: "Last 30 days" },
-  { value: "0", label: "All time" },
+// Shared workspace time window — same 1h/24h/7d/30d as FilterContext.
+const TIME_RANGE_OPTIONS = [
+  { value: "1h", label: "Last 1h" },
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7d" },
+  { value: "30d", label: "Last 30d" },
 ]
 
 const WHITELIST_OPTIONS = [
@@ -269,6 +264,18 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     width: "w-24",
   },
   {
+    id: "pattern",
+    header: "Pattern",
+    accessor: (d) => d.blocked_by,
+    enableSorting: false,
+    cell: (d) => (
+      <span className="block max-w-[180px] truncate font-mono text-xs text-muted-foreground" title={(d.blocked_by ?? []).join(", ") || undefined}>
+        {(d.blocked_by ?? []).join(", ") || "—"}
+      </span>
+    ),
+    width: "w-40",
+  },
+  {
     id: "coverage",
     header: "Lists",
     enableSorting: false,
@@ -466,11 +473,11 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 
 export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void } = {}) {
   const { toast } = useToast()
-  const { viewMode, setViewMode, setGlobalFilter } = useFilter()
-  const [windowMinutes, setWindowMinutes] = useState("60")
+  const { viewMode, setViewMode, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
   const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
   const [actionFilter, setActionFilter] = useState<"all" | "ALLOW" | "DENY">("all")
+  const [uniqueDomainsOnly, setUniqueDomainsOnly] = useState(false)
   const [esSearch, setEsSearch] = useState("")
   const debouncedEsSearch = useDebounce(esSearch, 400)
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -497,7 +504,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     setLoading(true)
     setError(null)
     const q = debouncedEsSearch.trim() || undefined
-    runQuery(Number(windowMinutes), {
+    runQuery(timeRangeToMinutesLive(timeRange), {
       q,
       excludeWhitelist: whitelistMode === "exclude",
       excludeBlacklist: blacklistMode === "exclude",
@@ -518,7 +525,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     return () => {
       cancelled = true
     }
-  }, [windowMinutes, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
+  }, [timeRange, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
 
   // Auto-run when the ES-level filter or whitelist mode changes.
   useEffect(() => fetchQuery(), [fetchQuery])
@@ -591,6 +598,20 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     if (actionFilter === "all") return visibleItems
     return visibleItems.filter((d) => d.action === actionFilter)
   }, [visibleItems, actionFilter])
+
+  // Optional dedupe to one row per unique domain (base_url).
+  const tableItems = useMemo(() => {
+    if (!uniqueDomainsOnly) return actionFilteredItems
+    const seen = new Set<string>()
+    const out: QueryDoc[] = []
+    for (const d of actionFilteredItems) {
+      const key = d.base_url || d.url
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(d)
+    }
+    return out
+  }, [actionFilteredItems, uniqueDomainsOnly])
 
   const esOffline = result !== null && !result.es_online
 
@@ -666,12 +687,12 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           className="w-40"
           aria-label="Filter by action"
         />
-        <span className="text-xs text-muted-foreground">Time window</span>
+        <span className="text-xs text-muted-foreground">Window</span>
         <Select
-          value={windowMinutes}
-          onChange={setWindowMinutes}
-          options={WINDOW_OPTIONS}
-          className="w-44"
+          value={timeRange}
+          onChange={(v) => setTimeRange(v as typeof timeRange)}
+          options={TIME_RANGE_OPTIONS}
+          className="w-36"
           aria-label="Query time window"
         />
         {/* Full stream / Flagged only — shared workspace view mode (was Live Monitor). */}
@@ -718,7 +739,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           label="Total requests"
           value={result ? result.total_requests.toLocaleString() : "—"}
           tone="info"
-          hint={`Matching block patterns · ${result?.window_minutes === 0 ? "all-time" : `${result?.window_minutes ?? 60}m`} window`}
+          hint={`Matching block patterns · ${timeRange} window`}
         />
         <StatCard
           icon={Users}
@@ -847,6 +868,15 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   className="w-64"
                   aria-label="Filter documents by IP or URL"
                 />
+                <Button
+                  variant={uniqueDomainsOnly ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setUniqueDomainsOnly((v) => !v)}
+                  aria-pressed={uniqueDomainsOnly}
+                  className={uniqueDomainsOnly ? "text-[#0A0A0A]" : ""}
+                >
+                  {uniqueDomainsOnly ? "Showing unique domains" : "Unique domains"}
+                </Button>
                 <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Server className="h-3.5 w-3.5" aria-hidden="true" />
                   {result.es_online ? "Elasticsearch online" : "Elasticsearch unreachable"}
@@ -877,7 +907,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             </div>
             <DataTable
               columns={columns}
-              data={actionFilteredItems}
+              data={tableItems}
               rowId={queryRowId}
               selectable
               busy={loading}

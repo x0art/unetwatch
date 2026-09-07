@@ -8,7 +8,6 @@ import {
   Globe,
   History,
   Link2,
-  Play,
   RefreshCcw,
   SearchX,
   ShieldAlert,
@@ -22,7 +21,7 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, Panel, RefreshIntervalSelect, Select, Skeleton, StatCard } from "./ui"
+import { Button, Panel, RefreshIntervalSelect, Skeleton, StatCard } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { useAutoRefresh, usePageVisible } from "../lib/utils"
 import { type View } from "./Sidebar"
@@ -32,17 +31,10 @@ interface DashboardPageProps {
   intervalSec: number
   status: MonitorStatus | null
   counts: PatternCounts | null
-  loadingRun: boolean
   lastUpdated: number
   onRefresh: () => void
-  onManualRun: (minutes: number) => void
   onNavigate: (view: View, search?: string) => void
 }
-
-const RUN_RANGE_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
-  value: String(i + 1),
-  label: `${i + 1} MIN`,
-}))
 
 function formatLastUpdated(timestamp: number) {
   const diff = Date.now() - timestamp
@@ -66,10 +58,8 @@ export function DashboardPage({
   intervalSec,
   status,
   counts,
-  loadingRun,
   lastUpdated,
   onRefresh,
-  onManualRun,
   onNavigate,
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
@@ -95,7 +85,6 @@ export function DashboardPage({
           }
         : null
 
-  const [runMinutes, setRunMinutes] = useState("1")
   const [blacklistCount, setBlacklistCount] = useState<number | null>(null)
   const [trackedCount, setTrackedCount] = useState<number | null>(null)
   const [recentFindings, setRecentFindings] = useState<Finding[]>([])
@@ -259,27 +248,8 @@ export function DashboardPage({
         <StatCard icon={History} label="Poll Interval" value={status ? `${status.poll_interval_minutes}M` : "—"} tone="default" hint="AUTO CHECK FREQUENCY" />
       </div>
 
-      {/* ── Manual run + Recent findings ── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Panel>
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-info text-white brutal-shadow-sm">
-                <Play className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="font-mono text-xs font-extrabold uppercase tracking-widest">MANUAL RUN</p>
-                <p className="font-mono text-[11px] text-muted-foreground">ONE-SHOT ES POLL</p>
-              </div>
-            </div>
-            <Select value={runMinutes} onChange={setRunMinutes} options={RUN_RANGE_OPTIONS} aria-label="Log range for manual run" />
-            <Button onClick={() => onManualRun(Number(runMinutes))} disabled={loadingRun} className="w-full">
-              {loadingRun ? "RUNNING..." : "RUN NOW"}
-            </Button>
-          </div>
-        </Panel>
-
-        <Panel className="lg:col-span-2" title="RECENT FINDINGS" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>VIEW ALL <ArrowRight className="h-3.5 w-3.5" /></Button>}>
+      {/* ── Recent findings ── */}
+      <Panel title="RECENT FINDINGS" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>VIEW ALL <ArrowRight className="h-3.5 w-3.5" /></Button>}>
           <div className="space-y-2">
             {recentLoading ? (
               <Skeleton className="h-32 w-full" />
@@ -311,7 +281,6 @@ export function DashboardPage({
             )}
           </div>
         </Panel>
-      </div>
 
       {/* ── Quick links — brutal slabs ── */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">

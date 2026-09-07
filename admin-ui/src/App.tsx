@@ -4,7 +4,6 @@ import {
   type PatternCounts,
   getMonitorStatus,
   getPatternCounts,
-  triggerManualRun,
   getToken,
   setToken,
   onSessionExpired,
@@ -14,7 +13,7 @@ import { AppShell } from "./components/AppShell"
 import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { FilterProvider } from "./contexts/FilterContext"
-import { ToastProvider, useToast, Skeleton } from "./components/ui"
+import { ToastProvider, Skeleton } from "./components/ui"
 import { MotionGate } from "./components/motion"
 import { GlobalSearchPalette } from "./components/GlobalSearchPalette"
 import { usePageVisible } from "./lib/utils"
@@ -73,7 +72,6 @@ function isStandalonePath() {
 }
 
 function AppRoutes() {
-  const { toast } = useToast()
   const pageVisible = usePageVisible()
   const [standalonePath] = useState(isStandalonePath)
   const VIEW_KEY = "unetwatch_view"
@@ -91,7 +89,6 @@ function AppRoutes() {
   const [loggedIn, setLoggedIn] = useState(!!getToken())
   const [status, setStatus] = useState<MonitorStatus | null>(null)
   const [counts, setCounts] = useState<PatternCounts | null>(null)
-  const [loadingRun, setLoadingRun] = useState(false)
   const [lastUpdated, setLastUpdated] = useState(Date.now())
   const [patternDialogOpen, setPatternDialogOpen] = useState(false)
 
@@ -145,20 +142,6 @@ function AppRoutes() {
   useEffect(() => {
     if (loggedIn) fetchStats()
   }, [loggedIn, fetchStats])
-
-  const handleManualRun = async (minutes: number) => {
-    setLoadingRun(true)
-    try {
-      await triggerManualRun(minutes)
-      toast({ title: "Manual run completed successfully", variant: "success" })
-      // Refresh stats to pick up the new last_poll_at from the backend
-      fetchStats()
-    } catch (e) {
-      toast({ title: "Run failed", description: (e as Error).message, variant: "error" })
-    } finally {
-      setLoadingRun(false)
-    }
-  }
 
   const handleLogout = () => {
     setToken(null)
@@ -254,10 +237,8 @@ function AppRoutes() {
               intervalSec={intervalSec}
               status={status}
               counts={counts}
-              loadingRun={loadingRun}
               lastUpdated={lastUpdated}
               onRefresh={fetchStats}
-              onManualRun={handleManualRun}
               onNavigate={handleNavigate}
             />
           </div>

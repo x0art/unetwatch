@@ -71,6 +71,8 @@ export interface Finding {
   user_id?: string
   action?: string
   duration_seconds?: number | string | null
+  /** JSON array of block patterns that matched at poll time. */
+  matched_patterns?: string | null
 }
 
 export interface FindingsResponse {
