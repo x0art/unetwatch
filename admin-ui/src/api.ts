@@ -861,12 +861,34 @@ export async function getLiveSankey(
  * Column order (user-confirmed): Pattern → Source → Domain → Destination.
  * Exported so Query renders the flow from its own result (no duplicate ES call).
  */
-export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
-  // Cap per-layer breadth so the diagram stays readable.
-  const MAX_PAT = 12
-  const MAX_SRC = 20
-  const MAX_DOM = 20
-  const MAX_DST = 20
+export interface FlowSankeyOptions {
+  maxPat?: number
+  maxSrc?: number
+  maxDom?: number
+  maxDst?: number
+  minWeight?: number
+  groupOthers?: boolean
+  keepRisk?: boolean
+}
+
+export interface FlowSankeyMeta {
+  grouped: { pat: number; src: number; dom: number; dst: number }
+  hiddenSingletons: number
+  othersCount: number
+}
+
+export function buildFlowSankey(
+  items: QueryDoc[],
+  opts?: FlowSankeyOptions,
+): LiveSankeyGraph & { meta: FlowSankeyMeta } {
+  // Cap per-layer breadth so the diagram stays readable — overridable via opts.
+  const MAX_PAT = opts?.maxPat ?? 12
+  const MAX_SRC = opts?.maxSrc ?? 20
+  const MAX_DOM = opts?.maxDom ?? 20
+  const MAX_DST = opts?.maxDst ?? 20
+  const MIN_WEIGHT = opts?.minWeight ?? 1
+  const GROUP_OTHERS = opts?.groupOthers ?? false
+  const KEEP_RISK = opts?.keepRisk ?? true
 
   // Frequency maps for capping
   const patCount = new Map<string, number>()
@@ -919,6 +941,17 @@ export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
     domAction.set(dom, best)
   }
 
+  const othersCount = {
+    pat: Math.max(0, patCount.size - topPat.size),
+    src: Math.max(0, srcCount.size - topSrc.size),
+    dom: Math.max(0, domCount.size - topDom.size),
+    dst: Math.max(0, dstCount.size - topDst.size),
+  }
+  const OTHER_PAT = "__OTHER__"
+  const OTHER_SRC = "__OTHER__"
+  const OTHER_DOM = "__OTHER__"
+  const OTHER_DST = "__OTHER__"
+
   const idPat = (p: string) => `pat:${p}`
   const idSrc = (ip: string) => `src:${ip}`
   const idDom = (d: string) => `dom:${d}`
@@ -929,6 +962,12 @@ export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
   for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 1 })
   for (const d of topDom) nodes.push({ id: idDom(d), name: d, layer: 2, action: domAction.get(d) ?? "ALLOW" })
   for (const d of topDst) nodes.push({ id: idDst(d), name: d, layer: 3, isHighRisk: dstRisk.get(d) ?? false })
+  if (GROUP_OTHERS) {
+    if (othersCount.pat > 0) nodes.push({ id: idPat(OTHER_PAT), name: `Others (${othersCount.pat})`, layer: 0 })
+    if (othersCount.src > 0) nodes.push({ id: idSrc(OTHER_SRC), name: `Others (${othersCount.src})`, layer: 1 })
+    if (othersCount.dom > 0) nodes.push({ id: idDom(OTHER_DOM), name: `Others (${othersCount.dom})`, layer: 2, action: "ALLOW" })
+    if (othersCount.dst > 0) nodes.push({ id: idDst(OTHER_DST), name: `Others (${othersCount.dst})`, layer: 3, isHighRisk: false })
+  }
 
   const linkKey = (a: string, b: string) => `${a}\0${b}`
   const patSrc = new Map<string, number>()
@@ -936,22 +975,42 @@ export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
   const domDst = new Map<string, number>()
   const domDstMeta = new Map<string, { action: string; isHighRisk: boolean }>()
 
+  // Track per-link risk so minWeight can keep risky ribbons.
+  const patSrcRisk = new Map<string, boolean>()
+  const srcDomRisk = new Map<string, boolean>()
+
   for (const it of items) {
     const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
-    const src = it.client_ip || "unknown"
-    if (!topSrc.has(src)) continue
-    const dom = it.base_url || it.url || "unknown"
-    if (!topDom.has(dom)) continue
-    const dst = it.server_ip || "unknown"
-    if (!topDst.has(dst)) continue
+    let src = it.client_ip || "unknown"
+    let dom = it.base_url || it.url || "unknown"
+    let dst = it.server_ip || "unknown"
     const act = it.action || "ALLOW"
     const risky = it.blacklisted === true
+    // Map tail keys to Others bucket when grouping, else skip
+    if (!topSrc.has(src)) {
+      if (!GROUP_OTHERS) continue
+      src = OTHER_SRC
+    }
+    if (!topDom.has(dom)) {
+      if (!GROUP_OTHERS) continue
+      dom = OTHER_DOM
+    }
+    if (!topDst.has(dst)) {
+      if (!GROUP_OTHERS) continue
+      dst = OTHER_DST
+    }
     for (const pat of pats) {
-      if (!topPat.has(pat)) continue
-      const k1 = linkKey(idPat(pat), idSrc(src))
+      let patKey = pat
+      if (!topPat.has(pat)) {
+        if (!GROUP_OTHERS) continue
+        patKey = OTHER_PAT
+      }
+      const k1 = linkKey(idPat(patKey), idSrc(src))
       patSrc.set(k1, (patSrc.get(k1) ?? 0) + 1)
+      if (risky) patSrcRisk.set(k1, true)
       const k2 = linkKey(idSrc(src), idDom(dom))
       srcDom.set(k2, (srcDom.get(k2) ?? 0) + 1)
+      if (risky) srcDomRisk.set(k2, true)
     }
     const k3 = linkKey(idDom(dom), idDst(dst))
     domDst.set(k3, (domDst.get(k3) ?? 0) + 1)
@@ -961,21 +1020,29 @@ export function buildFlowSankey(items: QueryDoc[]): LiveSankeyGraph {
   }
 
   const links: LiveSankeyLink[] = []
+  let hiddenSingletons = 0
   for (const [k, v] of patSrc) {
+    const isRisky = patSrcRisk.get(k) === true
+    if (v < MIN_WEIGHT && !(KEEP_RISK && isRisky)) { hiddenSingletons += 1; continue }
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
   for (const [k, v] of srcDom) {
+    const isRisky = srcDomRisk.get(k) === true
+    if (v < MIN_WEIGHT && !(KEEP_RISK && isRisky)) { hiddenSingletons += 1; continue }
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
   for (const [k, v] of domDst) {
-    const [source, target] = k.split("\0")
     const meta = domDstMeta.get(k)
+    const isRisky = meta?.isHighRisk === true
+    if (v < MIN_WEIGHT && !(KEEP_RISK && isRisky)) { hiddenSingletons += 1; continue }
+    const [source, target] = k.split("\0")
     links.push({ source, target, value: v, action: meta?.action, isHighRisk: meta?.isHighRisk })
   }
 
-  return { nodes, links }
+  const totalOthers = othersCount.pat + othersCount.src + othersCount.dom + othersCount.dst
+  return { nodes, links, meta: { grouped: othersCount, hiddenSingletons, othersCount: totalOthers } }
 }
 
 function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {

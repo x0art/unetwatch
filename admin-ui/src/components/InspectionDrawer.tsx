@@ -225,3 +225,5 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
     </Dialog>
   )
 }
+
+// Back-compat shim — prefer EventInspectorSidebar directly (import kept as comment to avoid circular dep).

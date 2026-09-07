@@ -46,7 +46,7 @@ import {
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram } from "./SankeyDiagram"
-import { InspectionDrawer } from "./InspectionDrawer"
+import { EventInspectorSidebar } from "./EventInspectorSidebar"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -115,7 +115,7 @@ function queryRowId(d: QueryDoc): string {
   return `${d.timestamp}|${d.client_ip}|${d.url}`
 }
 
-/** Copy button wrapped so its click never bubbles to the row's InspectionDrawer. */
+/** Copy button wrapped so its click never bubbles to the row's inspector sidebar. */
 function CopyCell({ value, label }: { value: string; label: string }) {
   return (
     <span onClick={(e) => e.stopPropagation()}>
@@ -484,6 +484,17 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
+  // Sankey adaptive controls — Focus + Detail (Track A)
+  const [sankeyTopN, setSankeyTopN] = useState<10 | 20 | 50>(20)
+  const [groupOthers, setGroupOthers] = useState(true)
+  const [hideSingletons, setHideSingletons] = useState(true)
+  const [flowCollapsed, setFlowCollapsed] = useState(false)
+  const [focusedSankeyId, setFocusedSankeyId] = useState<string | null>(null)
+  // Auto-collapse Sankey when entering a long window
+  useEffect(() => {
+    if (timeRange === "7d" || timeRange === "30d") setFlowCollapsed(true)
+    else setFlowCollapsed(false)
+  }, [timeRange])
 
   // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
   queryUI.setResult = setResult
@@ -539,9 +550,11 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
 
   // 4-column flow (Pattern → Source → Domain → Destination) built from this
   // page's own result items — no second ES round-trip.
+  const FLOW_SANKEY_OPTS = { maxPat: 12, maxSrc: sankeyTopN, maxDom: sankeyTopN, maxDst: sankeyTopN, minWeight: hideSingletons ? 2 : 1, groupOthers, keepRisk: true } as const
   const flowSankey = useMemo(
-    () => (result && result.items.length > 0 ? buildFlowSankey(result.items) : null),
-    [result],
+    () => (result && result.items.length > 0 ? buildFlowSankey(result.items, FLOW_SANKEY_OPTS as any) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [result, sankeyTopN, groupOthers, hideSingletons],
   )
   const handleBulkBlacklist = async (ids: Set<string | number>) => {
     const rows = (result?.items ?? []).filter((d) => ids.has(queryRowId(d)))
@@ -630,7 +643,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     return total > 0 ? formatBytes(total) : "—"
   }, [result])
 
-  // Row click opens the InspectionDrawer for deep row detail (was Live Monitor).
+  // Row click opens the EventInspectorSidebar for deep row detail (was Live Monitor).
   const handleRowClick = useCallback(
     (row: QueryDoc) => {
       setDrawerRow(row as unknown as LogRow)
@@ -828,25 +841,92 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             icon={Network}
             description="Pattern → Source → Domain → Destination · click a node or ribbon to filter the table"
             action={
-              <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
-                {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
-                {loading ? "Refreshing…" : "Refresh"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={String(sankeyTopN)}
+                  onChange={(v) => setSankeyTopN(Number(v) as 10 | 20 | 50)}
+                  options={[
+                    { value: "10", label: "Top 10" },
+                    { value: "20", label: "Top 20" },
+                    { value: "50", label: "Top 50" },
+                  ]}
+                  className="w-28"
+                  aria-label="Sankey top N"
+                />
+                <Button
+                  variant={groupOthers ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setGroupOthers((v) => !v)}
+                  aria-pressed={groupOthers}
+                >
+                  {groupOthers ? "Grouped" : "Group tail"}
+                </Button>
+                <Button
+                  variant={hideSingletons ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setHideSingletons((v) => !v)}
+                  aria-pressed={hideSingletons}
+                >
+                  {hideSingletons ? "Hiding 1-hit" : "Hide 1-hit"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setSankeyTopN(10); setGroupOthers(true); setHideSingletons(true); setFocusedSankeyId(null) }}
+                >
+                  Simplify
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
+                  {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
+                  {loading ? "Refreshing…" : "Refresh"}
+                </Button>
+                {(timeRange === "7d" || timeRange === "30d") && (
+                  <Button variant="ghost" size="sm" onClick={() => setFlowCollapsed((v) => !v)}>
+                    {flowCollapsed ? "Show flow" : "Collapse"}
+                  </Button>
+                )}
+              </div>
             }
           >
-            {esOffline ? (
+            {flowCollapsed ? (
+              <div className="flex flex-col items-center gap-3 py-10">
+                <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                  Flow collapsed for this window — {result?.total_requests.toLocaleString() ?? "—"} requests
+                </p>
+                <Button variant="outline" onClick={() => setFlowCollapsed(false)}>
+                  Show flow{flowSankey ? ` — ${flowSankey.links.length} ribbons` : ""}
+                </Button>
+              </div>
+            ) : esOffline ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 Flow unavailable — Elasticsearch unreachable.
               </p>
             ) : flowSankey && flowSankey.links.length > 0 ? (
-              <div className="cv-auto">
-                <SankeyDiagram
-                  nodes={flowSankey.nodes}
-                  links={flowSankey.links}
-                  onNodeClick={(q) => setGlobalFilter(q)}
-                  ariaLabel="Traffic flow — Pattern to Source to Domain to Destination"
-                />
-              </div>
+              <>
+                {(flowSankey as any).meta && ((flowSankey as any).meta.othersCount > 0 || (flowSankey as any).meta.hiddenSingletons > 0) && (
+                  <p className="mb-3 font-mono text-[11px] text-muted-foreground">
+                    Showing top {sankeyTopN}
+                    {(flowSankey as any).meta.othersCount > 0 ? ` · ${(flowSankey as any).meta.grouped.src + (flowSankey as any).meta.grouped.dom + (flowSankey as any).meta.grouped.pat + (flowSankey as any).meta.grouped.dst} hosts grouped as Others` : ""}
+                    {(flowSankey as any).meta.hiddenSingletons > 0 ? ` · ${(flowSankey as any).meta.hiddenSingletons} singletons hidden (risk kept)` : ""}
+                    {" · "}
+                    <button type="button" onClick={() => { setGroupOthers(false); setHideSingletons(false); setSankeyTopN(50) }} className="underline hover:text-foreground">Show all</button>
+                  </p>
+                )}
+                {focusedSankeyId && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 border-[2px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
+                    <span>Focused: {focusedSankeyId}</span>
+                    <Button variant="outline" size="sm" onClick={() => setFocusedSankeyId(null)} className="ml-auto h-6 px-2 text-[10px]">Clear focus</Button>
+                  </div>
+                )}
+                <div className="cv-auto">
+                  <SankeyDiagram
+                    nodes={flowSankey.nodes}
+                    links={flowSankey.links}
+                    onNodeClick={(q) => { setGlobalFilter(q); setFocusedSankeyId(q) }}
+                    ariaLabel="Traffic flow — Pattern to Source to Domain to Destination"
+                  />
+                </div>
+              </>
             ) : (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 No traffic in this window to visualize
@@ -944,7 +1024,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
 
       {/* Deep row inspection (was Live Monitor) — click a row to open. */}
       {drawerRow && (
-        <InspectionDrawer
+        <EventInspectorSidebar
           row={drawerRow}
           onClose={() => setDrawerRow(null)}
           onNavigate={(v) => {

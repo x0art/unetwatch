@@ -399,6 +399,15 @@ async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:
         domain = _domain_of_base(r.get("base_url") or "")
         entry = by_domain.setdefault(domain, {"count": 0, "volume": 0})
         entry["count"] += 1
+        # Prefer real bytes when present, matching _volume_for_bytes / _es_summary.
+        dn = r.get("bytes_downloaded")
+        up = r.get("bytes_uploaded")
+        try:
+            if dn not in (None, "") or up not in (None, ""):
+                entry["volume"] += int(dn or 0) + int(up or 0)
+                continue
+        except (TypeError, ValueError):
+            pass
         if has_duration:
             dur = r.get("duration_seconds") or 0
             try:

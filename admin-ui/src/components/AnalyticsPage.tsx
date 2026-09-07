@@ -213,7 +213,7 @@ export function AnalyticsPage({
   const peakValue = hasRealData && summary!.peakTrafficTime ? summary!.peakTrafficTime : "—"
 
   const volumeHint = hasRealData
-    ? pctArrow(summary!.volumeDeltaPct) ?? (compare === "previous" ? "no prev data" : rangeLabel(range))
+    ? `${pctArrow(summary!.volumeDeltaPct) ?? rangeLabel(range)} · ${summary!.source === "es" ? "live ES" : "findings table"} · bytes + 8 KiB fallback`
     : rangeLabel(range)
   const riskHint = hasRealData
     ? summary!.totalBlacklistedRisk
@@ -428,6 +428,48 @@ export function AnalyticsPage({
           )
         },
         width: "w-40",
+      },
+      {
+        id: "volume",
+        header: "Volume",
+        accessor: (r) => {
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          if (dn || up) return dn + up
+          const dur = Number(r.duration_seconds) || 0
+          return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
+        },
+        align: "right",
+        cell: (r) => {
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          const hasBytes = !!(dn || up)
+          const dur = Number(r.duration_seconds) || 0
+          const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
+          const title = hasBytes
+            ? `Real bytes: ↓ ${dn.toLocaleString()} + ↑ ${up.toLocaleString()}`
+            : `Estimated: duration ${dur || 0}s × 8 KiB`
+          return (
+            <span className="inline-flex items-center gap-1.5" title={title}>
+              <span className="whitespace-nowrap font-mono text-xs tabular-nums">{formatBytes(vol)}</span>
+              <span className={`inline-flex items-center border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]" : "border-border bg-muted text-muted-foreground"}`}>
+                {hasBytes ? "real" : "est."}
+              </span>
+            </span>
+          )
+        },
+        width: "w-32",
+      },
+      {
+        id: "duration",
+        header: "Duration",
+        accessor: (r) => r.duration_seconds,
+        align: "right",
+        cell: (r) =>
+          r.duration_seconds != null && String(r.duration_seconds) !== ""
+            ? <span className="font-mono text-xs tabular-nums">{Number(r.duration_seconds).toFixed(2)}s</span>
+            : <span className="text-xs text-muted-foreground">—</span>,
+        width: "w-24",
       },
     ],
     [openHost, openUrl],
