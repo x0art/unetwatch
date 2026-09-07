@@ -1780,22 +1780,15 @@ export interface ClientReport {
   top_patterns: ClientReportTopPattern[]
 }
 
-export async function getClientReport(
-  clientIp: string,
-  params: { range?: string } = {},
-): Promise<ClientReport> {
-  const qs = new URLSearchParams()
-  if (params.range) qs.set("range", params.range)
-  const q = qs.toString() ? `?${qs}` : ""
-  return request(`/client-report/${encodeURIComponent(clientIp)}${q}`)
+export async function getClientReport(clientIp: string): Promise<ClientReport> {
+  return request(`/client-report/${encodeURIComponent(clientIp)}`)
 }
 
 export async function getClientReportFindings(
   clientIp: string,
-  params: { range?: string; search?: string; limit?: number; offset?: number; sort_by?: string; sort_order?: "asc" | "desc" } = {},
+  params: { search?: string; limit?: number; offset?: number; sort_by?: string; sort_order?: "asc" | "desc" } = {},
 ): Promise<FindingsResponse> {
   const qs = new URLSearchParams()
-  if (params.range) qs.set("range", params.range)
   if (params.search) qs.set("search", params.search)
   if (params.limit != null) qs.set("limit", String(params.limit))
   if (params.offset != null) qs.set("offset", String(params.offset))
@@ -1805,10 +1798,7 @@ export async function getClientReportFindings(
   return request(`/client-report/${encodeURIComponent(clientIp)}/findings${q}`)
 }
 
-export function getClientReportCsvUrl(clientIp: string, params: { range?: string } = {}): string {
-  const qs = new URLSearchParams()
-  if (params.range) qs.set("range", params.range)
-  const q = qs.toString() ? `?${qs}` : ""
-  return `/api/client-report/${encodeURIComponent(clientIp)}/export.csv${q}`
+export function getClientReportCsvUrl(clientIp: string): string {
+  return `/api/client-report/${encodeURIComponent(clientIp)}/export.csv`
 }
 

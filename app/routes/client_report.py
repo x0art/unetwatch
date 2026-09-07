@@ -10,9 +10,9 @@ ADR 0001 applies verbatim: risk = ALLOW block-pattern hit not
 whitelisted; enforcements = DENY/FLAG explicitly.
 
 Endpoints:
-  GET /api/client-report/{client_ip}?range=24h
-  GET /api/client-report/{client_ip}/findings?range=&search=&limit=&offset=&sort_by=&sort_order=
-  GET /api/client-report/{client_ip}/export.csv?range=
+  GET /api/client-report/{client_ip}
+  GET /api/client-report/{client_ip}/findings?search=&limit=&offset=&sort_by=&sort_order=
+  GET /api/client-report/{client_ip}/export.csv
 """
 
 import csv
@@ -30,18 +30,8 @@ from app.database import get_db_conn
 
 router = APIRouter(prefix="/api/client-report", tags=["client-report"])
 
-SUPPORTED_RANGES = {"1h", "24h", "7d", "30d"}
 DEFAULT_BYTES_PER_REQUEST = 8192
-
-
-def _minutes_for_range(range_: str) -> int:
-    return {"1h": 60, "24h": 1440, "7d": 10080, "30d": 43200}[range_]
-
-
-def _validate_range(range_: str) -> str:
-    if range_ not in SUPPORTED_RANGES:
-        raise FastAPIHTTPException(422, f"range must be one of {sorted(SUPPORTED_RANGES)}")
-    return range_
+WINDOW_LABEL = "all time"
 
 
 def _window_clause(minutes: int, params: list) -> str:
@@ -159,14 +149,13 @@ async def _load_whitelist(db):
     return patterns, regex, clauses
 
 
-async def _fetch_client_rows(db, client_ip: str, minutes: int, patterns, regex: str, clauses: list[str]):
-    """Fetch all findings rows for the client+window, post-filtering
+async def _fetch_client_rows(db, client_ip: str, patterns, regex: str, clauses: list[str]):
+    """Fetch all findings rows for the client (no window), post-filtering
     whitelisted rows that couldn't be expressed in SQL."""
     where_parts = ["client_ip = ?"]
     params: list = [client_ip]
     for c in clauses:
         where_parts.append(c)
-    where_parts.append(f"1=1{_window_clause(minutes, params)}")
     clause = f"WHERE {' AND '.join(where_parts)}"
 
     fully_sql = _whitelist_fully_sql(patterns, clauses)
@@ -198,7 +187,7 @@ async def _fetch_client_rows(db, client_ip: str, minutes: int, patterns, regex: 
     return rows
 
 
-def _build_report_payload(client_ip: str, range_: str, minutes: int, rows: list[dict], columns: list[str]) -> dict:
+def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) -> dict:
     has_duration = _has_column(columns, "duration_seconds")
     has_action = _has_column(columns, "action")
     has_data = len(rows) > 0
@@ -352,8 +341,8 @@ def _build_report_payload(client_ip: str, range_: str, minutes: int, rows: list[
 
     return {
         "client_ip": client_ip,
-        "range": range_,
-        "window_minutes": minutes,
+        "range": "all",
+        "window_minutes": 0,
         "has_data": has_data,
         "source": "findings",
         "es_online": False,
@@ -380,22 +369,18 @@ def _build_report_payload(client_ip: str, range_: str, minutes: int, rows: list[
 @router.get("/{client_ip}")
 async def client_report(
     client_ip: str,
-    range: str = Query("24h", alias="range"),
     db=Depends(get_db_conn),
 ):
-    _validate_range(range)
     ip = _validate_ip(client_ip)
-    minutes = _minutes_for_range(range)
     columns = await _column_names(db)
     patterns, regex, clauses = await _load_whitelist(db)
-    rows = await _fetch_client_rows(db, ip, minutes, patterns, regex, clauses)
-    return _build_report_payload(ip, range, minutes, rows, columns)
+    rows = await _fetch_client_rows(db, ip, patterns, regex, clauses)
+    return _build_report_payload(ip, rows, columns)
 
 
 @router.get("/{client_ip}/findings")
 async def client_report_findings(
     client_ip: str,
-    range: str = Query("24h", alias="range"),
     search: str | None = Query(None, max_length=200),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -403,16 +388,12 @@ async def client_report_findings(
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     db=Depends(get_db_conn),
 ):
-    _validate_range(range)
     ip = _validate_ip(client_ip)
-    minutes = _minutes_for_range(range)
     if sort_by not in ALLOWED_SORT:
         sort_by = "log_timestamp"
-    direction = "ASC" if sort_order == "asc" else "DESC"
 
     patterns, regex, clauses = await _load_whitelist(db)
-    # Fetch full window rows, whitelist-filtered
-    rows = await _fetch_client_rows(db, ip, minutes, patterns, regex, clauses)
+    rows = await _fetch_client_rows(db, ip, patterns, regex, clauses)
     # search filter (client-side; small set — bounded by LIMIT 20000 above)
     if search:
         q = search.strip().lower()
@@ -428,17 +409,14 @@ async def client_report_findings(
 @router.get("/{client_ip}/export.csv")
 async def client_report_export_csv(
     client_ip: str,
-    range: str = Query("24h", alias="range"),
     db=Depends(get_db_conn),
 ):
-    _validate_range(range)
     ip = _validate_ip(client_ip)
-    minutes = _minutes_for_range(range)
     columns = await _column_names(db)
     has_duration = _has_column(columns, "duration_seconds")
     patterns, regex, clauses = await _load_whitelist(db)
-    rows = await _fetch_client_rows(db, ip, minutes, patterns, regex, clauses)
-    payload = _build_report_payload(ip, range, minutes, rows, columns)
+    rows = await _fetch_client_rows(db, ip, patterns, regex, clauses)
+    payload = _build_report_payload(ip, rows, columns)
 
     buf = io.StringIO()
     w = csv.writer(buf)
@@ -501,5 +479,6 @@ async def client_report_export_csv(
             (r.get("rule_name") or r.get("rule_info") or ""),
         ])
     csv_text = buf.getvalue()
-    headers = {"Content-Disposition": f"attachment; filename=client-{ip}-{range}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.csv"}
+    fname = f"client-{ip}-{payload['range']}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.csv"
+    headers = {"Content-Disposition": f"attachment; filename={fname}"}
     return PlainTextResponse(csv_text, media_type="text/csv", headers=headers)
