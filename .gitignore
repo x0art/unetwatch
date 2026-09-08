@@ -25,6 +25,7 @@ dist/
 
 # OMC runtime state
 .omc/
+.claude/plans/
 
 # Test artifacts
 .pytest_cache/

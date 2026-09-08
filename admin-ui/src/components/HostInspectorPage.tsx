@@ -1,19 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Activity, Link2, Search, SearchX, Download, ShieldCheck } from "lucide-react"
+import {
+  Activity,
+  Copy,
+  Database,
+  Globe,
+  Link2,
+  Printer,
+  Search,
+  SearchX,
+  Server,
+  ShieldAlert,
+  ShieldCheck,
+  Download,
+} from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, LoadingIcon, useToast } from "./ui"
+import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, LoadingIcon, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
 import { TopDestinations, type TopDomain, type TriggeredPattern } from "./TopDestinations"
+import { TrendCharts, type TrendPoint } from "./TrendCharts"
+import { copyText } from "../lib/utils"
 import {
   bulkImport,
   getHostProfile,
   runQuery,
   timeRangeToMinutesLive,
   formatBytes,
+  getClientReport,
+  getClientReportFindings,
+  getClientReportCsvUrl,
+  getToken,
   type QueryDoc,
   type HostProfile,
+  type ClientReport,
+  type Finding,
 } from "../api"
 import {
   getDestIp,
@@ -384,6 +405,16 @@ export function HostInspectorPage({
   const [page, setPage] = useState(0)
   const pageSize = 50
 
+  // ── Findings (Client Report) branch state ──
+  const [report, setReport] = useState<ClientReport | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [raw, setRaw] = useState<Finding[]>([])
+  const [rawTotal, setRawTotal] = useState(0)
+  const [rawLoading, setRawLoading] = useState(false)
+  const [rawSearch, setRawSearch] = useState("")
+  const [rawPage, setRawPage] = useState(0)
+  const rawPageSize = 50
+
   // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
   // InspectionDrawer "View Host History" land on the right host. Re-runs on
   // every globalFilter change (the page stays mounted across tabs now) — but
@@ -400,11 +431,35 @@ export function HostInspectorPage({
   useEffect(() => {
     setPage(0)
   }, [host, actionFilter])
-  // Re-fetch sections when data source toggle flips (if a host is already selected)
+
+  // Re-fetch the findings report when the source toggle flips to findings and
+  // a host is already selected (the report is all-time; no time range window).
   useEffect(() => {
-    if (host && !loading) {
+    if (!host || loading) return
+    if (hSource === "findings") {
+      setReportLoading(true)
+      void getClientReport((host as unknown as { primaryIp: string }).primaryIp || target)
+        .then((data) => {
+          setReport(data)
+          if (data.has_data) setRawPage(0)
+        })
+        .catch((e) => {
+          setReport(null)
+          toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
+        })
+        .finally(() => setReportLoading(false))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hSource])
+
+  // Re-fetch the live sections when the toggle flips to live and the host was
+  // looked up in Findings mode (sections were never loaded for it).
+  useEffect(() => {
+    if (!host || loading) return
+    if (hSource === "live" && !sections) {
       setSectionsLoading(true)
-      void fetchHostSections((host as unknown as { primaryIp: string }).primaryIp || target, timeRange, hSource)
+      const ip = (host as unknown as { primaryIp: string }).primaryIp || target
+      void fetchHostSections(ip, timeRange, "live")
         .then((data) => setSections(data))
         .catch(() => setSections({ ...EMPTY_SECTIONS, window: timeRange }))
         .finally(() => setSectionsLoading(false))
@@ -423,7 +478,9 @@ export function HostInspectorPage({
     setHasSearched(true)
     setHost(null)
     setSections(null)
+    setReport(null)
     setSectionsLoading(false)
+    setReportLoading(false)
     try {
       const profile = await getHostProfile(clean, timeRange)
       setHost(profile)
@@ -437,17 +494,54 @@ export function HostInspectorPage({
     }
     setLoading(false)
 
-    // Sections load independently so the entity card paints immediately.
-    setSectionsLoading(true)
-    try {
-      const data = await fetchHostSections(clean, timeRange, hSource)
-      setSections(data)
-    } catch {
-      setSections({ ...EMPTY_SECTIONS, window: timeRange })
-    } finally {
-      setSectionsLoading(false)
+    if (hSource === "findings") {
+      // Findings branch: always resolve the full Client Report.
+      setReportLoading(true)
+      try {
+        const data = await getClientReport(clean)
+        setReport(data)
+        setRawPage(0)
+      } catch (e) {
+        setReport(null)
+        setError((e as Error).message || "Report failed")
+        toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
+      } finally {
+        setReportLoading(false)
+      }
+    } else {
+      // Live branch: sections load independently so the entity card paints immediately.
+      setSectionsLoading(true)
+      try {
+        const data = await fetchHostSections(clean, timeRange, hSource)
+        setSections(data)
+      } catch {
+        setSections({ ...EMPTY_SECTIONS, window: timeRange })
+      } finally {
+        setSectionsLoading(false)
+      }
     }
   }
+
+  // ── Raw findings table (findings branch) ──
+  const fetchRaw = useCallback(async () => {
+    if (!report?.client_ip || !report.has_data) return
+    setRawLoading(true)
+    try {
+      const res = await getClientReportFindings(report.client_ip, {
+        search: rawSearch.trim() || undefined,
+        limit: rawPageSize,
+        offset: rawPage * rawPageSize,
+      })
+      setRaw(res.items)
+      setRawTotal(res.total)
+    } catch (e) {
+      toast({ title: "Raw findings failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setRawLoading(false)
+    }
+  }, [report, rawSearch, rawPage, toast])
+
+  useEffect(() => { void fetchRaw() }, [fetchRaw])
 
   const handleExport = () => {
     if (!host) {
@@ -507,8 +601,47 @@ export function HostInspectorPage({
     onNavigate?.("host")
   }, [setGlobalFilter, onNavigate])
 
+  const openUrlInInvestigation = useCallback((url: string) => {
+    if (!url) return
+    try { window.localStorage.setItem("unetwatch_url", url) } catch { /* ignore */ }
+    onNavigate?.("url")
+  }, [onNavigate])
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") lookup(target)
+  }
+
+  // ── Findings branch: client report exports ──
+  const handleExportCsv = () => {
+    if (!report) return
+    const apiUrl = getClientReportCsvUrl(report.client_ip)
+    const tok = getToken()
+    fetch(`/api${apiUrl.replace(/^\/api/, "") || apiUrl}`, { headers: tok ? { "X-API-Key": tok } : {} })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `client-${report.client_ip}-${Date.now()}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+        toast({ title: "CSV exported", variant: "success" })
+      })
+      .catch((e) => toast({ title: "CSV export failed", description: (e as Error).message, variant: "error" }))
+  }
+
+  const handleExportPdf = () => {
+    toast({ title: "Opening print dialog — Save as PDF", variant: "info" })
+    window.print()
+  }
+
+  const handleCopyLink = () => {
+    const url = window.location.href
+    void copyText(url).then((ok) => {
+      if (ok) toast({ title: "COPIED", description: url, variant: "success" })
+      else toast({ title: "COPY FAILED", variant: "error" })
+    })
   }
 
   // Host log rows — client-side action filter layered over fetched rows.
@@ -696,23 +829,99 @@ export function HostInspectorPage({
     [handleOpenHost, handleOpenUrl],
   )
 
-  const showSections = !!host && !error
+  /* ── Findings branch columns (ported from Client Report) ── */
+  const domainColumns = useMemo<DataTableColumn<{ domain: string; count: number; volume: number; pct: number }>[]>(() => [
+    { id: "domain", header: "Domain", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
+    { id: "count", header: "Requests", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+    { id: "volume", header: "Volume", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
+    { id: "pct", header: "% Total", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
+  ], [])
+
+  const patternColumns = useMemo<DataTableColumn<{ pattern: string; hits: number }>[]>(() => [
+    { id: "pattern", header: "Pattern", accessor: (r) => r.pattern, cell: (r) => <span className="block max-w-[280px] truncate font-mono text-xs" title={r.pattern}>{r.pattern}</span> },
+    { id: "hits", header: "Hits", accessor: (r) => r.hits, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.hits.toLocaleString()}</span>, width: "w-24" },
+  ], [])
+
+  const urlColumns = useMemo<DataTableColumn<{ url: string; base_url: string; count: number; last_seen: string }>[]>(() => [
+    { id: "url", header: "URL", accessor: (r) => r.url, cell: (r) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[560px] truncate font-mono text-xs" title={r.url}>{r.url}</span>
+        <button type="button" onClick={() => openUrlInInvestigation(r.url)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground" aria-label="Open in URL Investigation"><Search className="h-3 w-3" /></button>
+      </span>
+    )},
+    { id: "count", header: "Hits", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+  ], [openUrlInInvestigation])
+
+  const rawColumns = useMemo<DataTableColumn<Finding>[]>(() => [
+    { id: "log_timestamp", header: "Timestamp", accessor: (r) => r.log_timestamp, cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.log_timestamp)}</span>, width: "w-44", defaultSortDir: "desc" },
+    { id: "url", header: "URL", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
+    { id: "base_url", header: "Domain", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
+    { id: "pattern", header: "Pattern", enableSorting: false, accessor: (r) => r.matched_patterns, cell: (r) => {
+      let pats: string[] = []
+      try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch {}
+      // Findings-backed report: every finding was stored because it matched a block pattern.
+      // If the row somehow has no matched_patterns (legacy / empty array), fall back to
+      // the report-level top pattern for this client so the cell never reads as "—".
+      if (pats.length === 0 && report?.top_pattern) pats = [report.top_pattern]
+      if (pats.length === 0) return <span className="text-xs text-muted-foreground">—</span>
+      return (
+        <span className="flex flex-wrap gap-1">
+          {pats.map((pat) => (
+            <span key={pat} className="inline-flex items-center border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground" title={pat}>{pat}</span>
+          ))}
+        </span>
+      )
+    } },
+    { id: "volume", header: "Volume", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
+      const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
+      return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><span className={`border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]" : "border-border bg-muted text-muted-foreground"}`}>{hasBytes ? "real" : "est."}</span></span>
+    }, width: "w-32" },
+  ], [report?.top_pattern])
+
+  const showSections = !!host && !error && hSource === "live"
+  const showReport = !!host && !error && hSource === "findings"
+  const isFindings = hSource === "findings"
+  const hasRealData = !!report?.has_data
+
+  const bandwidthPoints = useMemo<TrendPoint[]>(
+    () => (report?.bandwidth.points ?? []).map((p) => ({
+      bucket: p.bucket,
+      inbound: Number((p.inbound / 1024 ** 3).toFixed(3)),
+      outbound: Number((p.outbound / 1024 ** 3).toFixed(3)),
+    })),
+    [report],
+  )
+  const enforcementPoints = useMemo<TrendPoint[]>(
+    () => (report?.enforcements.points ?? []).map((p) => ({ bucket: p.bucket, allow: p.allow, deny: p.deny })),
+    [report],
+  )
+  const volumeValue = hasRealData ? formatBytes(report!.total_volume) : "—"
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Host Investigation"
-        description="Single-entity forensic investigation"
+        description={isFindings ? "Per-client analytics from findings (all time, risk-only)" : "Single-entity forensic investigation (live ES window)"}
       >
-        <Button variant="outline" onClick={handleExport}>
-          <Download className="h-4 w-4" aria-hidden="true" />
-          Export Report
-        </Button>
-        {host && (
-          <Button variant="outline" onClick={handleWhitelist}>
-            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            Whitelist host
-          </Button>
+        {isFindings ? (
+          <>
+            <Button variant="outline" onClick={handleCopyLink} aria-label="Copy share link"><Copy className="h-4 w-4" aria-hidden="true" />Copy link</Button>
+            <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF"><Printer className="h-4 w-4" aria-hidden="true" />Print / PDF</Button>
+            <Button variant="outline" onClick={handleExportCsv} aria-label="Export CSV" disabled={!report?.has_data}><Database className="h-4 w-4" aria-hidden="true" />CSV</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="outline" onClick={handleExport}>
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Export Report
+            </Button>
+            {host && (
+              <Button variant="outline" onClick={handleWhitelist}>
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Whitelist host
+              </Button>
+            )}
+          </>
         )}
       </PageHeader>
 
@@ -727,7 +936,7 @@ export function HostInspectorPage({
         />
         <Button onClick={() => lookup(target)} disabled={loading}>
           {loading ? <LoadingIcon /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          {loading ? "Looking up…" : "Lookup"}
+          {loading ? "Looking up..." : "Lookup"}
         </Button>
         <Select
           value={timeRange}
@@ -755,7 +964,7 @@ export function HostInspectorPage({
         </div>
       )}
 
-      {!loading && !error && host && (
+      {!loading && !error && host && hSource === "live" && (
         <HostEntityCard host={host} risk={host.risk} />
       )}
 
@@ -770,12 +979,13 @@ export function HostInspectorPage({
         <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
           <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">Host Investigation</p>
           <p className="mt-2 text-sm text-muted-foreground">
-            Enter a host or IP (e.g. 192.168.1.45) and run Lookup. Try the wireframe demo IP <span className="font-mono font-semibold text-foreground">192.168.1.45</span> to see the spec card.
+            Enter a host or IP (e.g. 192.168.1.45) and run Lookup. <span className="font-mono font-semibold">Live</span> shows the live ES window;
+            <span className="font-mono font-semibold"> Findings</span> shows all-time analytics from the findings table.
           </p>
         </div>
       )}
 
-      {/* ── Spec §3.2 sections (render only once a host is resolved) ── */}
+      {/* ── LIVE branch — Spec §3.2 sections (render only once a host is resolved) ── */}
       {showSections && (
         <>
           {/* 1) Visual Traffic Timeline & Anomaly Heatmap */}
@@ -872,6 +1082,62 @@ export function HostInspectorPage({
               ariaLabel="Host request logs"
             />
           </Panel>
+        </>
+      )}
+
+      {/* ── FINDINGS branch — Client Report analytics ── */}
+      {showReport && (
+        <>
+          {reportLoading && !report ? (
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+              <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />
+            </div>
+          ) : report && !hasRealData && hasSearched ? (
+            <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
+              <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">No findings for {report.client_ip}</p>
+              <p className="mt-2 text-sm text-muted-foreground">This client has no findings in the database.</p>
+            </div>
+          ) : report && hasRealData ? (
+            <>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+                <StatCard icon={Database} label="Total Requests" value={report.total_requests.toLocaleString()} tone="info" hint={`${report.distinct_urls} URLs · ${report.distinct_domains} domains`} />
+                <StatCard icon={ShieldAlert} label="Risks (ALLOW)" value={report.total_risk.toLocaleString()} tone="danger" hint={report.top_pattern ? `top: ${report.top_pattern}` : "risk-only"} />
+                <StatCard icon={ShieldCheck} label="Enforcements (DENY)" value={report.total_enforcements.toLocaleString()} tone="success" hint="handled" />
+                <StatCard icon={Server} label="Total Volume" value={volumeValue} tone="default" hint={`bytes + 8 KiB fallback · ${report.distinct_domains} domains`} />
+                <StatCard icon={Activity} label="Peak Hour" value={report.peak_hour || "—"} tone="default" hint={`${report.distinct_urls} distinct URLs`} />
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Panel title="Daily Bandwidth (GB)" icon={Activity} description="inbound vs outbound">
+                  <TrendCharts type="area" data={bandwidthPoints} labels={["inbound", "outbound"]} seriesNames={["Inbound", "Outbound"]} unit="GB" height={260} ariaLabel="Client daily bandwidth" />
+                </Panel>
+                <Panel title="Daily Enforcements" icon={Activity} description="ALLOW vs DENY">
+                  <TrendCharts type="stackedBar" data={enforcementPoints} labels={["allow", "deny"]} seriesNames={["ALLOW", "DENY"]} unit="reqs" height={260} ariaLabel="Client daily enforcements" />
+                </Panel>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Panel title="Top Domains" icon={Globe}>
+                  <DataTable columns={domainColumns} data={report.top_domains} rowId={(r) => r.domain} empty={{ icon: Globe, title: "No domains in window", description: "Try a broader date range." }} ariaLabel="Top domains" />
+                </Panel>
+                <Panel title="Top Patterns" icon={Link2}>
+                  <DataTable columns={patternColumns} data={report.top_patterns} rowId={(r) => r.pattern} empty={{ icon: SearchX, title: "No patterns in window", description: "No matched patterns." }} ariaLabel="Top patterns" />
+                </Panel>
+              </div>
+
+              <Panel title="Top URLs" icon={Link2} description="Click to investigate">
+                <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} empty={{ icon: SearchX, title: "No URLs in window" }} ariaLabel="Top URLs" />
+              </Panel>
+
+              <Panel title={`Raw Findings — ${report.client_ip}`} icon={Database} description={`${rawTotal.toLocaleString()} docs`}>
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <input type="search" placeholder="Filter (URL)..." value={rawSearch} onChange={(e) => { setRawSearch(e.target.value); setRawPage(0) }} className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Filter raw findings" />
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">findings table · whitelist-excluded</span>
+                </div>
+                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window" }} ariaLabel="Raw findings" />
+              </Panel>
+            </>
+          ) : null}
         </>
       )}
     </div>

@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react"
 import {
-  FileBarChart,
   Activity,
   Ban,
   BarChart3,
@@ -111,7 +110,6 @@ export type View =
   | "host"
   | "url"
   | "analytics"
-  | "client-report"
 
 export interface NavItem {
   view: View
@@ -135,10 +133,9 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Deep Dive",
     items: [
-      { view: "host", label: "Host Inspector", icon: Users },
+      { view: "host", label: "Host Investigation", icon: Users },
       { view: "url", label: "URL Investigation", icon: Link2 },
       { view: "analytics", label: "Analytics", icon: BarChart3 },
-      { view: "client-report", label: "Client Report", icon: FileBarChart },
     ],
   },
   {

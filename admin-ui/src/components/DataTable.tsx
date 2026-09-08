@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { ArrowDown, ArrowUp, ArrowUpDown, X, type LucideIcon } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, Filter, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/utils"
 import { Button, EmptyState, Pagination, Skeleton } from "./ui"
 import { EASE, Stagger, StaggerItem } from "./motion"
@@ -44,6 +44,8 @@ export interface DataTableColumn<T> {
   cell?: (row: T) => ReactNode
   /** Hide the sort affordance on this column. */
   enableSorting?: boolean
+  /** Hide the per-column filter affordance on this column (default: on). */
+  enableColumnFilter?: boolean
   /** Default direction when this column becomes the active sort. */
   defaultSortDir?: SortDir
   align?: "left" | "center" | "right"
@@ -90,6 +92,12 @@ interface DataTableProps<T> {
   /* Uncontrolled (client-side) sorting defaults. */
   defaultSortBy?: SortKey | null
   defaultSortDir?: SortDir
+  /** Per-column filter state (controlled from the parent); when absent the
+   * component owns its own column filters internally. */
+  columnFilters?: Record<string, string>
+  onColumnFiltersChange?: (filters: Record<string, string>) => void
+  /** Hide the entire per-column filter row across the table. */
+  enableFiltering?: boolean
   onRowClick?: (row: T) => void
   /* Optional pagination slot rendered below the table. */
   page?: number
@@ -161,6 +169,9 @@ export function DataTable<T>({
   onSortChange,
   defaultSortBy = null,
   defaultSortDir = "asc",
+  columnFilters: controlledFilters,
+  onColumnFiltersChange,
+  enableFiltering = true,
   onRowClick,
   page,
   pageSize,
@@ -180,6 +191,30 @@ export function DataTable<T>({
   const sortState = controlled
     ? { key: sortBy ?? null, dir: sortDir ?? "asc" }
     : internalSort
+  const filtersControlled = controlledFilters !== undefined
+  const [internalFilters, setInternalFilters] = useState<Record<string, string>>({})
+  const filters = filtersControlled ? controlledFilters : internalFilters
+  const setFilter = (id: string, value: string) => {
+    const next = { ...filters, [id]: value }
+    if (!value) delete next[id]
+    if (filtersControlled) onColumnFiltersChange?.(next)
+    else setInternalFilters(next)
+  }
+  // A changed column filter can shrink the result set below the current page —
+  // jump back to page 0 so the table never lands on a now-empty page. Compare
+  // by serialized key so parents re-creating the filters object every render
+  // (uncontrolled or not) can't fire the reset spuriously.
+  const hasPagination = onPageChange !== undefined && page !== undefined
+  const filterKey = Object.keys(filters)
+    .filter((k) => filters[k] && filters[k].trim())
+    .sort()
+    .map((k) => `${k}=${filters[k].trim().toLowerCase()}`)
+    .join("|")
+  useEffect(() => {
+    if (!hasPagination || !page || !filterKey) return
+    onPageChange(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey])
 
   const [selected, setSelected] = useState<Set<string | number>>(new Set())
   const rowIdRef = useRef(rowId)
@@ -244,23 +279,46 @@ export function DataTable<T>({
     [sortKey],
   )
 
+  // ── Per-column filtering (runs before sorting) ─────────────────────
+  // Column filters match the raw accessor/cell value (case-insensitive
+  // substring) so the header+narrow filters stay honest across server- and
+  // client-paged tables.
+  const filterMatches = (row: T, filters: Record<string, string>): boolean => {
+    const ids = Object.keys(filters)
+    if (ids.length === 0) return true
+    return ids.every((id) => {
+      const want = filters[id].trim().toLowerCase()
+      if (!want) return true
+      const col = columnsRef.current.find((c) => c.id === id)
+      if (!col) return true
+      const val = col.accessor ? col.accessor(row) : renderCellValue(col, row)
+      return String(val ?? "").toLowerCase().includes(want)
+    })
+  }
+
+  const filteredData = useMemo(() => {
+    const f = filtersControlled ? controlledFilters : internalFilters
+    if (!f || Object.keys(f ?? {}).length === 0) return data
+    return data.filter((r) => filterMatches(r, f ?? {}))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, controlledFilters, internalFilters, filtersControlled])
+
   const sortedData = useMemo(() => {
-    if (controlled || !sortKey || !sortColumn) return data
+    const base = filteredData
+    if (controlled || !sortKey || !sortColumn) return base
     const dir = sortDirState === "asc" ? 1 : -1
-    return [...data].sort((a, b) => {
+    return [...base].sort((a, b) => {
       const av = sortColumn.accessor ? sortColumn.accessor(a) : renderCellValue(sortColumn, a)
       const bv = sortColumn.accessor ? sortColumn.accessor(b) : renderCellValue(sortColumn, b)
       return compareValues(av, bv) * dir
     })
-  }, [data, sortKey, sortDirState, controlled, sortColumn])
+  }, [filteredData, sortKey, sortDirState, controlled, sortColumn])
 
   const alignClass = (align?: "left" | "center" | "right") =>
     align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"
 
   const renderCell = (col: DataTableColumn<T>, row: T) =>
     col.cell ? col.cell(row) : renderCellValue(col, row)
-
-  const hasPagination = onPageChange !== undefined && page !== undefined
 
   // In client mode the component owns sorting + slicing; in server mode the
   // parent already passes exactly the rows for this page.
@@ -270,7 +328,9 @@ export function DataTable<T>({
     return sortedData.slice(page! * size, (page! + 1) * size)
   }, [internalPagination, hasPagination, sortedData, page, pageSize])
 
-  const paginationTotal = internalPagination ? data.length : total
+  // Honest total: internal-pagination tables report the post-filter count;
+  // server-mode tables keep the parent's server-provided total.
+  const paginationTotal = internalPagination ? sortedData.length : total
 
   return (
     <div className={className}>
@@ -336,6 +396,8 @@ export function DataTable<T>({
               {columns.map((col) => {
                 const sortable = col.enableSorting !== false && !col.srOnly
                 const active = sortable && sortState.key === col.id
+                const filterable = sortable && enableFiltering && col.enableColumnFilter !== false
+                const filterActive = filterable && !!filters[col.id]
                 return (
                   <th
                     key={col.id}
@@ -362,6 +424,9 @@ export function DataTable<T>({
                         aria-label={`Sort by ${String(col.header)}${active ? `, currently ${sortState.dir}ending` : ""}`}
                       >
                         {col.header}
+                        {filterActive && (
+                          <Filter className="h-3 w-3 text-[#FFD60A]" aria-hidden="true" />
+                        )}
                         {active ? (
                           sortState.dir === "asc" ? (
                             <ArrowUp className="h-3 w-3 opacity-100" aria-hidden="true" />
@@ -387,6 +452,50 @@ export function DataTable<T>({
                 )
               })}
             </tr>
+            {/* Per-column filter row — one dim, mono input under each sortable column. */}
+            {enableFiltering && (
+              <tr className="border-b-[2.5px] border-border bg-muted/40">
+                {selectable && <td className="px-4 py-1.5" />}
+                {columns.map((col) => {
+                  const filterable = col.enableSorting !== false && !col.srOnly && col.enableColumnFilter !== false
+                  const val = filters[col.id] ?? ""
+                  return (
+                    <td key={col.id} className={cn("px-2 py-1.5", alignClass(col.align))}>
+                      {filterable ? (
+                        <div className={cn("group relative", col.align === "right" && "ml-auto", col.width ? `max-w-full` : "", "w-full")}>
+                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 opacity-40">
+                            <Filter className="h-3 w-3" aria-hidden="true" />
+                          </span>
+                          <input
+                            type="search"
+                            value={val}
+                            onChange={(e) => setFilter(col.id, e.target.value)}
+                            placeholder="Filter…"
+                            aria-label={`Filter by ${String(col.header)}`}
+                            className={cn(
+                              "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-[#0A0A0A] focus:outline-none focus:ring-1 focus:ring-ring dark:focus:border-[#F6F2E8]",
+                              col.align === "right" && "text-right",
+                            )}
+                          />
+                          {val && (
+                            <button
+                              type="button"
+                              onClick={() => setFilter(col.id, "")}
+                              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted"
+                              aria-label={`Clear filter on ${String(col.header)}`}
+                            >
+                              <X className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span />
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            )}
           </thead>
           {loading ? (
             <tbody>
