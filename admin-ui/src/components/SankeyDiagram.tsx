@@ -30,20 +30,17 @@ export {
   type ResolvedColors,
 } from "../lib/echartsTheme"
 
-/** Neobrutalist palette — ink/paper/hazard on the 4-column flow.
- * Column order (user-confirmed): 0 Patterns · 1 Sources · 2 Domains · 3 Destinations.
+/** Neobrutalist palette — ink/paper/hazard on the flow columns.
+ * Column order: 0 Patterns · 1 Sources (client IPs) · 2 URLs · 3 Destinations.
+ * Layer 2 is the requested URL (not the collapsed host), and it carries no
+ * ALLOW/DENY verdict color — action on a domain is noise for tracing what a
+ * client reached. Destinations keep their high-risk red only.
  */
 export const LAYER_COLORS: Record<number, string> = {
   0: "#6B6560", // Patterns — muted slate
   1: "#0A7AFF", // Sources — info blue
-  2: "#0A0A0A", // Domains — overridden per action: ALLOW ink, DENY red, FLAG hazard
+  2: "#0A0A0A", // URLs — neutral ink (no action coloring)
   3: "#9A9590", // Destinations — muted; high-risk override hazard red
-}
-
-function domainColor(action?: string): string {
-  if (action === "DENY") return "#FF3B30"
-  if (action === "FLAG") return "#FFD60A"
-  return "#0A0A0A"
 }
 
 function destColor(isHighRisk?: boolean): string {
@@ -59,29 +56,73 @@ function displayNameForId(id: string, lookup?: Map<string, string>): string {
   return stripSankeyPrefix(id)
 }
 
-/** All node ids reachable from `id` through the flow's links, traversed
- * both ways — i.e. the node's whole connected component. Used for hover
- * emphasis: hovering any node/edge lights up the entire cluster it belongs
- * to, not just its direct neighbors. */
-function componentOf(id: string, links: SankeyLink[]): Set<string> {
-  const adj = new Map<string, Set<string>>()
-  for (const l of links) {
-    if (!adj.has(l.source)) adj.set(l.source, new Set())
-    if (!adj.has(l.target)) adj.set(l.target, new Set())
-    adj.get(l.source)!.add(l.target)
-    adj.get(l.target)!.add(l.source)
-  }
-  const comp = new Set<string>()
-  const queue = [id]
-  while (queue.length) {
-    const cur = queue.pop()!
-    if (comp.has(cur)) continue
-    comp.add(cur)
-    for (const nb of adj.get(cur) ?? []) {
-      if (!comp.has(nb)) queue.push(nb)
+/** Walk `links` from `start`, traversing only in the given direction, and
+ * return every node reached along a single connected run of that direction.
+ * Unlike an undirected flood-fill, this never crosses an earlier layer that a
+ * node does not actually touch — so a hovered URL lights only the client IPs
+ * that reached it (upstream) and the dest IPs it fanned to (downstream), not
+ * every unrelated node sharing a pattern.
+ * Returns `{ nodes, edges }`: the trace nodes plus the edges fully on the path. */
+function tracePath(
+  start: string,
+  links: SankeyLink[],
+): { nodes: Set<string>; edges: Set<string> } {
+  const nodes = new Set<string>([start])
+  const edges = new Set<string>()
+  // Outgoing: follow source → target.
+  let frontier = [start]
+  while (frontier.length) {
+    const next: string[] = []
+    for (const cur of frontier) {
+      for (const l of links) {
+        if (l.source !== cur) continue
+        const key = `${l.source}\u0001${l.target}`
+        if (edges.has(key)) continue
+        edges.add(key)
+        if (!nodes.has(l.target)) {
+          nodes.add(l.target)
+          next.push(l.target)
+        }
+      }
     }
+    frontier = next
   }
-  return comp
+  // Incoming: follow target → source.
+  frontier = [start]
+  while (frontier.length) {
+    const next: string[] = []
+    for (const cur of frontier) {
+      for (const l of links) {
+        if (l.target !== cur) continue
+        const key = `${l.source}\u0001${l.target}`
+        if (edges.has(key)) continue
+        edges.add(key)
+        if (!nodes.has(l.source)) {
+          nodes.add(l.source)
+          next.push(l.source)
+        }
+      }
+    }
+    frontier = next
+  }
+  return { nodes, edges }
+}
+
+/** Highlight set for a hovered edge: the two endpoint chains. */
+function traceEdge(
+  source: string,
+  target: string,
+  links: SankeyLink[],
+): { nodes: Set<string>; edges: Set<string> } {
+  const nodes = new Set<string>([source, target])
+  const edges = new Set<string>([`${source}\u0001${target}`])
+  const out = tracePath(target, links)
+  for (const n of out.nodes) nodes.add(n)
+  for (const e of out.edges) edges.add(e)
+  const inUp = tracePath(source, links)
+  for (const n of inUp.nodes) nodes.add(n)
+  for (const e of inUp.edges) edges.add(e)
+  return { nodes, edges }
 }
 
 function sameNodes(a: SankeyNode[], b: SankeyNode[]): boolean {
@@ -149,30 +190,16 @@ function buildOption(
   layerColors: Record<string, string> | undefined,
   resolved: ResolvedColors,
   layoutIterations: number,
-  hovered: Set<string> | null,
+  hover: { nodes: Set<string>; edges: Set<string> } | null,
 ): EChartsOption {
   const { palette, paletteColors, nodeColors } = resolved
   // Resolve per-node color: spec palette + per-node overrides take precedence
-  // over any caller-provided layerColors. Domains use action, dests use isHighRisk,
-  // with link-metadata fallback when the node itself carries no flag.
+  // over any caller-provided layerColors. Only destinations carry a color
+  // override (high-risk red); every other layer uses its neutral layer color.
   const resolveNodeColor = (n: SankeyNode): string => {
     const layer = n.layer ?? 0
-    if (layer === 2) {
-      let act = n.action
-      if (!act) {
-        const acts = links
-          .filter((l) => l.target === n.id || l.source === n.id)
-          .map((l) => l.action)
-          .filter((v): v is string => Boolean(v))
-        if (acts.length) {
-          const counts: Record<string, number> = {}
-          for (const a of acts) counts[a] = (counts[a] ?? 0) + 1
-          act = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
-        }
-      }
-      if (act) return domainColor(act)
-      return LAYER_COLORS[2]
-    }
+    // Only destinations carry a color override (high-risk red). URL/domain
+    // nodes are neutral ink — ALLOW/DENY verdicts are noise for tracing.
     if (layer === 3) {
       let hr = n.isHighRisk
       if (hr === undefined) {
@@ -208,12 +235,12 @@ function buildOption(
   const isLastColumn = (n: SankeyNode) =>
     (n.layer ?? 0) === maxLayer || !hasOutgoing.has(n.id)
 
-  // Connected-component hover emphasis: when a node/edge is hovered, only
-  // items in its connected component keep full opacity — everything else
-  // dims, so the whole chain lights up instead of just the direct neighbors
-  // (ECharts' built-in `focus: "adjacency"` only reaches one hop).
+  // Path-trace hover emphasis: when a node/edge is hovered, only the items on
+  // that item's directed path stay fully visible — the URL's upstream client
+  // IPs and its downstream dest IPs — everything else dims. This is a real
+  // trace, not the whole connected component.
   const data = nodes.map((n) => {
-    const inComponent = hovered === null || hovered.has(n.id)
+    const onPath = hover === null || hover.nodes.has(n.id)
     const item: SankeyNode & {
       itemStyle: { color: string; opacity: number }
       label?: { position?: "left"; opacity: number }
@@ -221,24 +248,24 @@ function buildOption(
       ...n,
       itemStyle: {
         color: resolveNodeColor(n),
-        opacity: hovered === null ? 0.92 : inComponent ? 1 : 0.12,
+        opacity: hover === null ? 0.92 : onPath ? 1 : 0.1,
       },
       label: {
         ...(isLastColumn(n) ? { position: "left" as const } : {}),
-        opacity: hovered === null ? 1 : inComponent ? 1 : 0.3,
+        opacity: hover === null ? 1 : onPath ? 1 : 0.2,
       },
     }
     return item
   })
   const linkData = links.map((l) => {
-    const inComponent =
-      hovered === null || (hovered.has(l.source) && hovered.has(l.target))
+    const onPath =
+      hover === null || hover.edges.has(`${l.source}\u0001${l.target}`)
     return {
       ...l,
       lineStyle: {
         color: "gradient",
         curveness: 0.5,
-        opacity: hovered === null ? 0.45 : inComponent ? 0.75 : 0.05,
+        opacity: hover === null ? 0.45 : onPath ? 0.8 : 0.03,
       },
     }
   })
@@ -305,12 +332,7 @@ function buildOption(
           fontFamily: "ui-monospace, SFMono-Regular, monospace",
           fontSize: 11,
           position: "right",
-          formatter: (p: { name: string; data?: unknown }) => {
-            const base = formatLabel(p.name)
-            const d = p.data as SankeyNode | undefined
-            if (d?.layer === 2 && d.action) return `${base} [${d.action}]`
-            return base
-          },
+          formatter: (p: { name: string; data?: unknown }) => formatLabel(p.name),
         },
         itemStyle: {
           borderColor: palette.border,
@@ -330,6 +352,7 @@ export function SankeyDiagram({
   height,
   className,
   ariaLabel,
+  focusedId,
   onNodeClick,
 }: {
   nodes: SankeyNode[]
@@ -340,8 +363,10 @@ export function SankeyDiagram({
   height?: number
   className?: string
   ariaLabel?: string
-  /** Click handler — receives node name or "source target" for edges. */
-  onNodeClick?: (name: string) => void
+  /** Node id currently focused (persistent path trace until parent clears it). */
+  focusedId?: string | null
+  /** Click handler — receives the clicked node id + a display-name search term. */
+  onNodeClick?: (info: { id: string; name: string; kind: "node" | "edge" }) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<ECharts | null>(null)
@@ -374,7 +399,7 @@ export function SankeyDiagram({
   // Connected-component hover is driven imperatively from event handlers
   // (not React state) so the canvas repaints synchronously within the same
   // mouseover frame — no async gap between the mouse event and the repaint.
-  const hoveredRef = useRef<Set<string> | null>(null)
+  const hoveredRef = useRef<{ nodes: Set<string>; edges: Set<string> } | null>(null)
   const buildOptRef = useRef<typeof buildOption>(buildOption)
   const linksRef = useRef(links)
   linksRef.current = links
@@ -444,27 +469,34 @@ export function SankeyDiagram({
     prevLinks.current = links
     prevLayerColors.current = layerColors
     prevPalette.current = resolvedPalette
-    // Clear hover on data/theme change so stale component highlights don't
-    // persist across a layout rebuild.
+    // Clear hover on data/theme change so stale highlights don't persist
+    // across a layout rebuild. Re-derive any focused trace for the new data.
     hoveredRef.current = null
+    const focusTrace =
+      focusedId != null && focusedId.trim().length > 0 ? tracePath(focusedId, links) : null
 
     chart.setOption(
-      buildOption(nodes, links, layerColors, resolved, layoutIterations, null),
+      buildOption(nodes, links, layerColors, resolved, layoutIterations, focusTrace),
       true,
     )
     chart.getZr().flush()
-  }, [nodes, links, layerColors, theme, h, resolved, layoutIterations])
+  }, [nodes, links, layerColors, theme, h, resolved, layoutIterations, focusedId])
 
-  // Hover any node/edge → highlight its whole connected component; leaving
-  // the chart restores full opacity. Driven directly from ECharts event
-  // handlers (not React state) so the setOption + flush happens synchronously
-  // in the same frame as the mouse event — no async gap.
+  // Hover any node/edge → trace its path (upstream clients + downstream dests);
+  // leaving the chart restores the focused trace (or full opacity). Driven
+  // directly from ECharts event handlers (not React state) so the setOption +
+  // flush happens synchronously in the same frame as the mouse event.
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
 
-    const pushHover = (comp: Set<string> | null) => {
-      hoveredRef.current = comp
+    const baseTrace = () =>
+      focusedId != null && focusedId.trim().length > 0
+        ? tracePath(focusedId, linksRef.current)
+        : null
+
+    const pushHover = (trace: { nodes: Set<string>; edges: Set<string> } | null) => {
+      hoveredRef.current = trace
       chart.setOption(
         buildOptRef.current(
           nodesRef.current,
@@ -472,7 +504,7 @@ export function SankeyDiagram({
           layerColorsRef.current,
           resolvedRef.current,
           layoutIterRef.current,
-          comp,
+          trace ?? baseTrace(),
         ),
         true,
       )
@@ -480,10 +512,17 @@ export function SankeyDiagram({
     }
 
     const onMouseOver = (params: ECElementEvent) => {
-      const d = params.data as { id?: string; source?: string } | undefined
-      const id = params.dataType === "node" ? d?.id : d?.source
-      if (id) pushHover(componentOf(id, linksRef.current))
-      else pushHover(null)
+      const d = params.data as { id?: string; source?: string; target?: string } | undefined
+      if (params.dataType === "edge") {
+        const s = d?.source ?? ""
+        const t = d?.target ?? ""
+        if (s && t) pushHover(traceEdge(s, t, linksRef.current))
+        else pushHover(null)
+      } else {
+        const id = d?.id ?? ""
+        if (id) pushHover(tracePath(id, linksRef.current))
+        else pushHover(null)
+      }
     }
     const onMouseOut = () => pushHover(null)
     chart.on("mouseover", onMouseOver)
@@ -492,36 +531,34 @@ export function SankeyDiagram({
       chart.off("mouseover", onMouseOver)
       chart.off("mouseout", onMouseOut)
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedId])
 
-  // Click-to-filter wiring — forwards display names to FilterContext so ES `q` matches.
-  // Node click pushes n.name; edge click maps prefixed source/target ids → names
-  // via node-name lookup (fallback: strip src:/pat:/dom:/dst: prefixes) — prefixed
-  // ids would otherwise never match an ES document.
+  // Click wiring — focuses the clicked node (persistent trace) and forwards a
+  // search term to the parent. Node clicks pass `{ id, name }`; edge clicks map
+  // prefixed source/target ids → names so the term can match an ES doc.
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
     const onClick = (params: ECElementEvent) => {
       const cb = onNodeClickRef.current
-      if (!cb) return
       if (params.dataType === "node") {
-        const d = params.data as { name?: string } | undefined
-        const nm =
-          d?.name ??
-          (params as unknown as { name?: string }).name ??
-          ""
-        if (nm) cb(nm)
+        const d = params.data as { id?: string; name?: string } | undefined
+        const id = d?.id ?? ""
+        const nm = d?.name ?? (params as unknown as { name?: string }).name ?? ""
+        if (cb && nm) cb({ id, name: nm, kind: "node" })
         return
       }
       if (params.dataType === "edge") {
         const d = params.data as { source?: string; target?: string } | undefined
-        const rawSrc = d?.source ?? (params as unknown as { source?: string }).source ?? ""
-        const rawTgt = d?.target ?? (params as unknown as { target?: string }).target ?? ""
+        const rawSrc = d?.source ?? ""
+        const rawTgt = d?.target ?? ""
         const map = nodeNameByIdRef.current
         const src = displayNameForId(rawSrc, map)
         const tgt = displayNameForId(rawTgt, map)
-        const q = `${src} ${tgt}`.trim()
-        if (q) cb(q)
+        if (cb && (rawSrc || rawTgt)) {
+          cb({ id: rawSrc || rawTgt, name: `${src} ${tgt}`.trim(), kind: "edge" })
+        }
       }
     }
     chart.on("click", onClick)
