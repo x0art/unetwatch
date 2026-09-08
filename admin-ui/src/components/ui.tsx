@@ -364,6 +364,7 @@ export function Select({
   className,
   placeholder,
   id,
+  size = "default",
   "aria-label": ariaLabel,
 }: {
   value: string
@@ -372,6 +373,7 @@ export function Select({
   className?: string
   placeholder?: string
   id?: string
+  size?: "default" | "sm"
   "aria-label"?: string
 }) {
   const current = options.find((o) => o.value === value)
@@ -381,7 +383,9 @@ export function Select({
         id={id}
         aria-label={ariaLabel}
         className={cn(
-          "flex h-10 w-full items-center justify-between gap-2 border-[2.5px] border-border bg-card px-3 py-2 text-sm font-medium brutal-shadow-sm",
+          size === "default"
+            ? "flex h-10 w-full items-center justify-between gap-2 border-[2.5px] border-border bg-card px-3 py-2 text-sm font-medium brutal-shadow-sm"
+            : "flex h-7 w-full items-center justify-between gap-1 border-[1.5px] border-border bg-card px-1.5 py-1 font-mono text-[11px] font-bold brutal-shadow-sm",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           "disabled:opacity-50 [&>span]:line-clamp-1",
           className,
@@ -391,7 +395,7 @@ export function Select({
           {current?.label ?? placeholder}
         </SelectPrimitive.Value>
         <SelectPrimitive.Icon asChild>
-          <ChevronDown className="h-4 w-4 opacity-70" aria-hidden="true" />
+          <ChevronDown className={size === "default" ? "h-4 w-4 opacity-70" : "h-3 w-3 opacity-70"} aria-hidden="true" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

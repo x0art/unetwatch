@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/utils"
-import { Button, EmptyState, Pagination, Skeleton } from "./ui"
+import { Button, EmptyState, Pagination, Select, Skeleton } from "./ui"
 import { EASE, Stagger, StaggerItem } from "./motion"
 
 /* ════════════════════════════════════════════════════════════════
@@ -98,6 +98,13 @@ interface DataTableProps<T> {
   onColumnFiltersChange?: (filters: Record<string, string>) => void
   /** Hide the entire per-column filter row across the table. */
   enableFiltering?: boolean
+  /**
+   * The per-column filter control. `combobox` (default) renders a compact
+   * dropdown of the distinct accessor values over the current `data`, exact-matching
+   * the selected value. `text` keeps a substring input. Only paginated tables
+   * (onPageChange + page) render the filter row at all.
+   */
+  filterControl?: "combobox" | "text"
   onRowClick?: (row: T) => void
   /* Optional pagination slot rendered below the table. */
   page?: number
@@ -172,6 +179,7 @@ export function DataTable<T>({
   columnFilters: controlledFilters,
   onColumnFiltersChange,
   enableFiltering = true,
+  filterControl = "combobox",
   onRowClick,
   page,
   pageSize,
@@ -280,9 +288,9 @@ export function DataTable<T>({
   )
 
   // ── Per-column filtering (runs before sorting) ─────────────────────
-  // Column filters match the raw accessor/cell value (case-insensitive
-  // substring) so the header+narrow filters stay honest across server- and
-  // client-paged tables.
+  // Combobox mode (the default on paginated tables) matches the exact
+  // accessor value the user picked. Text mode keeps case-insensitive substring
+  // matching.
   const filterMatches = (row: T, filters: Record<string, string>): boolean => {
     const ids = Object.keys(filters)
     if (ids.length === 0) return true
@@ -292,6 +300,7 @@ export function DataTable<T>({
       const col = columnsRef.current.find((c) => c.id === id)
       if (!col) return true
       const val = col.accessor ? col.accessor(row) : renderCellValue(col, row)
+      if (filterControl === "combobox") return String(val ?? "").toLowerCase() === want
       return String(val ?? "").toLowerCase().includes(want)
     })
   }
@@ -301,7 +310,31 @@ export function DataTable<T>({
     if (!f || Object.keys(f ?? {}).length === 0) return data
     return data.filter((r) => filterMatches(r, f ?? {}))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, controlledFilters, internalFilters, filtersControlled])
+  }, [data, controlledFilters, internalFilters, filtersControlled, filterControl])
+
+  // Distinct values per filterable column over the current `data`, for the
+  // combobox options. Built once per data/filter-column set; values are
+  // de-duplicated string forms of the accessor result.
+  const filterOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }[]>()
+    if (filterControl !== "combobox") return map
+    for (const col of columnsRef.current) {
+      if (col.enableSorting === false || col.srOnly || col.enableColumnFilter === false) continue
+      const seen = new Map<string, string>()
+      for (const row of data) {
+        const v = col.accessor ? col.accessor(row) : renderCellValue(col, row)
+        const key = String(v ?? "").trim().toLowerCase()
+        if (!key) continue
+        if (!seen.has(key)) seen.set(key, String(v))
+      }
+      map.set(
+        col.id,
+        [...seen.values()].map((v) => ({ value: v, label: v })),
+      )
+    }
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, columns, filterControl])
 
   const sortedData = useMemo(() => {
     const base = filteredData
@@ -452,8 +485,10 @@ export function DataTable<T>({
                 )
               })}
             </tr>
-            {/* Per-column filter row — one dim, mono input under each sortable column. */}
-            {enableFiltering && (
+            {/* Per-column filter row - only on paginated tables. Combobox of distinct
+                accessor values in combobox mode, or a mono substring input in
+                text mode. */}
+            {enableFiltering && hasPagination && (
               <tr className="border-b-[2.5px] border-border bg-muted/40">
                 {selectable && <td className="px-4 py-1.5" />}
                 {columns.map((col) => {
@@ -462,32 +497,55 @@ export function DataTable<T>({
                   return (
                     <td key={col.id} className={cn("px-2 py-1.5", alignClass(col.align))}>
                       {filterable ? (
-                        <div className={cn("group relative", col.align === "right" && "ml-auto", col.width ? `max-w-full` : "", "w-full")}>
-                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 opacity-40">
-                            <Filter className="h-3 w-3" aria-hidden="true" />
-                          </span>
-                          <input
-                            type="search"
-                            value={val}
-                            onChange={(e) => setFilter(col.id, e.target.value)}
-                            placeholder="Filter…"
-                            aria-label={`Filter by ${String(col.header)}`}
-                            className={cn(
-                              "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-[#0A0A0A] focus:outline-none focus:ring-1 focus:ring-ring dark:focus:border-[#F6F2E8]",
-                              col.align === "right" && "text-right",
+                        filterControl === "combobox" ? (
+                          <div className="flex items-center gap-1">
+                            <Filter className="h-3 w-3 shrink-0 opacity-40" aria-hidden="true" />
+                            {(() => {
+                              const opts = filterOptions.get(col.id) ?? []
+                              const patched = val && !opts.some((o) => o.value === val)
+                                ? [...opts, { value: val, label: val }]
+                                : opts
+                              return (
+                                <Select
+                                  value={val}
+                                  onChange={(v) => setFilter(col.id, v)}
+                                  options={[{ value: "", label: "All" }, ...patched]}
+                                  placeholder="All"
+                                  size="sm"
+                                  aria-label={`Filter by ${String(col.header)}`}
+                                  className="flex-1"
+                                />
+                              )
+                            })()}
+                          </div>
+                        ) : (
+                          <div className={cn("group relative", col.align === "right" && "ml-auto", col.width ? `max-w-full` : "", "w-full")}>
+                            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 opacity-40">
+                              <Filter className="h-3 w-3" aria-hidden="true" />
+                            </span>
+                            <input
+                              type="search"
+                              value={val}
+                              onChange={(e) => setFilter(col.id, e.target.value)}
+                              placeholder="Filter..."
+                              aria-label={`Filter by ${String(col.header)}`}
+                              className={cn(
+                                "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-[#0A0A0A] focus:outline-none focus:ring-1 focus:ring-ring dark:focus:border-[#F6F2E8]",
+                                col.align === "right" && "text-right",
+                              )}
+                            />
+                            {val && (
+                              <button
+                                type="button"
+                                onClick={() => setFilter(col.id, "")}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted"
+                                aria-label={`Clear filter on ${String(col.header)}`}
+                              >
+                                <X className="h-3 w-3" aria-hidden="true" />
+                              </button>
                             )}
-                          />
-                          {val && (
-                            <button
-                              type="button"
-                              onClick={() => setFilter(col.id, "")}
-                              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted"
-                              aria-label={`Clear filter on ${String(col.header)}`}
-                            >
-                              <X className="h-3 w-3" aria-hidden="true" />
-                            </button>
-                          )}
-                        </div>
+                          </div>
+                        )
                       ) : (
                         <span />
                       )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Ban,
   CornerUpRight,
@@ -10,13 +10,15 @@ import {
   Zap,
 } from "lucide-react"
 import {
+  type RedirectCheckResult,
   type RedirectGraph,
   type TrackedUrl,
   type UrlRedirectHistory,
   addBaseUrlToBlacklist,
   addTrackedUrl,
-  checkRedirects,
+  checkRedirectsBackground,
   deleteTrackedUrl,
+  getRedirectCheckStatus,
   getRedirectGraph,
   getUrlRedirectHistory,
   listTrackedUrls,
@@ -297,6 +299,7 @@ export function RedirectsPage() {
   const [addUrl, setAddUrl] = useState("")
   const [busy, setBusy] = useState(false)
   const [busyUrl, setBusyUrl] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<TrackedUrl | null>(null)
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [pendingBulkDelete, setPendingBulkDelete] = useState<Set<string | number> | null>(null)
@@ -395,46 +398,85 @@ export function RedirectsPage() {
     }
   }
 
+  const pollTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (pollTimerRef.current != null) window.clearTimeout(pollTimerRef.current)
+  }, [])
+
+  const pollCheck = useCallback(async (checkId: string, onDone: (res: { checked: number; updated: RedirectCheckResult[] }) => void) => {
+    let attempts = 0
+    const tick = async (): Promise<void> => {
+      attempts += 1
+      try {
+        const run = await getRedirectCheckStatus(checkId)
+        if (run.status === "done") {
+          onDone({ checked: run.checked, updated: run.updated })
+          return
+        }
+        if (run.status === "error") {
+          toast({ title: "Check failed", description: run.error || "Background check errored", variant: "error" })
+          return
+        }
+      } catch {
+        /* transient poll failure - keep waiting unless too many attempts */
+      }
+      if (attempts >= 300) {
+        toast({ title: "Check timed out", description: "The background check did not finish.", variant: "error" })
+        return
+      }
+      pollTimerRef.current = window.setTimeout(tick, 500)
+    }
+    await tick()
+  }, [toast])
+
   const handleCheckNow = async () => {
+    if (checking) return
+    setChecking(true)
     setBusy(true)
     try {
-      const res = await checkRedirects()
-      const changed = res.updated.filter((u) => u.error || u.status === "redirect").length
-      toast({
-        title: `Checked ${res.checked} URL${res.checked === 1 ? "" : "s"}`,
-        description: `${changed} changed or errored`,
-        variant: changed ? "info" : "success",
+      const { check_id: checkId } = await checkRedirectsBackground()
+      await pollCheck(checkId, (res) => {
+        const changed = res.updated.filter((u) => u.error || u.status === "redirect").length
+        toast({
+          title: `Checked ${res.checked} URL${res.checked === 1 ? "" : "s"}`,
+          description: `${changed} changed or errored`,
+          variant: changed ? "info" : "success",
+        })
+        reload()
       })
-      reload()
     } catch (e) {
       toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBusy(false)
+      setChecking(false)
     }
   }
 
   const handleCheckOne = async (item: TrackedUrl) => {
     setBusyUrl(item.url)
     try {
-      const res = await checkRedirects([item.url])
-      const result = res.updated[0]
-      toast({
-        title: `Checked ${item.url}`,
-        description: result
-          ? `${STATUS_META[result.status].label}${
-              result.final_url && result.final_url !== item.url
-                ? ` → ${result.final_url}`
-                : ""
-            }`
-          : "No result",
-        variant:
-          result?.status === "error"
-            ? "error"
-            : result?.status === "redirect"
-              ? "info"
-              : "success",
+      const { check_id: checkId } = await checkRedirectsBackground([item.url])
+      await pollCheck(checkId, (res) => {
+        const result = res.updated[0]
+        toast({
+          title: `Checked ${item.url}`,
+          description: result
+            ? `${STATUS_META[result.status].label}${
+                result.final_url && result.final_url !== item.url
+                  ? ` → ${result.final_url}`
+                  : ""
+              }`
+            : "No result",
+          variant:
+            result?.status === "error"
+              ? "error"
+              : result?.status === "redirect"
+                ? "info"
+                : "success",
+        })
+        reload()
       })
-      reload()
     } catch (e) {
       toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
     } finally {
@@ -466,20 +508,25 @@ export function RedirectsPage() {
   const handleBulkCheck = async (ids: Set<string | number>) => {
     const urls = items.filter((i) => ids.has(i.id)).map((i) => i.url)
     if (!urls.length) return
+    if (checking) return
+    setChecking(true)
     setBusy(true)
     try {
-      const res = await checkRedirects(urls)
-      const changed = res.updated.filter((u) => u.error || u.status === "redirect").length
-      toast({
-        title: `Checked ${res.checked} URL${res.checked === 1 ? "" : "s"}`,
-        description: `${changed} changed or errored`,
-        variant: changed ? "info" : "success",
+      const { check_id: checkId } = await checkRedirectsBackground(urls)
+      await pollCheck(checkId, (res) => {
+        const changed = res.updated.filter((u) => u.error || u.status === "redirect").length
+        toast({
+          title: `Checked ${res.checked} URL${res.checked === 1 ? "" : "s"}`,
+          description: `${changed} changed or errored`,
+          variant: changed ? "info" : "success",
+        })
+        reload()
       })
-      reload()
     } catch (e) {
       toast({ title: "Check failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBusy(false)
+      setChecking(false)
     }
   }
 
@@ -594,9 +641,9 @@ export function RedirectsPage() {
         <Button onClick={handleAdd} disabled={busy || !addUrl.trim()}>
           Track URL
         </Button>
-        <Button variant="outline" size="sm" onClick={handleCheckNow} disabled={busy || loading}>
-          <Zap className="h-4 w-4" />
-          Check now
+        <Button variant="outline" size="sm" onClick={handleCheckNow} disabled={busy || loading || checking}>
+          {checking ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+          {checking ? "Checking in background" : "Check now"}
         </Button>
         <Button variant="outline" size="sm" onClick={reload} disabled={busy}>
           <RefreshCcw className="h-4 w-4" />

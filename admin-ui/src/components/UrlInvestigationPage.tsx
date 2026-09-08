@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   CheckCircle2,
-  Copy,
   Globe,
   Link2,
   Search,
@@ -124,11 +123,20 @@ export function UrlInvestigationPage({
 
   const handleWhitelist = async () => {
     if (!result) return
-    const host = hostOfUrl(result.url)
-    const pattern = host ? `*.${host}/*` : result.url
+    // Whitelist targets the investigated URL (path-scoped), not just its host:
+    // exclude this exact URL prefix from findings & risk, leaving the rest of
+    // the host untouched.
+    const u = result.url
+    if (!u || !u.trim()) { toast({ title: "No URL", variant: "error" }); return }
+    const clean = u.split("?")[0].split("#")[0].replace(/\/$/, "")
+    // Ensure the wildcard has a path boundary so a bare-host URL like
+    // "https://example.com" does not become "https://example.com*" matching
+    // "https://example.com.evil.com".
+    const hasPath = /^https?:\/\/[^/]+\//.test(clean)
+    const pattern = hasPath ? `${clean}*` : `${clean}/*`
     try {
       await bulkImport({ patterns: [pattern], pattern_type: "whitelist" })
-      toast({ title: "Whitelisted", description: `${pattern} added to whitelist — excluded from findings & risk.`, variant: "success" })
+      toast({ title: "URL whitelisted", description: `${pattern} excluded from findings & risk.`, variant: "success" })
     } catch (e) {
       toast({ title: "Whitelist failed", description: (e as Error).message, variant: "error" })
     }
@@ -136,26 +144,19 @@ export function UrlInvestigationPage({
 
   const handleBlacklist = async () => {
     if (!result) return
-    const value = hostOfUrl(result.url) || result.url
+    // Blacklist the investigated URL as a whole. The backend feed stores the
+    // bare host/FQDN (protocol + path stripped) so every access to the domain
+    // is blocked at the device firewall.
     try {
-      const res = await addBaseUrlToBlacklist(value)
+      const res = await addBaseUrlToBlacklist(result.url)
+      const host = hostOfUrl(result.url)
       toast({
-        title: res.added.length ? "Blacklisted" : "Already blacklisted",
-        description: `${value} added to the block feed.`,
+        title: res.added.length ? "URL blacklisted" : "Already blacklisted",
+        description: `${host} added to the block feed (all paths).`,
         variant: res.added.length ? "success" : "info",
       })
     } catch (e) {
       toast({ title: "Blacklist failed", description: (e as Error).message, variant: "error" })
-    }
-  }
-
-  const handleCopy = async () => {
-    if (!result) return
-    try {
-      await navigator.clipboard.writeText(result.url)
-      toast({ title: "URL copied", variant: "success" })
-    } catch {
-      toast({ title: "Copy failed", variant: "error" })
     }
   }
 
@@ -199,32 +200,35 @@ export function UrlInvestigationPage({
     <div className="space-y-5">
       <PageHeader
         title="URL Investigation"
-        description="Investigate who reached a URL — clients, risk status, and enforcement actions."
+        description="Investigate who reached a URL - clients, risk status, and enforcement actions."
+      />
+
+      {/* Standardized search toolbar - matches Host Investigation's brutal-card form. */}
+      <form
+        className="brutal-card p-4"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void investigate(url)
+        }}
       >
-        <form
-          className="flex flex-wrap items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void investigate(url)
-          }}
-        >
+        <div className="flex flex-wrap items-center gap-2">
           <SearchInput
-            placeholder="Paste a URL or host to investigate…"
+            placeholder="Paste a URL or host to investigate..."
             value={url}
             onChange={setUrl}
-            className="w-72"
+            className="flex-1 min-w-[240px]"
             aria-label="URL to investigate"
           />
           <Button type="submit" disabled={loading}>
             {loading ? <LoadingIcon /> : <Search className="h-4 w-4" />}
-            {loading ? "Investigating…" : "Investigate"}
+            {loading ? "Investigating..." : "Investigate"}
           </Button>
           <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
             <button type="button" onClick={() => setUSource("findings")} aria-pressed={uSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
             <button type="button" onClick={() => setUSource("live")} aria-pressed={uSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
           </div>
-        </form>
-      </PageHeader>
+        </div>
+      </form>
 
       {error && (
         <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 font-mono text-xs text-danger">
@@ -276,19 +280,15 @@ export function UrlInvestigationPage({
             />
           </div>
 
-          {/* Actions */}
+          {/* Actions — target the investigated URL, not just its host. */}
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={handleWhitelist}>
               <ShieldCheck className="h-4 w-4" />
-              Whitelist host
+              Whitelist URL
             </Button>
             <Button variant="outline" onClick={handleBlacklist} className="text-destructive hover:text-destructive">
               <ShieldAlert className="h-4 w-4" />
-              Blacklist host
-            </Button>
-            <Button variant="ghost" onClick={handleCopy}>
-              <Copy className="h-4 w-4" />
-              Copy URL
+              Blacklist URL
             </Button>
           </div>
 

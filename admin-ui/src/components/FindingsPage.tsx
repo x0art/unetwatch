@@ -5,6 +5,7 @@ import {
   CornerUpRight,
   Eraser,
   History,
+  Radar,
   Search,
   SearchX,
   RefreshCcw,
@@ -27,6 +28,7 @@ import {
   ConfirmDialog,
   CopyUrlButton,
   PageHeader,
+  Panel,
   RefreshIntervalSelect,
   SearchInput,
   useToast,
@@ -565,7 +567,12 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         </Button>
       </PageHeader>
 
-      <DataTable
+      <Panel
+  title="Findings"
+  icon={Radar}
+  description={`${total.toLocaleString()} finding${total !== 1 ? "s" : ""} detected`}
+>
+<DataTable
         columns={columns}
         data={tableFindings}
         rowId={FINDINGS_ROW_ID}
@@ -604,6 +611,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         onPageChange={setPage}
         ariaLabel="Findings"
       />
+</Panel>
 
       <ConfirmDialog
         open={!!deleteTarget}

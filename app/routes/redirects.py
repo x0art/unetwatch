@@ -1,4 +1,9 @@
+import asyncio
+import uuid
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.database import get_db_conn
 from app.models import RedirectCheckRequest, RedirectTrackCreate
@@ -10,6 +15,55 @@ router = APIRouter(prefix="/api/redirects", tags=["redirects"])
 _HISTORY_COUNT_SQL = (
     "(SELECT COUNT(*) FROM redirect_edges e WHERE e.source_url = t.url) AS history_count"
 )
+
+# In-process store of background redirect check runs, polled by the UI so the
+# heavy HTTP work never blocks the request that kicked it off.
+_RUNS: dict[str, dict] = {}
+
+# Strong references to the asyncio tasks so a running check is never garbage
+# collected mid-flight; the callback removes the reference on completion.
+_TASKS: set[asyncio.Task] = set()
+
+
+async def _run_check(run_id: str, urls: list[str] | None) -> None:
+    """Run `check_all` in the background and persist the outcome on the run."""
+    _RUNS[run_id]["status"] = "running"
+    _RUNS[run_id]["started_at"] = datetime.now(UTC).isoformat()
+    try:
+        result = await check_all(urls)
+        _RUNS[run_id]["checked"] = result["checked"]
+        _RUNS[run_id]["updated"] = result["updated"]
+        _RUNS[run_id]["status"] = "done"
+    except Exception as e:  # noqa: BLE001 - a failed run must not kill the worker
+        _RUNS[run_id]["status"] = "error"
+        _RUNS[run_id]["error"] = str(e)
+    finally:
+        _RUNS[run_id]["finished_at"] = datetime.now(UTC).isoformat()
+
+
+def _spawn_check(run_id: str, urls: list[str] | None) -> None:
+    """Fire `_run_check` on the loop, keeping a strong ref until it finishes."""
+    # Prune finished runs (keep the latest 20) so _RUNS never grows unbounded.
+    finished = [rid for rid, r in _RUNS.items() if r["status"] in ("done", "error")]
+    for rid in sorted(finished)[:-20]:
+        _RUNS.pop(rid, None)
+    task = asyncio.create_task(_run_check(run_id, urls))
+    _TASKS.add(task)
+    task.add_done_callback(_TASKS.discard)
+
+
+async def _validate_tracked(db, urls: list[str] | None) -> None:
+    """Raises 404 for any requested URL that is not being tracked."""
+    if not urls:
+        return
+    placeholders = ", ".join("?" * len(urls))
+    cursor = await db.execute(
+        f"SELECT url FROM tracked_urls WHERE url IN ({placeholders})", urls
+    )
+    known = {r[0] for r in await cursor.fetchall()}
+    missing = [u for u in urls if u not in known]
+    if missing:
+        raise HTTPException(404, f"URL is not being tracked: {missing[0]}")
 
 
 @router.get("/")
@@ -81,9 +135,17 @@ async def delete_tracked_url(tracked_id: int, db=Depends(get_db_conn)):
 @router.post("/check")
 async def run_redirect_check(
     payload: RedirectCheckRequest | None = None,
+    background: bool = Query(False, description="Run in the background and return 202"),
     db=Depends(get_db_conn),
 ):
-    """Re-check all tracked URLs, or a specific set via ``{url}`` / ``{urls}``."""
+    """Re-check all tracked URLs, or a specific set via ``{url}`` / ``{urls}``.
+
+    The heavy per-URL HTTP work in ``check_all`` blocks the request that runs
+    it, so the UI opts into ``background=true``: the route validates, spawns an
+    asyncio task, returns ``202`` immediately, and the frontend polls
+    ``GET /api/redirects/check/status`` for completion. The synchronous path
+    (default) is kept for the scheduler and small inline checks.
+    """
     urls: list[str] | None = None
     if payload:
         if payload.urls is not None:
@@ -91,16 +153,34 @@ async def run_redirect_check(
         elif payload.url:
             urls = [payload.url.strip()]
 
-    if urls:
-        placeholders = ", ".join("?" * len(urls))
-        cursor = await db.execute(
-            f"SELECT url FROM tracked_urls WHERE url IN ({placeholders})", urls
-        )
-        known = {r[0] for r in await cursor.fetchall()}
-        missing = [u for u in urls if u not in known]
-        if missing:
-            raise HTTPException(404, f"URL is not being tracked: {missing[0]}")
+    await _validate_tracked(db, urls)
+
+    if background:
+        run_id = uuid.uuid4().hex
+        _RUNS[run_id] = {
+            "run_id": run_id,
+            "status": "queued",
+            "requested": datetime.now(UTC).isoformat(),
+            "started_at": None,
+            "finished_at": None,
+            "checked": 0,
+            "updated": [],
+            "error": None,
+        }
+        # Fire the heavy check without awaiting it; it owns its own DB session.
+        _spawn_check(run_id, urls)
+        return JSONResponse(status_code=202, content={"accepted": True, "check_id": run_id})
+
     return await check_all(urls)
+
+
+@router.get("/check/status")
+async def redirect_check_status(check_id: str = Query(...)):
+    """Poll the progress of a background redirect check run."""
+    run = _RUNS.get(check_id)
+    if not run:
+        raise HTTPException(404, "Unknown check run")
+    return run
 
 
 @router.get("/graph")

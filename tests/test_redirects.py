@@ -316,3 +316,38 @@ def test_classify_status_redirect_without_location():
     assert _classify_status([], 404, None) == "error"
     assert _classify_status([("a", "b", 301)], 200, None) == "redirect"
     assert _classify_status([], 0, "timeout") == "error"
+
+
+def test_redirects_check_background_202_and_status(client, monkeypatch):
+    """background=true returns 202 immediately and the run reports done via
+    GET /check/status once the background task finishes."""
+    from app.services import redirects as svc
+
+    client.post("/api/redirects/", json={"url": "http://bg.example/x"})
+
+    async def fake_check(session, url):
+        return [], 200, url, None
+
+    monkeypatch.setattr(svc, "check_url", fake_check)
+
+    # Kick off the async run; TestClient's portal lets the task make progress.
+    resp = client.post("/api/redirects/check", json={"url": "http://bg.example/x"}, params={"background": "true"})
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["accepted"] is True
+    check_id = body["check_id"]
+
+    # Allow the background task to run (TestClient portal runs on the event loop).
+    import time
+    status = {}
+    for _ in range(50):
+        s = client.get("/api/redirects/check/status", params={"check_id": check_id}).json()
+        if s["status"] in ("done", "error"):
+            status = s
+            break
+        time.sleep(0.05)
+
+    assert status.get("status") == "done"
+    assert status.get("checked") == 1
+    assert status["updated"][0]["url"] == "http://bg.example/x"
+    assert status["updated"][0]["status"] == "ok"

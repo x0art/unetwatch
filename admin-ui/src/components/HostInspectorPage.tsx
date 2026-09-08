@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Activity,
-  Copy,
   Database,
   Globe,
   Link2,
@@ -20,9 +19,7 @@ import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
 import { TopDestinations, type TopDomain, type TriggeredPattern } from "./TopDestinations"
 import { TrendCharts, type TrendPoint } from "./TrendCharts"
-import { copyText } from "../lib/utils"
 import {
-  bulkImport,
   getHostProfile,
   runQuery,
   timeRangeToMinutesLive,
@@ -563,22 +560,6 @@ export function HostInspectorPage({
     }
   }
 
-  /* ── Per-host whitelist action (ADR 0001) ──
-     NOTE: blacklisting a client source IP is intentionally removed — blacklist
-     entries are destination hosts (URLs whose host is an IP), consumed by the
-     device-firewall feeds. */
-  const handleWhitelist = async () => {
-    if (!target.trim()) return
-    const host = target.trim()
-    const pattern = `*.${host}/*`
-    try {
-      await bulkImport({ patterns: [pattern], pattern_type: "whitelist" })
-      toast({ title: "Whitelisted", description: `${pattern} added to whitelist — excluded from risk.`, variant: "success" })
-    } catch (e) {
-      toast({ title: "Whitelist failed", description: (e as Error).message, variant: "error" })
-    }
-  }
-
   const handleOpenUrl = useCallback((url: string) => {
     if (!url) return
     setGlobalFilter(url)
@@ -634,14 +615,6 @@ export function HostInspectorPage({
   const handleExportPdf = () => {
     toast({ title: "Opening print dialog — Save as PDF", variant: "info" })
     window.print()
-  }
-
-  const handleCopyLink = () => {
-    const url = window.location.href
-    void copyText(url).then((ok) => {
-      if (ok) toast({ title: "COPIED", description: url, variant: "success" })
-      else toast({ title: "COPY FAILED", variant: "error" })
-    })
   }
 
   // Host log rows — client-side action filter layered over fetched rows.
@@ -905,7 +878,6 @@ export function HostInspectorPage({
       >
         {isFindings ? (
           <>
-            <Button variant="outline" onClick={handleCopyLink} aria-label="Copy share link"><Copy className="h-4 w-4" aria-hidden="true" />Copy link</Button>
             <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF"><Printer className="h-4 w-4" aria-hidden="true" />Print / PDF</Button>
             <Button variant="outline" onClick={handleExportCsv} aria-label="Export CSV" disabled={!report?.has_data}><Database className="h-4 w-4" aria-hidden="true" />CSV</Button>
           </>
@@ -915,39 +887,36 @@ export function HostInspectorPage({
               <Download className="h-4 w-4" aria-hidden="true" />
               Export Report
             </Button>
-            {host && (
-              <Button variant="outline" onClick={handleWhitelist}>
-                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                Whitelist host
-              </Button>
-            )}
           </>
         )}
       </PageHeader>
 
-      <div className="flex gap-2">
-        <Input
-          placeholder="Host / IP Search: 192.168.1.45"
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-          onKeyDown={onKeyDown}
-          className="flex-1 font-mono text-[13px]"
-          aria-label="Host or IP search"
-        />
-        <Button onClick={() => lookup(target)} disabled={loading}>
-          {loading ? <LoadingIcon /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          {loading ? "Looking up..." : "Lookup"}
-        </Button>
-        <Select
-          value={timeRange}
-          onChange={(v) => setTimeRange(v as typeof timeRange)}
-          options={TIME_RANGE_OPTIONS}
-          className="w-36 shrink-0"
-          aria-label="Time range"
-        />
-        <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
-          <button type="button" onClick={() => setHSource("live")} aria-pressed={hSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
-          <button type="button" onClick={() => setHSource("findings")} aria-pressed={hSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+      {/* Standardized search toolbar - matches URL Investigation's brutal-card form. */}
+      <div className="brutal-card p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="Host / IP Search: 192.168.1.45"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            onKeyDown={onKeyDown}
+            className="flex-1 min-w-[240px] font-mono text-[13px]"
+            aria-label="Host or IP search"
+          />
+          <Button onClick={() => lookup(target)} disabled={loading}>
+            {loading ? <LoadingIcon /> : <Search className="h-4 w-4" aria-hidden="true" />}
+            {loading ? "Looking up..." : "Lookup"}
+          </Button>
+          <Select
+            value={timeRange}
+            onChange={(v) => setTimeRange(v as typeof timeRange)}
+            options={TIME_RANGE_OPTIONS}
+            className="w-36 shrink-0"
+            aria-label="Time range"
+          />
+          <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
+            <button type="button" onClick={() => setHSource("live")} aria-pressed={hSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
+            <button type="button" onClick={() => setHSource("findings")} aria-pressed={hSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+          </div>
         </div>
       </div>
 

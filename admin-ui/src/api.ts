@@ -1277,6 +1277,30 @@ export async function checkRedirects(urls?: string[]): Promise<RedirectCheckResp
   })
 }
 
+export interface RedirectCheckRun {
+  run_id: string
+  status: "queued" | "running" | "done" | "error"
+  requested: string
+  started_at: string | null
+  finished_at: string | null
+  checked: number
+  updated: RedirectCheckResult[]
+  error: string | null
+}
+
+/** Kick off a redirect check in the background (202); poll getRedirectCheckStatus. */
+export async function checkRedirectsBackground(urls?: string[]): Promise<{ accepted: boolean; check_id: string }> {
+  const qs = "?background=true"
+  return request(`/redirects/check${qs}`, {
+    method: "POST",
+    body: JSON.stringify(urls && urls.length ? { urls } : {}),
+  })
+}
+
+export async function getRedirectCheckStatus(checkId: string): Promise<RedirectCheckRun> {
+  return request(`/redirects/check/status?check_id=${encodeURIComponent(checkId)}`)
+}
+
 export async function getRedirectGraph(): Promise<RedirectGraph> {
   return request("/redirects/graph")
 }
