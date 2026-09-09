@@ -706,7 +706,7 @@ export function StatCard({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="mono-label truncate">[ {label.toUpperCase()} ]</p>
-            <div className="mt-2 font-display text-[30px] leading-none">{animated ? <AnimatedNumber value={value} /> : value}</div>
+            <div className="mt-2 font-display text-[30px] leading-none tabular-nums">{animated ? <AnimatedNumber value={value} /> : value}</div>
             {hint && <p className="mt-1 font-mono text-[11px] text-muted-foreground">{hint}</p>}
           </div>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">

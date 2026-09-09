@@ -625,7 +625,7 @@ export function DataTable<T>({
                     {columns.map((col) => (
                       <td
                         key={col.id}
-                        className={cn("px-4 py-3", alignClass(col.align), col.className)}
+                        className={cn("px-4 py-3", alignClass(col.align), col.align === "right" && "tabular-nums", col.className)}
                       >
                         {col.srOnly ? <span className="sr-only">{renderCell(col, row)}</span> : renderCell(col, row)}
                       </td>

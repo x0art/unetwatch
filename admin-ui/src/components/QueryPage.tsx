@@ -419,7 +419,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
               className="stroke-border/60"
               strokeDasharray={i === 0 ? undefined : "3 3"}
             />
-            <text x={CHART_PAD.l - 6} y={g.y + 3} textAnchor="end" fontSize={9} className="fill-muted-foreground">
+            <text x={CHART_PAD.l - 6} y={g.y + 3} textAnchor="end" fontSize={9} className="fill-muted-foreground tabular-nums">
               {g.label}
             </text>
           </g>
@@ -890,7 +890,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           >
             {flowCollapsed ? (
               <div className="flex flex-col items-center gap-3 py-10">
-                <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground tabular-nums">
                   Flow collapsed for this window — {result?.total_requests.toLocaleString() ?? "—"} requests
                 </p>
                 <Button variant="outline" onClick={() => setFlowCollapsed(false)}>

@@ -127,7 +127,7 @@ export function AnimatedNumber({
     const controls = animate(mv, value, { duration: durationMs / 1000, ease: EASE })
     return controls.stop
   }, [value, durationMs, mv])
-  return <>{display.toLocaleString()}</>
+  return <span className="tabular-nums">{display.toLocaleString()}</span>
 }
 
 /** Route-transition wrapper — fade + 8px rise on enter, fade out on exit.
