@@ -17,8 +17,7 @@ import type { ResolvedColors } from "../lib/echartsTheme"
 echarts.use([SankeyChart, TooltipComponent, CanvasRenderer])
 
 // Re-export shared types and the shared theme resolver so existing
-// `from "./SankeyDiagram"` imports (RedirectFlowDiagram, NetworkGraphDiagram)
-// keep working unchanged.
+// `from "./SankeyDiagram"` imports keep working unchanged.
 export type { SankeyNode, SankeyLink } from "../types/sankey"
 export {
   FALLBACK_DARK,
@@ -43,8 +42,22 @@ export const LAYER_COLORS: Record<number, string> = {
   3: "#9A9590", // Destinations — muted; high-risk override hazard red
 }
 
-function destColor(isHighRisk?: boolean): string {
-  return isHighRisk ? "#FF3B30" : "#9A9590"
+/** Layer color resolved for the active theme. LAYER_COLORS holds the
+ * light-mode hexes; dark mode swaps the two hexes that vanish on the ink
+ * background (#0A0A0A URLs) or read too dim (#6B6560 patterns). */
+function layerColor(layer: number, isDark: boolean): string {
+  if (isDark) {
+    switch (layer) {
+      case 0: return "#9A9590" // Patterns — lighter than muted on dark
+      case 2: return "#F6F2E8" // URLs — paper on ink bg
+      default: return LAYER_COLORS[layer]
+    }
+  }
+  return LAYER_COLORS[layer]
+}
+
+function destColor(isHighRisk?: boolean, isDark?: boolean): string {
+  return isHighRisk ? "#FF3B30" : isDark ? "#D4CFC5" : "#9A9590"
 }
 
 function stripSankeyPrefix(id: string): string {
@@ -191,6 +204,7 @@ function buildOption(
   resolved: ResolvedColors,
   layoutIterations: number,
   hover: { nodes: Set<string>; edges: Set<string> } | null,
+  isDark: boolean,
 ): EChartsOption {
   const { palette, paletteColors, nodeColors } = resolved
   // Resolve per-node color: spec palette + per-node overrides take precedence
@@ -209,13 +223,13 @@ function buildOption(
           .filter((v): v is boolean => v !== undefined)
         if (flags.length) hr = flags.some(Boolean)
       }
-      if (hr !== undefined) return destColor(hr)
-      return LAYER_COLORS[3]
+      if (hr !== undefined) return destColor(hr, isDark)
+      return layerColor(3, isDark)
     }
     if (layerColors && layerColors[String(layer)]) {
-      return nodeColors[String(layer)] ?? LAYER_COLORS[layer] ?? paletteColors[0]
+      return nodeColors[String(layer)] ?? layerColor(layer, isDark)
     }
-    return LAYER_COLORS[layer] ?? paletteColors[0]
+    return layerColor(layer, isDark)
   }
   const maxLayer = nodes.reduce((m, n) => Math.max(m, n.layer ?? 0), 0)
   const layerCounts: Record<number, number> = {}
@@ -411,6 +425,8 @@ export function SankeyDiagram({
   resolvedRef.current = resolved
   const layoutIterRef = useRef(layoutIterations)
   layoutIterRef.current = layoutIterations
+  const isDarkRef = useRef(theme === "dark")
+  isDarkRef.current = theme === "dark"
   const onNodeClickRef = useRef(onNodeClick)
   onNodeClickRef.current = onNodeClick
   const nodeNameByIdRef = useRef<Map<string, string>>(new Map(nodes.map((n) => [n.id, n.name])) )
@@ -476,7 +492,7 @@ export function SankeyDiagram({
       focusedId != null && focusedId.trim().length > 0 ? tracePath(focusedId, links) : null
 
     chart.setOption(
-      buildOption(nodes, links, layerColors, resolved, layoutIterations, focusTrace),
+      buildOption(nodes, links, layerColors, resolved, layoutIterations, focusTrace, theme === "dark"),
       true,
     )
     chart.getZr().flush()
@@ -505,6 +521,7 @@ export function SankeyDiagram({
           resolvedRef.current,
           layoutIterRef.current,
           trace ?? baseTrace(),
+          isDarkRef.current,
         ),
         true,
       )
