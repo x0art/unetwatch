@@ -4,6 +4,7 @@ import {
   Database,
   Globe,
   Link2,
+  Network,
   Printer,
   Search,
   SearchX,
@@ -24,6 +25,7 @@ import {
   runQuery,
   timeRangeToMinutesLive,
   formatBytes,
+  buildFlowSankey,
   getClientReport,
   getClientReportFindings,
   getClientReportCsvUrl,
@@ -33,6 +35,7 @@ import {
   type ClientReport,
   type Finding,
 } from "../api"
+import { SankeyDiagram } from "./SankeyDiagram"
 import {
   getDestIp,
   getDurationMs,
@@ -401,6 +404,8 @@ export function HostInspectorPage({
   const [hSource, setHSource] = useState<HostSource>("live")
   const [page, setPage] = useState(0)
   const pageSize = 50
+  /** Focused node id in the client-behaviour Sankey (persistent trace). */
+  const [behaviourFocus, setBehaviourFocus] = useState<string | null>(null)
 
   // ── Findings (Client Report) branch state ──
   const [report, setReport] = useState<ClientReport | null>(null)
@@ -623,6 +628,24 @@ export function HostInspectorPage({
     if (actionFilter === "All") return sections.logs
     return sections.logs.filter((r) => (r.action ?? "") === actionFilter)
   }, [sections, actionFilter])
+
+  // Client-behaviour flow: an ego view of this host — pattern → this client
+  // → URL → destination — over the same rows the request log shows. Built with
+  // the shared buildFlowSankey so it inherits top-N capping, Others grouping
+  // and the path-tracing hover/click interactions of the Query flow.
+  const behaviourFlow = useMemo(() => {
+    const items = filteredLogs as unknown as QueryDoc[]
+    if (items.length === 0) return null
+    return buildFlowSankey(items, {
+      maxPat: 12,
+      maxSrc: 5,
+      maxUrl: 20,
+      maxDst: 20,
+      minWeight: 1,
+      groupOthers: true,
+      keepRisk: true,
+    })
+  }, [filteredLogs])
 
   // Materialize the current page. Real data is already sliced; the demo window
   // (42,810 virtual rows) generates each page lazily from demoMeta so the full
@@ -1015,7 +1038,42 @@ export function HostInspectorPage({
             )}
           </Panel>
 
-          {/* 3) Chronological Kibana Request Logs */}
+          {/* 3) Client behaviour flow — pattern → this client → URL → dest IP */}
+          <Panel
+            title="Client Behaviour Flow"
+            icon={Network}
+            description="Pattern → this client → URL → destination · hover traces a path · click isolates it"
+          >
+            {sectionsLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : behaviourFlow && behaviourFlow.links.length > 0 ? (
+              <>
+                {behaviourFocus && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 border-[2px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
+                    <span>Focused: {behaviourFocus.replace(/^(stub:)?(src|pat|url|dom|dst|ip|base):/, "")}</span>
+                    <span className="opacity-60">(trace isolated)</span>
+                    <Button variant="outline" size="sm" onClick={() => setBehaviourFocus(null)} className="ml-auto h-6 px-2 text-[10px]">Clear focus</Button>
+                  </div>
+                )}
+                <SankeyDiagram
+                  nodes={behaviourFlow.nodes}
+                  links={behaviourFlow.links}
+                  focusedId={behaviourFocus}
+                  onNodeClick={(info) => {
+                    if (info.kind === "node") setBehaviourFocus((cur) => (cur === info.id ? null : info.id))
+                    else setBehaviourFocus(info.id)
+                  }}
+                  ariaLabel="Client behaviour — pattern to client to URL to destination"
+                />
+              </>
+            ) : (
+              <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+                NO DATA IN WINDOW
+              </p>
+            )}
+          </Panel>
+
+          {/* 4) Chronological Kibana Request Logs */}
           <Panel
             title="Chronological Kibana Request Logs"
             icon={SearchX}
