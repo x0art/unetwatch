@@ -211,8 +211,8 @@ type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "succe
 
 const badgeVariants: Record<BadgeVariant, string> = {
   default: "bg-[#0A0A0A] text-white border-[#0A0A0A] dark:bg-[#F6F2E8] dark:text-[#0A0A0A] dark:border-[#F6F2E8]",
-  secondary: "bg-secondary text-[#0A0A0A] border-[#0A0A0A]",
-  destructive: "bg-danger text-white border-[#0A0A0A]",
+  secondary: "bg-secondary text-[#0A0A0A] border-[#0A0A0A] dark:border-[#F6F2E8]",
+  destructive: "bg-danger text-white border-[#0A0A0A] dark:border-[#F6F2E8]",
   outline: "bg-card text-foreground border-border",
   success: "bg-[#0A0A0A] text-[#FFD60A] border-[#0A0A0A] dark:bg-[#FFD60A] dark:text-[#0A0A0A] dark:border-[#FFD60A]",
   warning: "bg-secondary text-[#0A0A0A] border-[#0A0A0A]",
@@ -472,9 +472,9 @@ const ToastContext = createContext<ToastContextValue | null>(null)
 
 const toastVariantStyles: Record<ToastVariant, { icon: LucideIcon; className: string }> = {
   default: { icon: Info, className: "bg-card text-foreground border-[#0A0A0A] brutal-shadow dark:border-[#F6F2E8]" },
-  success: { icon: CheckCircle2, className: "bg-secondary text-[#0A0A0A] border-[#0A0A0A] brutal-shadow" },
-  error: { icon: AlertTriangle, className: "bg-danger text-white border-[#0A0A0A] brutal-shadow" },
-  info: { icon: Info, className: "bg-info text-white border-[#0A0A0A] brutal-shadow" },
+  success: { icon: CheckCircle2, className: "bg-secondary text-[#0A0A0A] border-[#0A0A0A] brutal-shadow dark:border-[#F6F2E8]" },
+  error: { icon: AlertTriangle, className: "bg-danger text-white border-[#0A0A0A] brutal-shadow dark:border-[#F6F2E8]" },
+  info: { icon: Info, className: "bg-info text-white border-[#0A0A0A] brutal-shadow dark:border-[#F6F2E8]" },
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {
