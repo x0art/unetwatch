@@ -52,7 +52,7 @@ class PatternBulkImport(BaseModel):
 
 class BlacklistEntryCreate(BaseModel):
     value: str = Field(..., min_length=1, max_length=500)
-    source: str = Field(default="manual", pattern="^(manual|finding)$")
+    source: str = Field(default="manual", pattern="^(manual|finding|redirect)$")
     finding_id: int | None = None
 
 

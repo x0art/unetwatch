@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.database import get_db_conn
 from app.models import RedirectCheckRequest, RedirectTrackCreate
-from app.services.redirects import check_all, is_valid_url
+from app.services.redirects import blacklist_tracked_hosts, check_all, is_valid_url
 
 router = APIRouter(prefix="/api/redirects", tags=["redirects"])
 
@@ -105,6 +105,7 @@ async def add_tracked_url(payload: RedirectTrackCreate, db=Depends(get_db_conn))
         raise HTTPException(
             400, "url must start with http:// or https:// and contain no spaces"
         )
+    already_tracked = False
     try:
         cursor = await db.execute(
             "INSERT INTO tracked_urls (url, source) VALUES (?, ?)",
@@ -113,8 +114,14 @@ async def add_tracked_url(payload: RedirectTrackCreate, db=Depends(get_db_conn))
         await db.commit()
     except Exception as e:
         if "UNIQUE" in str(e):
-            raise HTTPException(409, f"URL already tracked: {url}")
-        raise HTTPException(500, str(e))
+            already_tracked = True
+        else:
+            raise HTTPException(500, str(e))
+    # Tracking a URL implies its host belongs on the block feed — every
+    # tracked host (new or pre-existing) is ensured on the blacklist.
+    await blacklist_tracked_hosts(db, [url])
+    if already_tracked:
+        raise HTTPException(409, f"URL already tracked: {url}")
     pid = cursor.lastrowid
     cursor = await db.execute(
         f"SELECT t.*, {_HISTORY_COUNT_SQL} FROM tracked_urls t WHERE t.id = ?",

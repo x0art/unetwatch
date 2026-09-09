@@ -51,6 +51,18 @@ async def lifespan(app: FastAPI):
     db = await get_db()
     try:
         await sync_regenerate(db)
+        # Reconciliation: every tracked redirect URL belongs on the blacklist
+        # feed (source='redirect'). Idempotent — already-blacklisted hosts are
+        # no-ops — so this also backfills rows tracked before auto-blacklist
+        # existed. Feeds are regenerated once at the end either way.
+        from app.services.redirects import blacklist_tracked_hosts
+
+        cursor = await db.execute("SELECT url FROM tracked_urls")
+        tracked = [row[0] for row in await cursor.fetchall()]
+        if tracked:
+            added = await blacklist_tracked_hosts(db, tracked)
+            if added:
+                print(f"[INIT] auto-blacklisted {len(added)} tracked redirect host(s)")
     finally:
         await db.close()
 

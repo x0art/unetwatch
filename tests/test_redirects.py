@@ -351,3 +351,49 @@ def test_redirects_check_background_202_and_status(client, monkeypatch):
     assert status.get("checked") == 1
     assert status["updated"][0]["url"] == "http://bg.example/x"
     assert status["updated"][0]["status"] == "ok"
+
+
+def test_track_url_auto_blacklists_host(client):
+    """Tracking a URL puts its bare host on the blacklist feed (source='redirect')."""
+    resp = client.post("/api/redirects/", json={"url": "http://evil.example:8080/a?x=1"})
+    assert resp.status_code == 201
+
+    entries = client.get("/api/blacklist/entries").json()
+    assert "evil.example" in entries["urls"]
+
+
+def test_retrack_same_host_blacklists_once(client):
+    """Tracking more URLs on an already-blacklisted host adds one feed entry."""
+    client.post("/api/redirects/", json={"url": "http://dup.example/a"})
+
+    # Same exact URL again — 409 on the tracked row, blacklist unchanged.
+    dup = client.post("/api/redirects/", json={"url": "http://dup.example/a"})
+    assert dup.status_code == 409
+
+    # A different path on the same host tracks fine but must not duplicate
+    # the blacklist entry (INSERT OR IGNORE on (kind, value)).
+    other = client.post("/api/redirects/", json={"url": "http://dup.example/b"})
+    assert other.status_code == 201
+    entries = client.get("/api/blacklist/entries").json()
+    assert entries["urls"].count("dup.example") == 1
+
+
+async def test_check_hop_targets_auto_blacklisted(client, monkeypatch):
+    """Redirect hop targets discovered during a check land on the blacklist."""
+    from app.services import redirects as svc
+
+    client.post("/api/redirects/", json={"url": "http://src.example/1"})
+
+    async def fake_check(session, url):
+        # One hop: src.example -> hop-target.example
+        if "src.example" in url:
+            return ([("http://src.example/1", "http://hop-target.example/x", 302)], 200, url, None)
+        return [], 200, url, None
+
+    monkeypatch.setattr(svc, "check_url", fake_check)
+    resp = client.post("/api/redirects/check")
+    assert resp.status_code == 200
+
+    entries = client.get("/api/blacklist/entries").json()
+    assert "src.example" in entries["urls"]
+    assert "hop-target.example" in entries["urls"]

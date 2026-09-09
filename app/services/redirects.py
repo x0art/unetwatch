@@ -19,6 +19,43 @@ def is_valid_url(value: str) -> bool:
     return v.startswith(("http://", "https://")) and " " not in v
 
 
+async def blacklist_tracked_hosts(db, urls: list[str]) -> list[str]:
+    """Add every tracked URL's host to the blacklist feed (source='redirect').
+
+    A URL under redirect watch is by definition suspicious: it was tracked
+    from a finding or a redirect hop, and monitoring it means the domain
+    should not be reached at all. Each URL is normalized to its bare FQDN
+    (``normalize_blacklist_value``) and inserted with ``INSERT OR IGNORE``
+    so re-tracking an already-blacklisted host is a no-op. Feeds are
+    regenerated only when at least one new host landed.
+
+    Returns the list of hosts actually added (empty when all were already
+    present).
+    """
+    from app.services.blacklist import normalize_blacklist_value
+    from app.services.feeds import sync_regenerate
+
+    added: list[str] = []
+    touched_kinds: set[str] = set()
+    for u in urls:
+        try:
+            kind, host = normalize_blacklist_value(u)
+        except ValueError:
+            continue  # not a normalizable host (bare internal name etc.) — skip
+        cursor = await db.execute(
+            "INSERT OR IGNORE INTO blacklist_entries (kind, value, source)"
+            " VALUES (?, ?, 'redirect')",
+            (kind, host),
+        )
+        if cursor.rowcount:
+            added.append(host)
+            touched_kinds.add(kind)
+    if added:
+        await db.commit()
+        await sync_regenerate(db, tuple(touched_kinds))
+    return added
+
+
 async def _request_once(
     session: aiohttp.ClientSession, method: str, url: str, timeout: float
 ):
@@ -121,6 +158,13 @@ async def _check_one(db, session: aiohttp.ClientSession, row) -> dict | None:
             "INSERT OR IGNORE INTO tracked_urls (url, source) VALUES (?, 'auto')",
             (target,),
         )
+
+    # Hop targets discovered by this check are auto-blacklisted: a URL the
+    # chain points at is now under watch, so its host belongs on the block
+    # feed like every other tracked host. blacklist_tracked_hosts dedupes via
+    # INSERT OR IGNORE, so already-blacklisted hosts are no-ops.
+    if hops:
+        await blacklist_tracked_hosts(db, [t for _, t, _ in hops])
 
     if hops:
         current_targets = [t for _, t, _ in hops]
