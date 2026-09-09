@@ -21,7 +21,7 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, Panel, RefreshIntervalSelect, Skeleton, StatCard } from "./ui"
+import { Button, Panel, RefreshIntervalSelect, Skeleton, StatCard, useToast } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { useAutoRefresh, usePageVisible } from "../lib/utils"
 import { type View } from "./Sidebar"
@@ -65,6 +65,7 @@ export function DashboardPage({
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "ONLINE" : "IDLE") : "UNKNOWN"
   const pageVisible = usePageVisible()
+  const { toast } = useToast()
 
   const banner =
     counts !== null && counts.block === 0
@@ -97,17 +98,17 @@ export function DashboardPage({
         if (!cancelled) setBlacklistCount(data.urls.length + data.ips.length)
       })
       .catch(() => {
-        if (!cancelled) setBlacklistCount(null)
+        if (!cancelled) { setBlacklistCount(null); toast({ title: "Failed to load blacklist count", variant: "error" }) }
       })
     listTrackedUrls({ limit: 1 })
       .then((data) => {
         if (!cancelled) setTrackedCount(data.total)
       })
       .catch(() => {
-        if (!cancelled) setTrackedCount(null)
+        if (!cancelled) { setTrackedCount(null); toast({ title: "Failed to load tracked URL count", variant: "error" }) }
       })
     return () => { cancelled = true }
-  }, [])
+  }, [toast])
 
   const fetchRecent = useCallback(() => {
     let cancelled = false
@@ -117,13 +118,13 @@ export function DashboardPage({
         if (!cancelled) setRecentFindings(data.items)
       })
       .catch(() => {
-        if (!cancelled) setRecentFindings([])
+        if (!cancelled) { setRecentFindings([]); toast({ title: "Failed to load recent findings", variant: "error" }) }
       })
       .finally(() => {
         if (!cancelled) setRecentLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [toast])
 
   useEffect(() => fetchRecent(), [fetchRecent])
 

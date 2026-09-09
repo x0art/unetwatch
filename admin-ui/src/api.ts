@@ -831,7 +831,7 @@ export async function getLiveSankey(
         id: n.id,
         name: n.label,
         layer: n.kind === "ip" ? 1 : 3,
-        // Destinations without action stay standard purple; SankeyDiagram will use LAYER_COLORS[3]
+        // Destinations without action stay muted; SankeyDiagram resolves via LAYER_COLORS[3]
       }))
       const links: LiveSankeyLink[] = res.flow.links.map((l) => ({
         source: l.source,

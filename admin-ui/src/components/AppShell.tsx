@@ -1,4 +1,4 @@
-import { useState, type ReactNode, useRef } from "react"
+import { useState, type ReactNode, useRef, useEffect } from "react"
 import { MobileSidebar, MobileMenuButton, Sidebar, useTheme, type View } from "./Sidebar"
 import { cn } from "../lib/utils"
 
@@ -26,6 +26,10 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false)
   const { theme, toggle } = useTheme()
   const mainRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    document.title = title ? `uNetWatch — ${title}` : "uNetWatch"
+  }, [title])
 
   const handleNavigate = (view: View) => {
     onNavigate(view)
