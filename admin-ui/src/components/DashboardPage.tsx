@@ -21,7 +21,7 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, Panel, RefreshIntervalSelect, Skeleton, StatCard, useToast } from "./ui"
+import { Button, EmptyState, Panel, RefreshIntervalSelect, Skeleton, StatCard, useToast } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { useAutoRefresh, usePageVisible } from "../lib/utils"
 import { type View } from "./Sidebar"
@@ -39,12 +39,12 @@ interface DashboardPageProps {
 function formatLastUpdated(timestamp: number) {
   const diff = Date.now() - timestamp
   const seconds = Math.floor(diff / 1000)
-  if (seconds < 10) return "JUST NOW"
-  if (seconds < 60) return `${seconds}S AGO`
+  if (seconds < 10) return "Just now"
+  if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}M AGO`
+  if (minutes < 60) return `${minutes}m ago`
   const hours = Math.floor(minutes / 60)
-  return `${hours}H AGO`
+  return `${hours}h ago`
 }
 
 function formatDetected(ts: string) {
@@ -63,7 +63,7 @@ export function DashboardPage({
   onNavigate,
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
-  const statusLabel = status ? (isOnline ? "ONLINE" : "IDLE") : "UNKNOWN"
+  const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
   const pageVisible = usePageVisible()
   const { toast } = useToast()
 
@@ -71,54 +71,83 @@ export function DashboardPage({
     counts !== null && counts.block === 0
       ? {
           kind: "setup" as const,
-          title: "NO BLOCK PATTERNS YET",
-          description: "ADD BLOCK PATTERNS TO START FLAGGING TRAFFIC.",
-          actionLabel: "ADD PATTERNS",
+          title: "No block patterns yet",
+          description: "Add block patterns to start flagging traffic.",
+          actionLabel: "Add patterns",
           action: () => onNavigate("patterns"),
         }
       : status !== null && !status.es_online
         ? {
             kind: "offline" as const,
-            title: "ELASTICSEARCH UNREACHABLE",
-            description: "MONITORING IS PAUSED. CHECK THE CLUSTER, THEN RETRY.",
-            actionLabel: "RETRY",
+            title: "Elasticsearch unreachable",
+            description: "Monitoring is paused. Check the cluster, then retry.",
+            actionLabel: "Retry",
             action: onRefresh,
           }
         : null
 
   const [blacklistCount, setBlacklistCount] = useState<number | null>(null)
+  const [blacklistError, setBlacklistError] = useState<string | null>(null)
   const [trackedCount, setTrackedCount] = useState<number | null>(null)
+  const [trackedError, setTrackedError] = useState<string | null>(null)
   const [recentFindings, setRecentFindings] = useState<Finding[]>([])
   const [recentLoading, setRecentLoading] = useState(true)
+  const [recentError, setRecentError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchBlacklistCount = useCallback(() => {
     let cancelled = false
+    setBlacklistError(null)
     getBlacklistSet()
       .then((data) => {
         if (!cancelled) setBlacklistCount(data.urls.length + data.ips.length)
       })
-      .catch(() => {
-        if (!cancelled) { setBlacklistCount(null); toast({ title: "Failed to load blacklist count", variant: "error" }) }
-      })
-    listTrackedUrls({ limit: 1 })
-      .then((data) => {
-        if (!cancelled) setTrackedCount(data.total)
-      })
-      .catch(() => {
-        if (!cancelled) { setTrackedCount(null); toast({ title: "Failed to load tracked URL count", variant: "error" }) }
+      .catch((e) => {
+        if (!cancelled) {
+          setBlacklistCount(null)
+          setBlacklistError((e as Error).message)
+          toast({ title: "Failed to load blacklist count", variant: "error" })
+        }
       })
     return () => { cancelled = true }
   }, [toast])
 
+  const fetchTrackedCount = useCallback(() => {
+    let cancelled = false
+    setTrackedError(null)
+    listTrackedUrls({ limit: 1 })
+      .then((data) => {
+        if (!cancelled) setTrackedCount(data.total)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setTrackedCount(null)
+          setTrackedError((e as Error).message)
+          toast({ title: "Failed to load tracked URL count", variant: "error" })
+        }
+      })
+    return () => { cancelled = true }
+  }, [toast])
+
+  useEffect(() => {
+    const cancelBlacklist = fetchBlacklistCount()
+    const cancelTracked = fetchTrackedCount()
+    return () => { cancelBlacklist(); cancelTracked() }
+  }, [fetchBlacklistCount, fetchTrackedCount])
+
   const fetchRecent = useCallback(() => {
     let cancelled = false
     setRecentLoading(true)
+    setRecentError(null)
     getFindings({ limit: 5 })
       .then((data) => {
         if (!cancelled) setRecentFindings(data.items)
       })
-      .catch(() => {
-        if (!cancelled) { setRecentFindings([]); toast({ title: "Failed to load recent findings", variant: "error" }) }
+      .catch((e) => {
+        if (!cancelled) {
+          setRecentFindings([])
+          setRecentError((e as Error).message)
+          toast({ title: "Failed to load recent findings", variant: "error" })
+        }
       })
       .finally(() => {
         if (!cancelled) setRecentLoading(false)
@@ -142,11 +171,11 @@ export function DashboardPage({
           <div>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 bg-danger border border-border shrink-0" aria-hidden="true" />
-              <span className="mono-label">[ DASHBOARD // UNETWATCH ]</span>
+              <span className="mono-label">Dashboard · uNetWatch</span>
             </div>
-            <h2 className="mt-1 text-[30px] font-semibold tracking-tight sm:text-[36px]">DASHBOARD</h2>
+            <h2 className="mt-1 text-[30px] font-semibold tracking-tight sm:text-[36px]">Dashboard</h2>
             <p className="mt-1 max-w-[52ch] text-xs font-medium text-muted-foreground">
-              LIVE POLL HEALTH — FINDINGS — REDIRECT WATCH
+              Live poll health — findings — redirect watch
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -163,7 +192,7 @@ export function DashboardPage({
             <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
             <Button variant="outline" size="sm" onClick={onRefresh}>
               <RefreshCcw className="h-4 w-4" />
-              REFRESH
+              Refresh
             </Button>
           </div>
         </div>
@@ -172,7 +201,7 @@ export function DashboardPage({
       {/* ── Banner ── */}
       {banner && (
         <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-secondary p-4 shadow-sm">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
             {banner.kind === "setup" ? <ShieldAlert className="h-5 w-5" aria-hidden="true" /> : <RefreshCcw className="h-5 w-5" aria-hidden="true" />}
           </div>
           <div className="min-w-0 flex-1">
@@ -185,7 +214,7 @@ export function DashboardPage({
         </div>
       )}
 
-      {/* ── Primary stats — bento with hard slabs ── */}
+      {/* ── Primary stats — soft cards ── */}
       <div className="grid gap-3 lg:grid-cols-12">
         <div className="lg:col-span-3">
           <StatCard
@@ -193,7 +222,7 @@ export function DashboardPage({
             label="Next Poll"
             value={<CountdownRing remaining={remaining} total={intervalSec} />}
             tone="default"
-            hint="UNTIL NEXT ES QUERY"
+            hint="Until next ES query"
           />
         </div>
         <div className="lg:col-span-5">
@@ -202,10 +231,10 @@ export function DashboardPage({
             label="Findings"
             value={status ? status.findings_count.toLocaleString() : "—"}
             tone="info"
-            hint="PERSISTED BY ES POLL"
+            hint="Persisted by ES poll"
             action={
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("findings")}>
-                VIEW ALL <ArrowRight className="h-3 w-3" />
+                View all <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
@@ -216,10 +245,10 @@ export function DashboardPage({
             label="Blacklist"
             value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
             tone="danger"
-            hint="HOSTS & IPS BLOCKED"
+            hint="Hosts & IPs blocked"
             action={
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("blacklist")}>
-                MANAGE <ArrowRight className="h-3 w-3" />
+                Manage <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
@@ -230,26 +259,44 @@ export function DashboardPage({
             label="Tracked URLs"
             value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
             tone="warning"
-            hint="MONITORED FOR REDIRECTS"
+            hint="Monitored for redirects"
             action={
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("redirects")}>
-                VIEW ALL <ArrowRight className="h-3 w-3" />
+                View all <ArrowRight className="h-3 w-3" />
               </Button>
             }
           />
         </div>
       </div>
 
+      {/* Inline error panels — keep toasts too */}
+      {(blacklistError || trackedError) && (
+        <div className="space-y-2">
+          {blacklistError && (
+            <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
+              <span className="flex-1">Blacklist count failed to load — {blacklistError}</span>
+              <Button variant="outline" size="sm" onClick={() => { void fetchBlacklistCount() }}>Retry</Button>
+            </div>
+          )}
+          {trackedError && (
+            <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
+              <span className="flex-1">Tracked count failed to load — {trackedError}</span>
+              <Button variant="outline" size="sm" onClick={() => { void fetchTrackedCount() }}>Retry</Button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Secondary stats ── */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard icon={Ban} label="Block Patterns" value={counts?.block ?? "—"} tone="danger" hint="URL PATTERNS TO FLAG" />
-        <StatCard icon={CheckCircle2} label="Whitelist" value={counts?.whitelist ?? "—"} tone="default" hint="PATTERNS TO ALLOW" />
-        <StatCard icon={Zap} label="ES Status" value={isOnline ? "ONLINE" : "OFFLINE"} tone={isOnline ? "default" : "danger"} hint="ES CONNECTIVITY" />
-        <StatCard icon={History} label="Poll Interval" value={status ? `${status.poll_interval_minutes}M` : "—"} tone="default" hint="AUTO CHECK FREQUENCY" />
+        <StatCard icon={Ban} label="Block Patterns" value={counts?.block ?? "—"} tone="danger" hint="URL patterns to flag" />
+        <StatCard icon={CheckCircle2} label="Whitelist" value={counts?.whitelist ?? "—"} tone="default" hint="Patterns to allow" />
+        <StatCard icon={Zap} label="ES Status" value={isOnline ? "Online" : "Offline"} tone={isOnline ? "default" : "danger"} hint="ES connectivity" />
+        <StatCard icon={History} label="Poll Interval" value={status ? `${status.poll_interval_minutes}M` : "—"} tone="default" hint="Auto check frequency" />
       </div>
 
       {/* ── Recent findings ── */}
-      <Panel title="RECENT FINDINGS" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>VIEW ALL <ArrowRight className="h-3.5 w-3.5" /></Button>}>
+      <Panel title="Recent findings" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>View all <ArrowRight className="h-3.5 w-3.5" /></Button>}>
           <div className="space-y-2">
             {recentLoading ? (
               <Skeleton className="h-32 w-full" />
@@ -258,26 +305,34 @@ export function DashboardPage({
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border bg-muted text-muted-foreground">
-                      <th className="px-3 py-2 text-left text-xs font-medium">CLIENT IP</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium">BASE URL</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium">DETECTED</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Client IP</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Base URL</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">Detected</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {recentFindings.map((f) => (
                       <tr key={f.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onNavigate("findings", f.base_url)}>
                         <td className="px-3 py-2 font-mono font-medium">{f.client_ip}</td>
-                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground">{f.base_url}</td>
+                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground" title={f.base_url}>{f.base_url}</td>
                         <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+            ) : recentError ? (
+              <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
+                <span className="flex-1">Couldn&apos;t load recent findings — {recentError}</span>
+                <Button variant="outline" size="sm" onClick={fetchRecent}>Retry</Button>
+              </div>
             ) : (
-              <p className="py-6 text-center text-xs font-medium text-muted-foreground">
-                NO FINDINGS YET — THEY APPEAR AFTER THE ES POLL DETECTS MATCHES.
-              </p>
+              <EmptyState
+                icon={SearchX}
+                title="No findings yet"
+                description="They appear after the ES poll detects matches."
+                action={<Button variant="outline" size="sm" onClick={() => onNavigate("query")}>Run query</Button>}
+              />
             )}
           </div>
         </Panel>
@@ -287,14 +342,14 @@ export function DashboardPage({
         <button
           type="button"
           onClick={() => onNavigate("query")}
-          className="group relative flex items-center gap-4 rounded-md border border-border bg-card p-5 text-left shadow-sm active:scale-[0.98] lg:col-span-3 lg:p-6"
+          className="group relative flex items-center gap-4 rounded-md border border-border bg-card p-5 text-left shadow-sm active:scale-[0.98] lg:col-span-3 lg:p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted/50"
         >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-info text-white">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-info/10 text-info">
             <FileSearch className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold tracking-tight">QUERY CONSOLE</p>
-            <p className="mt-0.5 text-xs font-medium text-muted-foreground">LIVE ES QUERIES & ACCESS-FLOW</p>
+            <p className="text-sm font-semibold tracking-tight">Query console</p>
+            <p className="mt-0.5 text-xs font-medium text-muted-foreground">Live ES queries & access-flow</p>
           </div>
           <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
         </button>
@@ -303,14 +358,14 @@ export function DashboardPage({
           <button
             type="button"
             onClick={() => onNavigate("query")}
-            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98]"
+            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted/50"
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
               <Link2 className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold tracking-tight">TRAFFIC FLOW</p>
-              <p className="text-xs font-medium text-muted-foreground">CLIENT → SERVER → URL</p>
+              <p className="text-xs font-semibold tracking-tight">Traffic flow</p>
+              <p className="text-xs font-medium text-muted-foreground">Client → server → URL</p>
             </div>
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>
@@ -318,14 +373,14 @@ export function DashboardPage({
           <button
             type="button"
             onClick={() => onNavigate("patterns")}
-            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98]"
+            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted/50"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <Ban className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold tracking-tight">PATTERNS</p>
-              <p className="text-xs font-medium text-muted-foreground">BLOCK & WHITELIST RULES</p>
+              <p className="text-xs font-semibold tracking-tight">Patterns</p>
+              <p className="text-xs font-medium text-muted-foreground">Block & whitelist rules</p>
             </div>
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>

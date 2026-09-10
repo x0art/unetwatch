@@ -52,14 +52,14 @@ export function AddPatternDialog({
       onClose()
       onCreated?.()
     } catch (e) {
-      toast({ title: "Error", description: (e as Error).message, variant: "error" })
+      toast({ title: "Create failed", description: (e as Error).message, variant: "error" })
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Add Pattern">
+    <Dialog open={open} onClose={onClose} title="Add pattern">
       <div className="space-y-4">
         <div>
           <Label>Pattern</Label>

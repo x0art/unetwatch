@@ -297,7 +297,7 @@ export function Label({ children, className, htmlFor }: { children: ReactNode; c
   )
 }
 
-/* ── Skeleton — hatched ─────────────────────────────────────── */
+/* ── Skeleton — shimmer ─────────────────────────────────────── */
 
 export function Skeleton({ className }: { className?: string }) {
   return (
@@ -471,9 +471,9 @@ const ToastContext = createContext<ToastContextValue | null>(null)
 
 const toastVariantStyles: Record<ToastVariant, { icon: LucideIcon; className: string }> = {
   default: { icon: Info, className: "bg-card text-foreground border-border shadow-lg" },
-  success: { icon: CheckCircle2, className: "bg-card text-foreground border-success/30 shadow-lg" },
-  error: { icon: AlertTriangle, className: "bg-card text-foreground border-danger/30 shadow-lg" },
-  info: { icon: Info, className: "bg-card text-foreground border-info/30 shadow-lg" },
+  success: { icon: CheckCircle2, className: "bg-card text-foreground border-success/20 shadow-lg" },
+  error: { icon: AlertTriangle, className: "bg-card text-foreground border-danger/20 shadow-lg" },
+  info: { icon: Info, className: "bg-card text-foreground border-info/20 shadow-lg" },
 }
 
 export function ToastProvider({ children }: { children: ReactNode }) {

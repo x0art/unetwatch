@@ -169,7 +169,7 @@ export function UrlInvestigationPage({
         <button
           type="button"
           onClick={() => handleViewHost(r.client_ip)}
-          className="group inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-primary hover:underline"
+          className="group inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
           title="Open Host Inspector"
         >
           {r.client_ip}
@@ -224,15 +224,16 @@ export function UrlInvestigationPage({
             {loading ? "Investigating..." : "Investigate"}
           </Button>
           <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
-            <button type="button" onClick={() => setUSource("findings")} aria-pressed={uSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
-            <button type="button" onClick={() => setUSource("live")} aria-pressed={uSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${uSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
+            <button type="button" onClick={() => setUSource("findings")} aria-pressed={uSource === "findings"} className={`rounded-sm px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${uSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+            <button type="button" onClick={() => setUSource("live")} aria-pressed={uSource === "live"} className={`rounded-sm px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${uSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
           </div>
         </div>
       </form>
 
       {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 font-mono text-xs text-danger">
-          {error}
+        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={() => void investigate(searched || url)}>Retry</Button>
         </div>
       )}
 
@@ -311,6 +312,7 @@ export function UrlInvestigationPage({
                   icon: SearchX,
                   title: "No clients found",
                   description: "This URL has no persisted accesses in the window.",
+                  action: <Button variant="outline" size="sm" onClick={() => void investigate(url)}>Search again</Button>,
                 }}
               />
             ) : (
@@ -318,6 +320,7 @@ export function UrlInvestigationPage({
                 icon={SearchX}
                 title="No clients found"
                 description="No persisted accesses for this URL."
+                action={<Button variant="outline" size="sm" onClick={() => void investigate(url)}>Search again</Button>}
               />
             )}
           </Panel>
@@ -331,6 +334,7 @@ export function UrlInvestigationPage({
           icon={Link2}
           title="Investigate a URL"
           description="Paste a URL or host above to see every client that reached it, with actions to whitelist or blacklist."
+          action={<Button variant="outline" size="sm" onClick={() => void investigate("https://example.com")}>Try example.com</Button>}
         />
       )}
     </div>

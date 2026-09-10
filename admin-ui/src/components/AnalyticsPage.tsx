@@ -22,6 +22,7 @@ import {
   Skeleton,
   StatCard,
   useToast,
+  Badge,
   type SelectOption,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
@@ -146,6 +147,7 @@ export function AnalyticsPage({
   const [rawSearch, setRawSearch] = useState("")
   const [rawPage, setRawPage] = useState(0)
   const [rawUniqueDomains, setRawUniqueDomains] = useState(false)
+  const [rawError, setRawError] = useState<string | null>(null)
   const rawPageSize = 50
 
   const fetchAll = useCallback(async () => {
@@ -182,6 +184,7 @@ export function AnalyticsPage({
   // Raw-data table — the persisted findings in the selected window.
   const fetchRaw = useCallback(async () => {
     setRawLoading(true)
+    setRawError(null)
     try {
       const res = await getFindings({
         search: rawSearch.trim() || undefined,
@@ -192,7 +195,9 @@ export function AnalyticsPage({
       setRaw(res.items)
       setRawTotal(res.total)
     } catch (e) {
-      toast({ title: "Raw data load failed", description: (e as Error).message, variant: "error" })
+      const msg = (e as Error).message || "Raw data load failed"
+      setRawError(msg)
+      toast({ title: "Raw data load failed", description: msg, variant: "error" })
     } finally {
       setRawLoading(false)
     }
@@ -452,9 +457,7 @@ export function AnalyticsPage({
           return (
             <span className="inline-flex items-center gap-1.5" title={title}>
               <span className="whitespace-nowrap font-mono text-xs tabular-nums">{formatBytes(vol)}</span>
-              <span className={`inline-flex items-center rounded border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-transparent bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>
-                {hasBytes ? "real" : "est."}
-              </span>
+              <Badge variant={hasBytes ? "success" : "secondary"}>{hasBytes ? "Real" : "Estimated"}</Badge>
             </span>
           )
         },
@@ -554,7 +557,7 @@ export function AnalyticsPage({
   return (
     <div className="space-y-5">
       <PageHeader title="Analytics & Reports" description="Usage, enforcements, and raw findings.">
-        <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+        <span className="text-xs font-medium text-muted-foreground">
           {rangeLabel(range)} · {summary?.source === "es" ? "live ES" : "findings table"}
         </span>
         <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF">
@@ -588,8 +591,9 @@ export function AnalyticsPage({
       </div>
 
       {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 font-mono text-xs text-danger">
-          {error}
+        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={() => void fetchAll()}>Retry</Button>
         </div>
       )}
 
@@ -655,7 +659,7 @@ export function AnalyticsPage({
               type="stackedBar"
               data={enforcementPoints}
               labels={["allow", "deny"]}
-              seriesNames={["ALLOW", "DENY"]}
+              seriesNames={["Allow", "Deny"]}
               unit="reqs"
               height={260}
               ariaLabel="Daily policy enforcements, allow vs deny"
@@ -676,6 +680,7 @@ export function AnalyticsPage({
               icon: Globe,
               title: "No domains in window",
               description: "Try a broader date range.",
+              action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
             ariaLabel="Top bandwidth consuming domains"
           />
@@ -690,6 +695,7 @@ export function AnalyticsPage({
               icon: ShieldCheck,
               title: "No enforced domains in window",
               description: "DENY rows appear here — the proxy handled them.",
+              action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
             ariaLabel="Top enforced target domains"
           />
@@ -724,23 +730,31 @@ export function AnalyticsPage({
             Findings are ALLOW risk rows only (ADR 0001)
           </span>
         </div>
-        <DataTable
-          columns={rawColumns}
-          data={rawUniqueDomains ? dedupeByDomain(raw) : raw}
-          rowId={(r) => String(r.id)}
-          loading={rawLoading}
-          internalPagination
-          total={rawTotal}
-          page={rawPage}
-          pageSize={rawPageSize}
-          onPageChange={setRawPage}
-          empty={{
-            icon: SearchX,
-            title: "No findings in window",
-            description: "Try a broader date range or clear the filter.",
-          }}
-          ariaLabel="Raw findings"
-        />
+        {rawError ? (
+          <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3 mb-3">
+            <span>{rawError}</span>
+            <Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>
+          </div>
+        ) : (
+          <DataTable
+            columns={rawColumns}
+            data={rawUniqueDomains ? dedupeByDomain(raw) : raw}
+            rowId={(r) => String(r.id)}
+            loading={rawLoading}
+            internalPagination
+            total={rawTotal}
+            page={rawPage}
+            pageSize={rawPageSize}
+            onPageChange={setRawPage}
+            empty={{
+              icon: SearchX,
+              title: "No findings in window",
+              description: "Try a broader date range or clear the filter.",
+              action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
+            }}
+            ariaLabel="Raw findings"
+          />
+        )}
       </Panel>
 
     </div>

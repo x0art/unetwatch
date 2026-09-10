@@ -92,23 +92,23 @@ function buildOption(
       animation: false,
       backgroundColor: card,
       title: {
-        text: "NO DATA IN WINDOW",
+        text: "No data in window",
         left: "center",
         top: "center",
-        textStyle: { color: muted, fontSize: 11, fontFamily: "ui-monospace, SFMono-Regular, monospace" },
+        textStyle: { color: muted, fontSize: 11, fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
       },
     }
   }
 
   const defaultTokens =
     type === "area"
-      ? ["var(--color-info)", "var(--color-success)"]
-      : ["var(--color-success)", "var(--color-danger)"]
+      ? ["var(--color-info)", "var(--color-muted-foreground)"]
+      : ["var(--color-muted-foreground)", "var(--color-danger)"]
   const tokens = colorTokens ?? defaultTokens
   const resolvedSeries = labels.map((label, i) => ({
     label,
     color: resolveColor(tokens[i % tokens.length] ?? defaultTokens[0], colors),
-    name: seriesNames?.[i] ?? label.toUpperCase(),
+    name: seriesNames?.[i] ?? label,
   }))
 
   const xData = data.map((d) => d.bucket)

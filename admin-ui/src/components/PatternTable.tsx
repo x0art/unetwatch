@@ -63,7 +63,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     accessor: (p) => p.pattern,
     defaultSortDir: "asc",
     cell: (p) => (
-      <span className="block max-w-[260px] truncate font-mono text-sm font-bold uppercase" title={p.pattern}>
+      <span className="block max-w-[260px] truncate font-mono text-sm font-medium normal-case" title={p.pattern}>
         {p.pattern}
       </span>
     ),
@@ -225,7 +225,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       setDeleteTarget(null)
       fetchPatterns()
     } catch (e) {
-      toast({ title: "Error", description: (e as Error).message, variant: "error" })
+      toast({ title: "Delete failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBusy(false)
     }
@@ -269,7 +269,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       setEditOpen(false)
       fetchPatterns()
     } catch (e) {
-      toast({ title: "Error", description: (e as Error).message, variant: "error" })
+      toast({ title: "Update failed", description: (e as Error).message, variant: "error" })
     } finally {
       setEditSaving(false)
     }
@@ -290,7 +290,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       setBulkValue("")
       fetchPatterns()
     } catch (e) {
-      toast({ title: "Error", description: (e as Error).message, variant: "error" })
+      toast({ title: "Import failed", description: (e as Error).message, variant: "error" })
     } finally {
       setBulkImporting(false)
     }
@@ -339,7 +339,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
 
       {/* ── Error banner ── */}
       {error && (
-        <div className="flex items-center gap-3 rounded-md border border-transparent bg-danger px-4 py-3 text-xs font-medium text-white">
+        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
           <span className="flex-1">{error}</span>
           <Button variant="outline" size="sm" onClick={fetchPatterns}>
             Retry
@@ -388,7 +388,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       {/* ── Confirm Delete Dialog ── */}
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Delete Pattern"
+        title="Delete pattern"
         description="Are you sure you want to delete this pattern? This action cannot be undone."
         confirmLabel="Delete"
         variant="destructive"
@@ -411,7 +411,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       />
 
       {/* ── Edit Dialog ── */}
-      <Dialog open={editOpen} onClose={() => setEditOpen(false)} title="Edit Pattern">
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} title="Edit pattern">
         <div className="space-y-4">
           <div>
             <Label>Pattern</Label>
@@ -445,7 +445,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
       />
 
       {/* ── Bulk Import Dialog ── */}
-      <Dialog open={bulkOpen} onClose={() => setBulkOpen(false)} title="Bulk Import Patterns">
+      <Dialog open={bulkOpen} onClose={() => setBulkOpen(false)} title="Bulk import patterns">
         <div className="space-y-4">
           <div>
             <Label>Patterns (one per line)</Label>

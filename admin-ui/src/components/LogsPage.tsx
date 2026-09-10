@@ -24,6 +24,7 @@ import {
   Button,
   ConfirmDialog,
   Dialog,
+  EmptyState,
   PageHeader,
   SearchInput,
   Select,
@@ -307,10 +308,12 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
   const [retryingProvider, setRetryingProvider] = useState<"webhook" | "msteams" | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     let cancelled = false
     setLoading(true)
+    setLoadError(null)
     listLogs({
       kind: (kind || undefined) as "poll" | "query" | undefined,
       search: debouncedSearch || undefined,
@@ -324,10 +327,11 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         setItems(data.items)
         setTotal(data.total)
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
           setItems([])
           setTotal(0)
+          setLoadError((e as Error).message)
         }
       })
       .finally(() => {
@@ -438,21 +442,29 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         </Button>
       </PageHeader>
 
-      {loading && items.length === 0 ? (
+      {loadError ? (
+        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+          <span className="flex-1">{loadError}</span>
+          <Button variant="outline" size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      ) : loading && items.length === 0 ? (
         <div className="space-y-3" aria-busy="true">
           <Skeleton className="h-56 w-full" />
         </div>
       ) : total === 0 ? (
-        <div className="rounded-md border-dashed border border-border bg-muted/50 px-6 py-14 text-center">
-          <ScrollText className="mx-auto mb-3 h-8 w-8 text-muted-foreground/50" aria-hidden="true" />
-          <p className="text-sm font-medium text-muted-foreground">
-            {kind ? `No ${kind} logs yet` : "No logs yet"}
-          </p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground/80">
-            Every monitor poll and Query page run is recorded here with its ES query DSL,
-            match counts and webhook result.
-          </p>
-        </div>
+        <EmptyState
+          icon={ScrollText}
+          title={kind ? `No ${kind} logs yet` : "No logs yet"}
+          description="Every monitor poll and Query page run is recorded here with its ES query DSL, match counts and webhook result."
+          action={
+            <Button variant="outline" size="sm" onClick={load}>
+              <RefreshCcw className="h-4 w-4" />
+              Refresh
+            </Button>
+          }
+        />
       ) : (
         <DataTable
           columns={columns}

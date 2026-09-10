@@ -39,7 +39,7 @@ function CopyField({
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={`Copy ${label}`}
             title={`Copy ${label}`}
           >
@@ -107,7 +107,7 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
     if (srcIp) setGlobalFilter(srcIp)
     try {
       window.localStorage.setItem("unetwatch_view", "host")
-      // Only synchronously stamp ?q= when there's no onNavigate (standalone
+      // Only synchronously write ?q= when there's no onNavigate (standalone
       // page) so the URL is immediately shareable; the delegated path relies
       // on the context debounce instead to avoid competing history writes.
       if (!onNavigate) {

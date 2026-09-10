@@ -159,7 +159,7 @@ function RowActionsMenu({
             {action.separator && <div className="my-1 border-t border-border" />}
             <button
               type="button"
-              className={`flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted hover:text-foreground ${
+              className={`flex w-full items-center gap-2 px-2 py-1.5 text-xs hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:bg-muted focus-visible:text-foreground ${
                 action.variant === "destructive" ? "hover:text-destructive" : ""
               }`}
               onClick={() => {

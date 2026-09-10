@@ -91,8 +91,9 @@ export function GlobalSearchPalette({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/60 backdrop-blur-sm" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40" />
         <DialogPrimitive.Content className="fixed left-1/2 top-[22vh] z-50 w-[min(92vw,560px)] -translate-x-1/2">
+          <DialogPrimitive.Title className="sr-only">Global search</DialogPrimitive.Title>
           <div className="overflow-hidden rounded-md border border-border bg-card shadow-md">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -108,7 +109,7 @@ export function GlobalSearchPalette({
               <button
                 type="button"
                 onClick={() => onOpenChange(false)}
-                className="shrink-0 rounded border border-border px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:bg-muted"
+                className="shrink-0 rounded border border-border px-2 py-0.5 mono-label text-muted-foreground hover:bg-muted"
               >
                 esc
               </button>

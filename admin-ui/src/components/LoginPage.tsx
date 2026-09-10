@@ -28,7 +28,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="relative flex min-h-dvh items-center justify-center bg-background px-4 py-10 sm:py-16">
       <div className="fade-in relative m-auto w-full max-w-sm">
-        <div className="rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+        <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden">
 
           <div className="p-8 sm:p-8">
             {/* Brand */}
@@ -36,14 +36,14 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
               <span className="inline-flex h-14 w-14 items-center justify-center rounded-md border border-transparent bg-primary text-white shadow-sm">
                 <ShieldCheck className="h-7 w-7" aria-hidden="true" />
               </span>
-              <h1 className="mt-4 text-[22px] font-semibold tracking-tight">UNETWATCH</h1>
-              <p className="mono-label mt-1">[ ADMIN CONSOLE // SIGN IN ]</p>
+              <h1 className="mt-4 text-[22px] font-semibold tracking-tight">uNetWatch</h1>
+              <p className="mono-label mt-1">Admin console — sign in</p>
               <div className="mx-auto mt-3 h-1 w-12 bg-border" aria-hidden="true" />
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="login-username">USERNAME</Label>
+                <Label htmlFor="login-username">Username</Label>
                 <div className="relative">
                   <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <Input
@@ -56,14 +56,14 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                       if (error) setError("")
                     }}
                     placeholder="admin"
-                    className="pl-9 font-mono text-sm"
+                    className="pl-9 text-sm"
                     autoFocus
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="login-password">PASSWORD</Label>
+                <Label htmlFor="login-password">Password</Label>
                 <div className="relative">
                   <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                   <Input
@@ -77,7 +77,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                       if (error) setError("")
                     }}
                     placeholder="••••••••"
-                    className="pl-9 pr-10 font-mono text-sm"
+                    className="pl-9 pr-10 text-sm"
                   />
                   <button
                     type="button"
@@ -103,23 +103,19 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    SIGNING IN...
+                    Signing in…
                   </>
                 ) : (
-                  "SIGN IN — ENTER"
+                  "Sign in"
                 )}
               </Button>
             </form>
           </div>
 
           <div className="border-t border-border bg-secondary px-4 py-2 text-center text-xs font-medium text-secondary-foreground">
-            RESTRICTED AREA — ADMINISTRATORS ONLY
+            Restricted area — administrators only
           </div>
         </div>
-
-        <p className="mt-4 text-center text-xs font-medium text-muted-foreground">
-          [ SECURE // ENCRYPTED // AUDITED ]
-        </p>
       </div>
     </div>
   )

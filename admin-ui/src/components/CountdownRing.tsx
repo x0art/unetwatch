@@ -51,7 +51,7 @@ export function CountdownRing({ remaining, total, className = "" }: CountdownRin
       <div className="relative text-center">
         <span className="block font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground">{formatted}</span>
         <span className="mono-label mt-1 block">
-          APPROX.
+          Approx
         </span>
       </div>
     </div>

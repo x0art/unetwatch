@@ -26,7 +26,7 @@ export function HostEntityCard({ host, risk }: HostEntityCardProps) {
       <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
         <h3 className="text-xs font-medium">Risk Summary</h3>
-        <span className="ml-auto hidden truncate text-xs font-medium text-muted-foreground sm:inline">
+        <span className="ml-auto hidden truncate text-xs font-medium text-muted-foreground sm:inline" title={`${host.hostname || host.primaryIp} — ${risk.totalRequests.toLocaleString()} requests`}>
           {host.hostname || host.primaryIp} · {risk.totalRequests.toLocaleString()} req
         </span>
       </div>

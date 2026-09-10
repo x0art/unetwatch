@@ -53,6 +53,7 @@ interface FeedCardProps {
   onClearSelection?: () => void
   onDeleteSelected?: () => void
   disabled?: boolean
+  onClearSearch?: () => void
 }
 
 function FeedCard({
@@ -73,6 +74,7 @@ function FeedCard({
   onClearSelection,
   onDeleteSelected,
   disabled,
+  onClearSearch,
 }: FeedCardProps) {
   return (
     <Card>
@@ -170,7 +172,7 @@ function FeedCard({
                         onClick={() => onDelete(kind, value)}
                         disabled={disabled}
                         aria-label={`Remove ${value} from blacklist`}
-                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       </button>
@@ -185,9 +187,26 @@ function FeedCard({
             icon={Search}
             title="No matches"
             description="Nothing in this feed matches your search."
+            action={
+              onClearSearch ? (
+                <Button variant="outline" size="sm" onClick={onClearSearch}>
+                  Clear search
+                </Button>
+              ) : undefined
+            }
           />
         ) : (
-          <EmptyState icon={Link2} title="Empty feed" description="No entries yet." />
+          <EmptyState
+            icon={Link2}
+            title="Empty feed"
+            description="No entries yet."
+            action={
+              <Button variant="outline" size="sm" onClick={onRefresh}>
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </Button>
+            }
+          />
         )}
       </CardContent>
     </Card>
@@ -198,7 +217,7 @@ export function BlacklistPage() {
   const [urls, setUrls] = useState<string[]>([])
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
-  const [, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [addValue, setAddValue] = useState("")
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -378,9 +397,9 @@ export function BlacklistPage() {
   return (
     <div className="space-y-6">
       <div className="border-b border-border pb-4">
-        <p className="text-xs font-medium text-muted-foreground tracking-widest uppercase">[ BLACKLIST ]</p>
+        <p className="mono-label">Blacklist</p>
         <h2 className="font-semibold tracking-tight mt-1 text-[26px] sm:text-[30px]">Blacklist</h2>
-        <p className="mt-1.5 max-w-[60ch] font-mono text-xs font-medium leading-relaxed text-muted-foreground">
+        <p className="mt-1.5 max-w-[60ch] text-xs font-medium leading-relaxed text-muted-foreground">
           Blacklisted destinations, consumed as separate URL and IP feeds by the device firewall (nginx/fail2ban).
           IP entries are destinations whose host is an IP address.
         </p>
@@ -426,46 +445,57 @@ export function BlacklistPage() {
         </div>
       </div>
 
-      <div className="space-y-4">
-        <FeedCard
-          title="URL blacklist"
-          path="/api/blacklist/urls.txt"
-          kind="url"
-          entries={filteredUrls}
-          totalEntries={urls.length}
-          searchActive={!!q}
-          loading={loading}
-          onRefresh={load}
-          onCopy={() => copy(urls.join("\n"), "URLs")}
-          onDelete={requestDelete}
-          selectMode={selectFeed === "url"}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onEnterSelectMode={() => enterSelectMode("url")}
-          onClearSelection={exitSelectMode}
-          onDeleteSelected={() => setConfirmBulkDelete(true)}
-          disabled={deleting}
-        />
-        <FeedCard
-          title="Destination IP blacklist"
-          path="/api/blacklist/ips.txt"
-          kind="ip"
-          entries={filteredIps}
-          totalEntries={ips.length}
-          searchActive={!!q}
-          loading={loading}
-          onRefresh={load}
-          onCopy={() => copy(ips.join("\n"), "IPs")}
-          onDelete={requestDelete}
-          selectMode={selectFeed === "ip"}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onEnterSelectMode={() => enterSelectMode("ip")}
-          onClearSelection={exitSelectMode}
-          onDeleteSelected={() => setConfirmBulkDelete(true)}
-          disabled={deleting}
-        />
-      </div>
+      {error ? (
+        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+          <span className="flex-1">{error}</span>
+          <Button variant="outline" size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <FeedCard
+            title="URL blacklist"
+            path="/api/blacklist/urls.txt"
+            kind="url"
+            entries={filteredUrls}
+            totalEntries={urls.length}
+            searchActive={!!q}
+            loading={loading}
+            onRefresh={load}
+            onCopy={() => copy(urls.join("\n"), "URLs")}
+            onDelete={requestDelete}
+            selectMode={selectFeed === "url"}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onEnterSelectMode={() => enterSelectMode("url")}
+            onClearSelection={exitSelectMode}
+            onDeleteSelected={() => setConfirmBulkDelete(true)}
+            disabled={deleting}
+            onClearSearch={() => setSearch("")}
+          />
+          <FeedCard
+            title="Destination IP blacklist"
+            path="/api/blacklist/ips.txt"
+            kind="ip"
+            entries={filteredIps}
+            totalEntries={ips.length}
+            searchActive={!!q}
+            loading={loading}
+            onRefresh={load}
+            onCopy={() => copy(ips.join("\n"), "IPs")}
+            onDelete={requestDelete}
+            selectMode={selectFeed === "ip"}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onEnterSelectMode={() => enterSelectMode("ip")}
+            onClearSelection={exitSelectMode}
+            onDeleteSelected={() => setConfirmBulkDelete(true)}
+            disabled={deleting}
+            onClearSearch={() => setSearch("")}
+          />
+        </div>
+      )}
 
       {/* Per-row delete confirm */}
       <ConfirmDialog

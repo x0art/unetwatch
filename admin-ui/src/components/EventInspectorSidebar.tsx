@@ -31,8 +31,8 @@ function CopyField({
   const { toast } = useToast()
   const handleCopy = async () => {
     const ok = await copyText(copyValue)
-    if (ok) toast({ title: "COPIED", description: copyValue, variant: "success" })
-    else toast({ title: "COPY FAILED", variant: "error" })
+    if (ok) toast({ title: "Copied", description: copyValue, variant: "success" })
+    else toast({ title: "Copy failed", variant: "error" })
   }
   return (
     <div>
@@ -146,8 +146,8 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
   const handleCopyJson = async () => {
     const json = JSON.stringify(row, null, 2)
     const ok = await copyText(json)
-    if (ok) toast({ title: "COPIED", description: "Event JSON copied", variant: "success" })
-    else toast({ title: "COPY FAILED", variant: "error" })
+    if (ok) toast({ title: "Copied", description: "Event JSON copied", variant: "success" })
+    else toast({ title: "Copy failed", variant: "error" })
   }
 
   return (
@@ -177,12 +177,12 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge variant={actionVariant(row.action ?? "")}>{row.action || "—"}</Badge>
                 {isRisky && (
-                  <span className="inline-flex items-center rounded-md border border-danger bg-danger px-1.5 py-0.5 text-xs font-medium text-white">
+                  <span className="inline-flex items-center rounded-md border border-danger/20 bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
                     blacklist risk
                   </span>
                 )}
                 {(row as unknown as { whitelisted?: boolean }).whitelisted && (
-                  <span className="inline-flex items-center rounded-md border border-border bg-foreground px-1.5 py-0.5 text-xs font-medium text-background">
+                  <span className="inline-flex items-center rounded-md border border-success/20 bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
                     whitelist
                   </span>
                 )}

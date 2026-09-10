@@ -29,6 +29,7 @@ export function BlockDomainPage() {
   const [editValue, setEditValue] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [result, setResult] = useState<{
     added: number
     skipped: number
@@ -73,6 +74,7 @@ export function BlockDomainPage() {
   const handleSubmit = useCallback(async () => {
     if (items.length === 0) return
     setSubmitting(true)
+    setSubmitError(null)
     try {
       const res = await bulkAddBlacklist(items)
       setResult({
@@ -91,6 +93,7 @@ export function BlockDomainPage() {
         variant: res.errors.length ? "error" : "success",
       })
     } catch (e) {
+      setSubmitError((e as Error).message)
       toast({
         title: "Failed to add to blacklist",
         description: (e as Error).message,
@@ -146,19 +149,19 @@ export function BlockDomainPage() {
             <div className="flex justify-center gap-6 text-sm">
               {result.added > 0 && (
                 <div>
-                  <p className="text-2xl font-bold text-success">{result.added}</p>
+                  <p className="text-2xl font-bold text-success tabular-nums">{result.added}</p>
                   <p className="text-muted-foreground">Added</p>
                 </div>
               )}
               {result.skipped > 0 && (
                 <div>
-                  <p className="text-2xl font-bold text-warning">{result.skipped}</p>
+                  <p className="text-2xl font-bold text-warning tabular-nums">{result.skipped}</p>
                   <p className="text-muted-foreground">Skipped</p>
                 </div>
               )}
               {result.errors > 0 && (
                 <div>
-                  <p className="text-2xl font-bold text-danger">{result.errors}</p>
+                  <p className="text-2xl font-bold text-danger tabular-nums">{result.errors}</p>
                   <p className="text-muted-foreground">Errors</p>
                 </div>
               )}
@@ -187,7 +190,7 @@ export function BlockDomainPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center bg-primary/15 rounded-lg border border-border shadow-sm">
             <Ban className="h-7 w-7 text-primary" aria-hidden="true" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">Confirm Blacklist Add</h1>
+          <h1 className="text-xl font-bold tracking-tight">Confirm blacklist add</h1>
           <p className="text-sm text-muted-foreground">
             Review the entries below. Edit or remove any before confirming.
           </p>
@@ -257,7 +260,7 @@ export function BlockDomainPage() {
                                 type="button"
                                 onClick={() => startEdit(idx)}
                                 aria-label={`Edit ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
@@ -265,7 +268,7 @@ export function BlockDomainPage() {
                                 type="button"
                                 onClick={() => removeItem(idx)}
                                 aria-label={`Remove ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive"
+                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
@@ -280,6 +283,15 @@ export function BlockDomainPage() {
             </div>
           </CardContent>
         </Card>
+
+        {submitError && (
+          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+            <span className="flex-1">{submitError}</span>
+            <Button variant="outline" size="sm" onClick={handleSubmit}>
+              Try again
+            </Button>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex flex-col items-center gap-3">

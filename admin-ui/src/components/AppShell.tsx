@@ -42,7 +42,7 @@ export function AppShell({
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:border focus:border-border focus:bg-secondary focus:px-4 focus:py-2 focus:text-xs focus:font-medium focus:text-foreground"
       >
-        SKIP TO CONTENT
+        Skip to content
       </a>
 
       <Sidebar

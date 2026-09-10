@@ -289,8 +289,10 @@ export function RedirectsPage() {
   const [items, setItems] = useState<TrackedUrl[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [tableError, setTableError] = useState<string | null>(null)
   const [graph, setGraph] = useState<RedirectGraph | null>(null)
   const [graphLoading, setGraphLoading] = useState(true)
+  const [graphError, setGraphError] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState("")
@@ -306,12 +308,14 @@ export function RedirectsPage() {
   const [historyTarget, setHistoryTarget] = useState<TrackedUrl | null>(null)
   const [history, setHistory] = useState<UrlRedirectHistory | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
 
   const debouncedSearch = useDebounce(search, 300)
 
   const loadTable = useCallback(() => {
     let cancelled = false
     setLoading(true)
+    setTableError(null)
     listTrackedUrls({
       search: debouncedSearch || undefined,
       limit: pageSize,
@@ -324,10 +328,11 @@ export function RedirectsPage() {
         setItems(data.items)
         setTotal(data.total)
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
           setItems([])
           setTotal(0)
+          setTableError((e as Error).message)
         }
       })
       .finally(() => {
@@ -341,12 +346,16 @@ export function RedirectsPage() {
   const loadGraph = useCallback(() => {
     let cancelled = false
     setGraphLoading(true)
+    setGraphError(null)
     getRedirectGraph()
       .then((data) => {
         if (!cancelled) setGraph(data)
       })
-      .catch(() => {
-        if (!cancelled) setGraph(null)
+      .catch((e) => {
+        if (!cancelled) {
+          setGraph(null)
+          setGraphError((e as Error).message)
+        }
       })
       .finally(() => {
         if (!cancelled) setGraphLoading(false)
@@ -575,9 +584,11 @@ export function RedirectsPage() {
     setHistoryTarget(target)
     setHistory(null)
     setHistoryLoading(true)
+    setHistoryError(null)
     try {
       setHistory(await getUrlRedirectHistory(target.id))
     } catch (e) {
+      setHistoryError((e as Error).message)
       toast({ title: "Failed to load history", description: (e as Error).message, variant: "error" })
     } finally {
       setHistoryLoading(false)
@@ -606,7 +617,7 @@ export function RedirectsPage() {
   }, [graph])
 
   const graphEmpty = !graphLoading && (!graph || graph.nodes.length === 0)
-  const tableEmpty = !loading && total === 0
+  const tableEmpty = !loading && !tableError && total === 0
 
   /* ── Table columns ───────────────────────────────────────────────── */
 
@@ -680,6 +691,15 @@ export function RedirectsPage() {
         {graphLoading ? (
           <div className="space-y-3 p-4" aria-busy="true">
             <Skeleton className="h-64 w-full" />
+          </div>
+        ) : graphError ? (
+          <div className="p-4">
+            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+              <span className="flex-1">{graphError}</span>
+              <Button variant="outline" size="sm" onClick={() => loadGraph()}>
+                Retry
+              </Button>
+            </div>
           </div>
         ) : graphEmpty ? (
           <EmptyState
@@ -757,7 +777,14 @@ export function RedirectsPage() {
           />
         </div>
 
-        {tableEmpty ? (
+        {tableError ? (
+          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+            <span className="flex-1">{tableError}</span>
+            <Button variant="outline" size="sm" onClick={() => reload()}>
+              Retry
+            </Button>
+          </div>
+        ) : tableEmpty ? (
           <EmptyState
             icon={SearchX}
             title={debouncedSearch ? "No matching URLs" : "No tracked URLs"}
@@ -853,6 +880,13 @@ export function RedirectsPage() {
         {historyLoading ? (
           <div className="space-y-3" aria-busy="true">
             <Skeleton className="h-40 w-full" />
+          </div>
+        ) : historyError ? (
+          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+            <span className="flex-1">{historyError}</span>
+            <Button variant="outline" size="sm" onClick={() => historyTarget && openHistory(historyTarget)}>
+              Retry
+            </Button>
           </div>
         ) : history && history.edges.length > 0 ? (
           <div className="space-y-2">

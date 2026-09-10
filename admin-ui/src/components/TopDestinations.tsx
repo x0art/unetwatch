@@ -23,7 +23,7 @@ interface TopDestinationsProps {
 function EmptyCell() {
   return (
     <p className="py-8 text-center text-xs font-medium text-muted-foreground">
-      NO DATA IN WINDOW
+      No data in window
     </p>
   )
 }

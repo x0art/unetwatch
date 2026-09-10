@@ -714,7 +714,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             type="button"
             onClick={() => setViewMode("all")}
             aria-pressed={viewMode === "all"}
-            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+            className={`rounded-sm px-2.5 py-1 text-xs font-medium uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               viewMode === "all"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -726,7 +726,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             type="button"
             onClick={() => setViewMode("flagged")}
             aria-pressed={viewMode === "flagged"}
-            className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${
+            className={`rounded-sm px-2.5 py-1 text-xs font-medium uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               viewMode === "flagged"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -818,9 +818,12 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             {result.timeline.length > 0 ? (
               <TimelineChart points={result.timeline} />
             ) : (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                No timestamped matches in this window
-              </p>
+              <EmptyState
+                icon={SearchX}
+                title="No timestamped matches in this window"
+                description="Try a longer window or trigger a manual run."
+                action={<Button variant="outline" onClick={handleRun}>Try again</Button>}
+              />
             )}
           </Panel>
 
@@ -890,21 +893,24 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           >
             {flowCollapsed ? (
               <div className="flex flex-col items-center gap-3 py-10">
-                <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground tabular-nums">
-                  Flow collapsed for this window — {result?.total_requests.toLocaleString() ?? "—"} requests
+                <p className="text-xs text-muted-foreground">
+                  Flow collapsed for this window — <span className="tabular-nums">{result?.total_requests.toLocaleString() ?? "—"}</span> requests
                 </p>
                 <Button variant="outline" onClick={() => setFlowCollapsed(false)}>
                   Show flow{flowSankey ? ` — ${flowSankey.links.length} ribbons` : ""}
                 </Button>
               </div>
             ) : esOffline ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                Flow unavailable — Elasticsearch unreachable.
-              </p>
+              <EmptyState
+                icon={SearchX}
+                title="Flow unavailable"
+                description="Elasticsearch unreachable."
+                action={<Button variant="outline" onClick={handleRun}>Try again</Button>}
+              />
             ) : flowSankey && flowSankey.links.length > 0 ? (
               <>
                 {(flowSankey as any).meta && ((flowSankey as any).meta.othersCount > 0 || (flowSankey as any).meta.hiddenSingletons > 0) && (
-                  <p className="mb-3 font-mono text-[11px] text-muted-foreground">
+                  <p className="mb-3 text-xs text-muted-foreground">
                     Showing top {sankeyTopN}
                     {(flowSankey as any).meta.othersCount > 0 ? ` · ${(flowSankey as any).meta.grouped.src + (flowSankey as any).meta.grouped.dom + (flowSankey as any).meta.grouped.pat + (flowSankey as any).meta.grouped.dst} items grouped as Others` : ""}
                     {(flowSankey as any).meta.hiddenSingletons > 0 ? ` · ${(flowSankey as any).meta.hiddenSingletons} singletons hidden (risk kept)` : ""}
@@ -930,9 +936,12 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 </div>
               </>
             ) : (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                No traffic in this window to visualize
-              </p>
+              <EmptyState
+                icon={SearchX}
+                title="No traffic in this window to visualize"
+                description="Try a longer window or trigger a manual run."
+                action={<Button variant="outline" onClick={handleRun}>Try again</Button>}
+              />
             )}
           </Panel>
 

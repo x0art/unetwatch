@@ -14,7 +14,7 @@ import {
   Download,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, LoadingIcon, useToast, StatCard } from "./ui"
+import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
@@ -400,6 +400,7 @@ export function HostInspectorPage({
 
   const [sections, setSections] = useState<HostSectionData | null>(null)
   const [sectionsLoading, setSectionsLoading] = useState(false)
+  const [sectionsError, setSectionsError] = useState<string | null>(null)
   const [actionFilter, setActionFilter] = useState("All")
   const [hSource, setHSource] = useState<HostSource>("live")
   const [page, setPage] = useState(0)
@@ -415,6 +416,7 @@ export function HostInspectorPage({
   const [rawLoading, setRawLoading] = useState(false)
   const [rawSearch, setRawSearch] = useState("")
   const [rawPage, setRawPage] = useState(0)
+  const [rawError, setRawError] = useState<string | null>(null)
   const rawPageSize = 50
 
   // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
@@ -469,6 +471,24 @@ export function HostInspectorPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hSource])
 
+  // Shared sections loader: uses the cleaned host string, falls back to
+  // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
+  const fetchSections = useCallback(async (clean: string) => {
+    setSectionsLoading(true)
+    setSectionsError(null)
+    try {
+      const data = await fetchHostSections(clean, timeRange, hSource)
+      setSections(data)
+    } catch (e) {
+      const msg = (e as Error).message || "Sections load failed"
+      setSections({ ...EMPTY_SECTIONS, window: timeRange })
+      setSectionsError(msg)
+      toast({ title: "Sections load failed", description: msg, variant: "error" })
+    } finally {
+      setSectionsLoading(false)
+    }
+  }, [timeRange, hSource, toast])
+
   const lookup = async (ip: string) => {
     const clean = ip.trim()
     if (!clean) {
@@ -512,15 +532,7 @@ export function HostInspectorPage({
       }
     } else {
       // Live branch: sections load independently so the entity card paints immediately.
-      setSectionsLoading(true)
-      try {
-        const data = await fetchHostSections(clean, timeRange, hSource)
-        setSections(data)
-      } catch {
-        setSections({ ...EMPTY_SECTIONS, window: timeRange })
-      } finally {
-        setSectionsLoading(false)
-      }
+      await fetchSections(clean)
     }
   }
 
@@ -528,6 +540,7 @@ export function HostInspectorPage({
   const fetchRaw = useCallback(async () => {
     if (!report?.client_ip || !report.has_data) return
     setRawLoading(true)
+    setRawError(null)
     try {
       const res = await getClientReportFindings(report.client_ip, {
         search: rawSearch.trim() || undefined,
@@ -537,7 +550,9 @@ export function HostInspectorPage({
       setRaw(res.items)
       setRawTotal(res.total)
     } catch (e) {
-      toast({ title: "Raw findings failed", description: (e as Error).message, variant: "error" })
+      const msg = (e as Error).message || "Raw findings failed"
+      setRawError(msg)
+      toast({ title: "Raw findings failed", description: msg, variant: "error" })
     } finally {
       setRawLoading(false)
     }
@@ -870,7 +885,7 @@ export function HostInspectorPage({
     } },
     { id: "volume", header: "Volume", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
       const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
-      return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-transparent bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>{hasBytes ? "real" : "est."}</span></span>
+      return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><Badge variant={hasBytes ? "success" : "secondary"}>{hasBytes ? "Real" : "Estimated"}</Badge></span>
     }, width: "w-32" },
   ], [report?.top_pattern])
 
@@ -937,8 +952,8 @@ export function HostInspectorPage({
             aria-label="Time range"
           />
           <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
-            <button type="button" onClick={() => setHSource("live")} aria-pressed={hSource === "live"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
-            <button type="button" onClick={() => setHSource("findings")} aria-pressed={hSource === "findings"} className={`px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors ${hSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>
+            <button type="button" onClick={() => setHSource("live")} aria-pressed={hSource === "live"} className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${hSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm`}>Live</button>
+            <button type="button" onClick={() => setHSource("findings")} aria-pressed={hSource === "findings"} className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${hSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm`}>Findings</button>
           </div>
         </div>
       </div>
@@ -951,8 +966,9 @@ export function HostInspectorPage({
       )}
 
       {!loading && error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 font-mono text-xs text-danger">
-          {error}
+        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <Button variant="outline" size="sm" onClick={() => void lookup(target)}>Try again</Button>
         </div>
       )}
 
@@ -961,25 +977,22 @@ export function HostInspectorPage({
       )}
 
       {!loading && !error && !host && hasSearched && (
-        <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
-          <p className="text-xs font-medium text-muted-foreground">No host found</p>
-          <p className="mt-2 text-sm text-muted-foreground">No data for “{target}” in the selected window.</p>
-        </div>
+        <EmptyState icon={SearchX} title="No host found" description={`No data for "${target}" in the selected window.`} action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Search again</Button>} />
       )}
 
       {!loading && !error && !host && !hasSearched && (
-        <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
-          <p className="text-xs font-medium text-muted-foreground">Host Investigation</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Enter a host or IP (e.g. 192.168.1.45) and run Lookup. <span className="font-mono font-semibold">Live</span> shows the live ES window;
-            <span className="font-mono font-semibold"> Findings</span> shows all-time analytics from the findings table.
-          </p>
-        </div>
+        <EmptyState icon={SearchX} title="Host Investigation" description="Enter a host or IP (e.g. 192.168.1.45) and run Lookup. Live shows the live ES window; Findings shows all-time analytics." action={<Button variant="outline" size="sm" onClick={() => void lookup("192.168.1.45")}>Try 192.168.1.45</Button>} />
       )}
 
       {/* ── LIVE branch — Spec §3.2 sections (render only once a host is resolved) ── */}
       {showSections && (
         <>
+          {sectionsError && (
+            <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
+              <span>{sectionsError}</span>
+              <Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target) }}>Retry</Button>
+            </div>
+          )}
           {/* 1) Visual Traffic Timeline & Anomaly Heatmap */}
           <Panel
             title="Visual Traffic Timeline & Anomaly Heatmap"
@@ -992,7 +1005,7 @@ export function HostInspectorPage({
               <TrafficTimeline points={sections.timeline} anomalyAnnotation={sections.anomaly} />
             ) : (
               <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                NO DATA IN WINDOW
+                No data in window
               </p>
             )}
           </Panel>
@@ -1019,7 +1032,7 @@ export function HostInspectorPage({
                     key={u.url}
                     type="button"
                     onClick={() => handleOpenUrl(u.url)}
-                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/30"
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
                   >
                     <span className="block max-w-[60%] flex-1 truncate font-mono text-[13px] font-semibold" title={u.url}>
                       {u.url}
@@ -1033,7 +1046,7 @@ export function HostInspectorPage({
               </div>
             ) : (
               <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                NO DATA IN WINDOW
+                No data in window
               </p>
             )}
           </Panel>
@@ -1068,7 +1081,7 @@ export function HostInspectorPage({
               </>
             ) : (
               <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                NO DATA IN WINDOW
+                No data in window
               </p>
             )}
           </Panel>
@@ -1120,10 +1133,7 @@ export function HostInspectorPage({
               <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />
             </div>
           ) : report && !hasRealData && hasSearched ? (
-            <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
-              <p className="text-xs font-medium text-muted-foreground">No findings for {report.client_ip}</p>
-              <p className="mt-2 text-sm text-muted-foreground">This client has no findings in the database.</p>
-            </div>
+            <EmptyState icon={SearchX} title={`No findings for ${report.client_ip}`} description="This client has no findings in the database." action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Search again</Button>} />
           ) : report && hasRealData ? (
             <>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
@@ -1156,6 +1166,12 @@ export function HostInspectorPage({
                 <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} empty={{ icon: SearchX, title: "No URLs in window" }} ariaLabel="Top URLs" />
               </Panel>
 
+              {rawError && (
+                <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3 mb-3">
+                  <span>{rawError}</span>
+                  <Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>
+                </div>
+              )}
               <Panel title={`Raw Findings — ${report.client_ip}`} icon={Database} description={`${rawTotal.toLocaleString()} docs`}>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <input type="search" placeholder="Filter (URL)..." value={rawSearch} onChange={(e) => { setRawSearch(e.target.value); setRawPage(0) }} className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Filter raw findings" />

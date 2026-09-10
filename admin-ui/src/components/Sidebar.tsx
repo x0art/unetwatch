@@ -178,7 +178,7 @@ function SidebarContent({
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className={cn("relative flex h-16 shrink-0 items-center border-b border-sidebar-border", collapsed ? "justify-center px-0" : "gap-3 px-4")}>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <Activity className="h-4 w-4" aria-hidden="true" />
         </div>
         {!collapsed && (
@@ -306,7 +306,7 @@ export function Sidebar(props: SidebarContentProps) {
       <aside
         className={cn(
           "hidden md:sticky md:top-0 md:flex md:h-screen md:shrink-0 md:flex-col md:border-r md:border-sidebar-border",
-          "transition-[width] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+          "transition-[width] duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]",
           collapsed ? "md:w-[60px]" : "md:w-[240px]",
         )}
         aria-label="Sidebar"

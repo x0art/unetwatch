@@ -178,7 +178,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
             aria-label="Already in whitelist"
           >
             <CheckCircle2 className="h-3 w-3" />
-            WHITELIST
+            Whitelist
           </span>
         ) : FINDINGS_UI.blacklistIndex[f.base_url] ? (
           <span
@@ -187,7 +187,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
             aria-label="In blacklist"
           >
             <CheckCircle2 className="h-3 w-3" />
-            BLACKLIST
+            Blacklist
           </span>
         ) : null}
       </div>
@@ -274,6 +274,8 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [indexError, setIndexError] = useState(false)
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
   const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
@@ -298,6 +300,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   const refetch = useCallback(() => {
     let cancelled = false
     if (!loadedRef.current) setLoading(true)
+    setError(null)
     getFindings({
       search: debouncedSearch || undefined,
       limit: pageSize,
@@ -308,10 +311,11 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         setFindings(data.items)
         setTotal(data.total)
       })
-      .catch(() => {
+      .catch((e) => {
         if (!cancelled) {
           setFindings([])
           setTotal(0)
+          setError((e as Error).message)
         }
       })
       .finally(() => {
@@ -333,63 +337,42 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   // Live updates: refetch findings on an interval.
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refetch, "findings", 0)
 
-  useEffect(() => {
-    let cancelled = false
-    listPatterns({ pattern_type: "whitelist", limit: 5000 })
-      .then((items: Pattern[]) => {
-        if (cancelled) return
-        const next: Record<string, true> = {}
-        for (const p of items) next[p.pattern] = true
-        setWhitelistIndex(next)
-      })
-      .catch(() => {
-        if (!cancelled) setWhitelistIndex({})
-      })
-    return () => {
-      cancelled = true
+  const refetchIndexes = useCallback(async () => {
+    setIndexError(false)
+    const [wlRes, trackedRes, blRes] = await Promise.allSettled([
+      listPatterns({ pattern_type: "whitelist", limit: 5000 }),
+      listTrackedUrls({ limit: 5000 }),
+      getBlacklistSet(),
+    ])
+    let failed = false
+    if (wlRes.status === "fulfilled") {
+      const wlNext: Record<string, true> = {}
+      for (const p of wlRes.value as Pattern[]) wlNext[p.pattern] = true
+      setWhitelistIndex(wlNext)
+    } else {
+      failed = true
     }
-  }, [])
-
-  // Tracked-for-redirects index (for the Track button state).
-  useEffect(() => {
-    let cancelled = false
-    listTrackedUrls({ limit: 5000 })
-      .then((data) => {
-        if (cancelled) return
-        const next: Record<string, true> = {}
-        for (const t of data.items) next[t.url] = true
-        setTrackedIndex(next)
-      })
-      .catch(() => {
-        if (!cancelled) setTrackedIndex({})
-      })
-    return () => {
-      cancelled = true
+    if (trackedRes.status === "fulfilled") {
+      const trackedNext: Record<string, true> = {}
+      for (const t of trackedRes.value.items) trackedNext[t.url] = true
+      setTrackedIndex(trackedNext)
+    } else {
+      failed = true
     }
-  }, [])
-
-  const refetchBlacklist = useCallback(() => {
-    let cancelled = false
-    getBlacklistSet()
-      .then((data) => {
-        if (cancelled) return
-        const next: Record<string, true> = {}
-        for (const url of data.urls) next[url] = true
-        for (const ip of data.ips) next[ip] = true
-        setBlacklistIndex(next)
-      })
-      .catch(() => {
-        if (!cancelled) setBlacklistIndex({})
-      })
-    return () => {
-      cancelled = true
+    if (blRes.status === "fulfilled") {
+      const blNext: Record<string, true> = {}
+      for (const url of blRes.value.urls) blNext[url] = true
+      for (const ip of blRes.value.ips) blNext[ip] = true
+      setBlacklistIndex(blNext)
+    } else {
+      failed = true
     }
+    if (failed) setIndexError(true)
   }, [])
 
   useEffect(() => {
-    const cancel = refetchBlacklist()
-    return cancel
-  }, [refetchBlacklist])
+    refetchIndexes()
+  }, [refetchIndexes])
 
   const handleSearchChange = (value: string) => {
     setSearch(value)
@@ -570,6 +553,23 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
           Refresh
         </Button>
       </PageHeader>
+
+      {error && (
+        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+          <span className="flex-1">{error}</span>
+          <Button variant="outline" size="sm" onClick={refetch}>
+            Retry
+          </Button>
+        </div>
+      )}
+      {indexError && (
+        <div className="flex items-center gap-3 rounded-md border border-warning/20 bg-warning/10 px-4 py-3 text-xs font-medium text-warning">
+          <span className="flex-1">Some badges may be unavailable — index data failed to load.</span>
+          <Button variant="outline" size="sm" onClick={refetchIndexes}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       <Panel
   title="Findings"

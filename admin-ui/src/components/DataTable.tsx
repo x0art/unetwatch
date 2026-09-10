@@ -380,7 +380,7 @@ export function DataTable<T>({
             role="toolbar"
             aria-label="Bulk actions"
           >
-            <span className="tabular-nums">[ {selected.size} SELECTED ]</span>
+            <span className="tabular-nums">{selected.size} selected</span>
             <span className="h-4 w-px bg-border/20" aria-hidden="true" />
             {bulkActions.map((action) => {
               const Icon = action.icon
@@ -414,7 +414,7 @@ export function DataTable<T>({
       <div className="overflow-x-auto rounded-md border border-border bg-card shadow-sm">
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b border-border bg-foreground text-background dark:bg-foreground dark:text-background">
+            <tr className="border-b border-border bg-muted/50 text-muted-foreground">
               {selectable && (
                 <th className="w-12 px-4 py-3 text-left font-medium text-muted-foreground">
                   <Checkbox
@@ -449,7 +449,7 @@ export function DataTable<T>({
                         type="button"
                         onClick={() => handleSort(col)}
                         className={cn(
-                          "inline-flex cursor-pointer items-center gap-1 uppercase tracking-wide transition-colors hover:text-foreground",
+                          "inline-flex cursor-pointer items-center gap-1 mono-label transition-colors hover:text-foreground",
                           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background rounded-sm",
                           col.align === "right" && "flex-row-reverse",
                           col.align === "center" && "justify-center",
@@ -473,7 +473,7 @@ export function DataTable<T>({
                     ) : (
                       <span
                         className={cn(
-                          "uppercase tracking-wide",
+                          "mono-label",
                           col.align === "right" && "inline-block w-full text-right",
                           col.align === "center" && "inline-block w-full text-center",
                         )}
@@ -489,7 +489,7 @@ export function DataTable<T>({
                 accessor values in combobox mode, or a mono substring input in
                 text mode. */}
             {enableFiltering && hasPagination && (
-              <tr className="border-b-[2.5px] border-border bg-muted/40">
+              <tr className="border-b border-border bg-muted/40">
                 {selectable && <td className="px-4 py-1.5" />}
                 {columns.map((col) => {
                   const filterable = col.enableSorting !== false && !col.srOnly && col.enableColumnFilter !== false
