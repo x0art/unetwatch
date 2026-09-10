@@ -155,7 +155,7 @@ function Checkbox({
       onChange={onChange}
       disabled={disabled}
       aria-label={label}
-      className="h-4 w-4 cursor-pointer border-[2px] border-[#0A0A0A] bg-card text-[#0A0A0A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#F6F2E8] dark:text-[#F6F2E8]"
+      className="h-4 w-4 cursor-pointer border border-border bg-card text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
     />
   )
 }
@@ -376,12 +376,12 @@ export function DataTable<T>({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.18, ease: EASE }}
-            className="mb-3 flex flex-wrap items-center gap-2 border-[2.5px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-xs font-extrabold uppercase tracking-widest text-[#0A0A0A] brutal-shadow-sm dark:border-[#F6F2E8]"
+            className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-medium text-foreground shadow-sm"
             role="toolbar"
             aria-label="Bulk actions"
           >
             <span className="tabular-nums">[ {selected.size} SELECTED ]</span>
-            <span className="h-4 w-px bg-[#0A0A0A]/20" aria-hidden="true" />
+            <span className="h-4 w-px bg-border/20" aria-hidden="true" />
             {bulkActions.map((action) => {
               const Icon = action.icon
               return (
@@ -411,10 +411,10 @@ export function DataTable<T>({
         )}
       </AnimatePresence>
 
-      <div className="overflow-x-auto border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8]">
+      <div className="overflow-x-auto rounded-md border border-border bg-card shadow-sm">
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#F6F2E8] dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
+            <tr className="border-b border-border bg-foreground text-background dark:bg-foreground dark:text-background">
               {selectable && (
                 <th className="w-12 px-4 py-3 text-left font-medium text-muted-foreground">
                   <Checkbox
@@ -458,7 +458,7 @@ export function DataTable<T>({
                       >
                         {col.header}
                         {filterActive && (
-                          <Filter className="h-3 w-3 text-[#FFD60A]" aria-hidden="true" />
+                          <Filter className="h-3 w-3 text-warning" aria-hidden="true" />
                         )}
                         {active ? (
                           sortState.dir === "asc" ? (
@@ -530,7 +530,7 @@ export function DataTable<T>({
                               placeholder="Filter..."
                               aria-label={`Filter by ${String(col.header)}`}
                               className={cn(
-                                "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-[#0A0A0A] focus:outline-none focus:ring-1 focus:ring-ring dark:focus:border-[#F6F2E8]",
+                                "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring",
                                 col.align === "right" && "text-right",
                               )}
                             />

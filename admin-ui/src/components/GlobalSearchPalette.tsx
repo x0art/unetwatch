@@ -91,10 +91,10 @@ export function GlobalSearchPalette({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[#0A0A0A]/60 backdrop-blur-sm" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/60 backdrop-blur-sm" />
         <DialogPrimitive.Content className="fixed left-1/2 top-[22vh] z-50 w-[min(92vw,560px)] -translate-x-1/2">
-          <div className="brutal-card overflow-hidden bg-card shadow-xl">
-            <div className="flex items-center gap-2 border-b-[2.5px] border-border px-4 py-3">
+          <div className="overflow-hidden rounded-md border border-border bg-card shadow-md">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
               <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <Input
                 value={query}
@@ -115,7 +115,7 @@ export function GlobalSearchPalette({
             </div>
 
             <div className="p-3">
-              <p className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
                 Search as
               </p>
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Search destination">
@@ -129,9 +129,9 @@ export function GlobalSearchPalette({
                       onClick={() => setTarget(t.key)}
                       aria-pressed={active}
                       className={cn(
-                        "inline-flex items-center gap-1.5 border-[2px] px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-widest transition-colors",
+                        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                         active
-                          ? "border-[#0A0A0A] bg-primary text-primary-foreground dark:border-[#F6F2E8]"
+                          ? "border-border bg-primary text-primary-foreground"
                           : "border-border bg-card text-muted-foreground hover:bg-muted",
                       )}
                     >
@@ -141,7 +141,7 @@ export function GlobalSearchPalette({
                   )
                 })}
               </div>
-              <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+              <p className="mt-2 text-[11px] text-muted-foreground">
                 {TARGETS.find((t) => t.key === target)?.hint}
               </p>
             </div>

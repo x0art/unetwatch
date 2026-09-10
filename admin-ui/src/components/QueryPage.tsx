@@ -458,7 +458,7 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 
       {hoverPoint && hover !== null && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 border-[2.5px] border-[#0A0A0A] bg-popover px-2.5 py-1.5 font-mono text-xs font-bold brutal-shadow-sm dark:border-[#F6F2E8]"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-md border border-border bg-popover px-2.5 py-1.5 font-mono text-xs font-bold shadow-sm"
           style={{ left: `${(chart.x(hover) / CHART_W) * 100}%`, top: 0 }}
         >
           <p className="font-semibold tabular-nums">{hoverPoint.count.toLocaleString()} req</p>
@@ -913,7 +913,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   </p>
                 )}
                 {focusedSankeyId && (
-                  <div className="mb-3 flex flex-wrap items-center gap-2 border-[2px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-medium text-foreground">
                     <span>Focused: {focusedSankeyId.replace(/^(stub:)?(src|pat|url|dom|dst|ip|base):/, "")}</span>
                     <span className="opacity-60">(trace isolated)</span>
                     <Button variant="outline" size="sm" onClick={() => setFocusedSankeyId(null)} className="ml-auto h-6 px-2 text-[10px]">Clear focus</Button>
@@ -955,7 +955,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   size="sm"
                   onClick={() => setUniqueDomainsOnly((v) => !v)}
                   aria-pressed={uniqueDomainsOnly}
-                  className={uniqueDomainsOnly ? "text-[#0A0A0A]" : ""}
+                  className={uniqueDomainsOnly ? "text-primary-foreground" : ""}
                 >
                   {uniqueDomainsOnly ? "Showing unique domains" : "Unique domains"}
                 </Button>
@@ -967,7 +967,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             }
           >
             {/* Badge legend */}
-            <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 border-[2.5px] border-[#0A0A0A] bg-muted px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground brutal-shadow-sm dark:border-[#F6F2E8]">
+            <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-muted-foreground shadow-sm">
               <span className="inline-flex items-center gap-1.5">
                 <ListBadge tone="danger" icon={ShieldAlert}>
                   blacklist risk

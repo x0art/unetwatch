@@ -443,7 +443,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           <Skeleton className="h-56 w-full" />
         </div>
       ) : total === 0 ? (
-        <div className="border-[2.5px] border-dashed border-[#0A0A0A] dark:border-[#F6F2E8] px-6 py-14 text-center">
+        <div className="rounded-md border-dashed border border-border bg-muted/50 px-6 py-14 text-center">
           <ScrollText className="mx-auto mb-3 h-8 w-8 text-muted-foreground/50" aria-hidden="true" />
           <p className="text-sm font-medium text-muted-foreground">
             {kind ? `No ${kind} logs yet` : "No logs yet"}
@@ -517,17 +517,17 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         {detail && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">Duration</p>
                 <p className="mt-0.5 font-semibold tabular-nums">{formatDuration(detail.duration_ms)}</p>
               </div>
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">Window</p>
                 <p className="mt-0.5 font-semibold tabular-nums">
                   {detail.minutes !== null && detail.minutes !== undefined ? `${detail.minutes}m` : "—"}
                 </p>
               </div>
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">ES online</p>
                 <p className="mt-0.5 font-semibold">
                   {detail.es_online ? (
@@ -537,15 +537,15 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
                   )}
                 </p>
               </div>
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">Raw matches</p>
                 <p className="mt-0.5 font-semibold tabular-nums">{detail.matches.toLocaleString()}</p>
               </div>
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">After filters</p>
                 <p className="mt-0.5 font-semibold tabular-nums">{detail.filtered.toLocaleString()}</p>
               </div>
-              <div className="border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 px-3 py-2">
+              <div className="border border-border bg-muted/30 px-3 py-2">
                 <p className="text-muted-foreground">Findings stored</p>
                 <p className="mt-0.5 font-semibold tabular-nums">{detail.stored.toLocaleString()}</p>
               </div>
@@ -558,7 +558,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
                   <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
                   URL matches
                 </div>
-                <div className="space-y-1 border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30 p-3">
+                <div className="space-y-1 border border-border bg-muted/30 p-3">
                   {detail.topUrls?.map((url) => (
                     <p key={url} className="truncate font-mono text-[11px] leading-relaxed text-foreground/90" title={url}>
                       {url}
@@ -582,7 +582,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
                 <FileJson className="h-3.5 w-3.5" aria-hidden="true" />
                 ES query DSL
               </div>
-              <pre className="max-h-64 overflow-auto border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
+              <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-foreground/90">
                 {parsedQuery ? JSON.stringify(parsedQuery, null, 2) : detail.es_query ?? "—"}
               </pre>
             </div>
@@ -598,12 +598,12 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
                   </div>
                   <div
                     className={cn(
-                      "flex items-start justify-between gap-2 border-[2.5px] px-3 py-2 text-xs",
+                      "flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-xs",
                       detail.webhook_error || (detail.webhook_status !== null && detail.webhook_status >= 300)
-                        ? "border-[2.5px] border-danger/40 bg-danger/10"
+                        ? "border border-danger/40 bg-danger/10"
                         : detail.webhook_status !== null
-                          ? "border-[2.5px] border-success/40 bg-success/10"
-                          : "border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30",
+                          ? "border border-success/40 bg-success/10"
+                          : "border border-border bg-muted/30",
                     )}
                   >
                     <div className="min-w-0 flex-1">
@@ -659,12 +659,12 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
                   </div>
                   <div
                     className={cn(
-                      "flex items-start justify-between gap-2 border-[2.5px] px-3 py-2 text-xs",
+                      "flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-xs",
                       detail.msteams_error || (detail.msteams_status !== null && detail.msteams_status !== undefined && detail.msteams_status >= 300)
-                        ? "border-[2.5px] border-danger/40 bg-danger/10"
+                        ? "border border-danger/40 bg-danger/10"
                         : detail.msteams_status !== null && detail.msteams_status !== undefined
-                          ? "border-[2.5px] border-success/40 bg-success/10"
-                          : "border-[2.5px] border-[#0A0A0A] dark:border-[#F6F2E8] bg-muted/30",
+                          ? "border border-success/40 bg-success/10"
+                          : "border border-border bg-muted/30",
                     )}
                   >
                     <div className="min-w-0 flex-1">

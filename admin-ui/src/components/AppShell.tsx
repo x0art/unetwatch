@@ -38,12 +38,9 @@ export function AppShell({
 
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
-      {/* grid paper under main — blueprint */}
-      <div className="grid-paper pointer-events-none fixed inset-0 opacity-[0.45] dark:opacity-[0.15]" aria-hidden="true" />
-
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:border-[2.5px] focus:border-[#0A0A0A] focus:bg-secondary focus:px-4 focus:py-2 focus:font-mono focus:text-xs focus:font-extrabold focus:uppercase focus:tracking-widest focus:text-[#0A0A0A]"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[200] focus:border focus:border-border focus:bg-secondary focus:px-4 focus:py-2 focus:text-xs focus:font-medium focus:text-foreground"
       >
         SKIP TO CONTENT
       </a>
@@ -69,13 +66,12 @@ export function AppShell({
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-40 flex h-[64px] items-center gap-3 border-b-[3px] border-[#0A0A0A] bg-card px-4 sm:px-6 dark:border-[#F6F2E8] dark:bg-[#0A0A0A]">
-          <div className="hazard-bar absolute inset-x-0 top-0" aria-hidden="true" />
+        <header className="sticky top-0 z-40 flex h-[64px] items-center gap-3 border-b border-border bg-card px-4 sm:px-6">
           <MobileMenuButton onClick={() => setMobileOpen(true)} />
           <div className="min-w-0 flex-1">
-            <h1 className="font-display truncate text-[15px] sm:text-[16px]">{title}</h1>
+            <h1 className="truncate text-[15px] font-semibold tracking-tight sm:text-[16px]">{title}</h1>
             {description && (
-              <p className="truncate font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{description}</p>
+              <p className="truncate text-xs font-medium text-muted-foreground">{description}</p>
             )}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

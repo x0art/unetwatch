@@ -812,7 +812,7 @@ export function originOf(u: string): string {
  * Layers (user-confirmed order):
  *  0 Patterns — matched block patterns + "Unmatched" (slate)
  *  1 Sources — client IPs / hosts (info blue)
- *  2 Domains — base_url/domain, colored by action: ALLOW ink / DENY red / FLAG hazard
+ *  2 Domains — base_url/domain, colored by action: ALLOW foreground / DENY danger / FLAG warning
  *  3 Destinations — dest IPs; blacklisted destinations high-risk (ADR 0001:
  *    DENY is an enforcement, not a risk, so it no longer flags a destination).
  *

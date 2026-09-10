@@ -170,7 +170,7 @@ function AppRoutes() {
     onSessionExpired(() => setLoggedIn(false))
   }, [])
 
-  // Pause infinite CSS animations (ping dots, pulse, edge-flow) while the
+  // Pause infinite CSS animations (ping dots, pulse, dash-flow) while the
   // tab is hidden — honored by the `html[data-paused]` rule in index.css.
   useEffect(() => {
     document.documentElement.toggleAttribute("data-paused", !pageVisible)

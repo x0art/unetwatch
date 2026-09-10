@@ -203,9 +203,9 @@ export function UrlInvestigationPage({
         description="Investigate who reached a URL - clients, risk status, and enforcement actions."
       />
 
-      {/* Standardized search toolbar - matches Host Investigation's brutal-card form. */}
+      {/* Standardized search toolbar - matches Host Investigation's card form. */}
       <form
-        className="brutal-card p-4"
+        className="rounded-md border border-border bg-card p-4 shadow-sm"
         onSubmit={(e) => {
           e.preventDefault()
           void investigate(url)

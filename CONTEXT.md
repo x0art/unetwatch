@@ -19,7 +19,7 @@ uNetWatch (rebranded from "ELK Monitoring") watches **user internet behaviour re
 
 - **Backend**: Python / FastAPI, single process, SQLite storage (`app/`). Pure-function service modules: `result_processor.py` (filtering, findings, items), `query_builder.py` (ES DSL), `monitor.py` (orchestrator: poll, query, store, webhook), `readout.py` (per-client risk ranking), `blacklist.py`. Routes under `app/routes/` (`findings`, `query`, `analytics`, `patterns`, `blacklist`, `redirects`, `readout`).
 - **Frontend**: React + Vite + TypeScript (`admin-ui/`), ECharts for charts. State-driven routing — `App.tsx` view switch over `Sidebar.tsx` `NAV_GROUPS`. Shared workspace state in `FilterContext` (globalFilter, timeRange, actionFilter, viewMode), persisted to localStorage + URL params.
-- **Theme**: neobrutalist uNetWatch — paper `#F6F2E8`, ink `#0A0A0A`, hazard `#FF3B30` + `#FFD60A`.
+- **Theme**: Notion-style uNetWatch — white `#FFFFFF`, ink `#37352F`, single blue accent `#2383E2` (+ warm-charcoal dark mode).
 
 ## Pages (redesign 2026-09-04)
 

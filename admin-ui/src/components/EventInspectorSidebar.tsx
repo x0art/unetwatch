@@ -64,9 +64,9 @@ function Section({
 }) {
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 border-b-[2px] border-border pb-1.5">
-        <span className="h-1.5 w-1.5 shrink-0 bg-[#0A0A0A] dark:bg-[#F6F2E8]" aria-hidden="true" />
-        <p className="font-mono text-[10px] font-extrabold uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="flex items-center gap-2 border-b border-border pb-1.5">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-sm bg-foreground" aria-hidden="true" />
+        <p className="text-xs font-medium tracking-wide text-muted-foreground">
           {title}
         </p>
       </div>
@@ -154,24 +154,21 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
     <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-40 bg-[#0A0A0A]/30 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out"
+          className="fixed inset-0 z-40 bg-foreground/30 backdrop-blur-[1px] data-[state=open]:animate-in data-[state=closed]:animate-out"
           onClick={onClose}
         />
         <DialogPrimitive.Content
           className={cn(
             "fixed right-0 top-0 z-50 flex h-dvh w-[min(100vw,440px)] flex-col overflow-hidden",
-            "border-l-[3px] border-[#0A0A0A] bg-card text-card-foreground brutal-shadow-lg dark:border-[#F6F2E8]",
+            "border-l border-border bg-card text-card-foreground shadow-lg",
             "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
           )}
           aria-describedby={undefined}
         >
-          {/* Hazard bar */}
-          <div className={cn("h-1.5 w-full shrink-0", isRisky ? "bg-danger" : "bg-[#0A0A0A] dark:bg-[#F6F2E8]")} aria-hidden="true" />
-
           {/* Header */}
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b-[2.5px] border-border bg-muted/20 px-5 py-4">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-muted/20 px-5 py-4">
             <div className="min-w-0">
-              <DialogPrimitive.Title className="font-display text-sm leading-tight">
+              <DialogPrimitive.Title className="text-sm font-semibold leading-tight tracking-tight">
                 Event #{String(rowId).slice(0, 20)}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
@@ -180,12 +177,12 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge variant={actionVariant(row.action ?? "")}>{row.action || "—"}</Badge>
                 {isRisky && (
-                  <span className="inline-flex items-center border-[2px] border-danger bg-danger px-1.5 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-white">
+                  <span className="inline-flex items-center rounded-md border border-danger bg-danger px-1.5 py-0.5 text-xs font-medium text-white">
                     blacklist risk
                   </span>
                 )}
                 {(row as unknown as { whitelisted?: boolean }).whitelisted && (
-                  <span className="inline-flex items-center border-[2px] border-[#0A0A0A] bg-[#0A0A0A] px-1.5 py-0.5 font-mono text-[10px] font-extrabold uppercase tracking-widest text-[#FFD60A] dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
+                  <span className="inline-flex items-center rounded-md border border-border bg-foreground px-1.5 py-0.5 text-xs font-medium text-background">
                     whitelist
                   </span>
                 )}
@@ -193,7 +190,7 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
             </div>
             <DialogPrimitive.Close
               aria-label="Close inspector"
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center border-[2px] border-transparent hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X className="h-4 w-4" />
             </DialogPrimitive.Close>
@@ -315,10 +312,10 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
               {/* ── Raw JSON preview ── */}
               <Section title="Raw">
                 <details className="group">
-                  <summary className="cursor-pointer font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground">
+                  <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground">
                     Show raw JSON
                   </summary>
-                  <pre className="mt-2 max-h-48 overflow-auto border-[2px] border-border bg-muted p-3 font-mono text-[10px] leading-relaxed">
+                  <pre className="mt-2 max-h-48 overflow-auto rounded-md border border-border bg-muted p-3 font-mono text-[10px] leading-relaxed">
                     {JSON.stringify(row, null, 2)}
                   </pre>
                 </details>
@@ -327,7 +324,7 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
           </div>
 
           {/* Footer actions */}
-          <div className="flex shrink-0 flex-wrap gap-2 border-t-[2.5px] border-border bg-muted/30 px-5 py-4">
+          <div className="flex shrink-0 flex-wrap gap-2 border-t border-border bg-muted/30 px-5 py-4">
             <Button onClick={handleAddToAllowList}>Add to Allow List</Button>
             <Button variant="outline" onClick={handleViewHostHistory}>
               View Host History

@@ -22,7 +22,7 @@ export function CountdownRing({ remaining, total, className = "" }: CountdownRin
 
   return (
     <div
-      className={`relative grid h-28 w-28 shrink-0 place-items-center border-[2.5px] border-[#0A0A0A] bg-card brutal-shadow-sm dark:border-[#F6F2E8] ${className}`}
+      className={`relative grid h-28 w-28 shrink-0 place-items-center rounded-md border border-border bg-card shadow-sm ${className}`}
       role="timer"
       aria-label={`Approximately ${formatted} until the next Elasticsearch poll`}
     >
@@ -32,7 +32,7 @@ export function CountdownRing({ remaining, total, className = "" }: CountdownRin
           cy="56"
           r={radius}
           fill="none"
-          className="stroke-[#ECE8DD] dark:stroke-[#1E1E1E]"
+          className="stroke-muted"
           strokeWidth="7"
           strokeLinecap="butt"
         />
@@ -41,7 +41,7 @@ export function CountdownRing({ remaining, total, className = "" }: CountdownRin
           cy="56"
           r={radius}
           fill="none"
-          className="stroke-[#0A0A0A] transition-[stroke-dashoffset] duration-1000 ease-linear dark:stroke-[#FFD60A]"
+          className="stroke-current text-foreground transition-[stroke-dashoffset] duration-1000 ease-linear"
           strokeWidth="7"
           strokeLinecap="butt"
           strokeDasharray={circumference}
@@ -49,7 +49,7 @@ export function CountdownRing({ remaining, total, className = "" }: CountdownRin
         />
       </svg>
       <div className="relative text-center">
-        <span className="block font-mono text-xl font-black tabular-nums tracking-tight text-foreground">{formatted}</span>
+        <span className="block font-mono text-xl font-semibold tabular-nums tracking-tight text-foreground">{formatted}</span>
         <span className="mono-label mt-1 block">
           APPROX.
         </span>

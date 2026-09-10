@@ -863,14 +863,14 @@ export function HostInspectorPage({
       return (
         <span className="flex flex-wrap gap-1">
           {pats.map((pat) => (
-            <span key={pat} className="inline-flex items-center border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground" title={pat}>{pat}</span>
+            <span key={pat} className="inline-flex items-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground" title={pat}>{pat}</span>
           ))}
         </span>
       )
     } },
     { id: "volume", header: "Volume", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
       const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
-      return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><span className={`border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]" : "border-border bg-muted text-muted-foreground"}`}>{hasBytes ? "real" : "est."}</span></span>
+      return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><span className={`rounded border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-transparent bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>{hasBytes ? "real" : "est."}</span></span>
     }, width: "w-32" },
   ], [report?.top_pattern])
 
@@ -914,8 +914,8 @@ export function HostInspectorPage({
         )}
       </PageHeader>
 
-      {/* Standardized search toolbar - matches URL Investigation's brutal-card form. */}
-      <div className="brutal-card p-4">
+      {/* Standardized search toolbar - matches URL Investigation's card form. */}
+      <div className="rounded-md border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <Input
             placeholder="Host / IP Search: 192.168.1.45"
@@ -961,15 +961,15 @@ export function HostInspectorPage({
       )}
 
       {!loading && !error && !host && hasSearched && (
-        <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
-          <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">No host found</p>
+        <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
+          <p className="text-xs font-medium text-muted-foreground">No host found</p>
           <p className="mt-2 text-sm text-muted-foreground">No data for “{target}” in the selected window.</p>
         </div>
       )}
 
       {!loading && !error && !host && !hasSearched && (
-        <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
-          <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">Host Investigation</p>
+        <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
+          <p className="text-xs font-medium text-muted-foreground">Host Investigation</p>
           <p className="mt-2 text-sm text-muted-foreground">
             Enter a host or IP (e.g. 192.168.1.45) and run Lookup. <span className="font-mono font-semibold">Live</span> shows the live ES window;
             <span className="font-mono font-semibold"> Findings</span> shows all-time analytics from the findings table.
@@ -991,7 +991,7 @@ export function HostInspectorPage({
             ) : sections && sections.timeline.length > 0 ? (
               <TrafficTimeline points={sections.timeline} anomalyAnnotation={sections.anomaly} />
             ) : (
-              <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
                 NO DATA IN WINDOW
               </p>
             )}
@@ -1032,7 +1032,7 @@ export function HostInspectorPage({
                 ))}
               </div>
             ) : (
-              <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
                 NO DATA IN WINDOW
               </p>
             )}
@@ -1049,7 +1049,7 @@ export function HostInspectorPage({
             ) : behaviourFlow && behaviourFlow.links.length > 0 ? (
               <>
                 {behaviourFocus && (
-                  <div className="mb-3 flex flex-wrap items-center gap-2 border-[2px] border-[#0A0A0A] bg-secondary px-3 py-2 font-mono text-[11px] font-bold uppercase tracking-widest text-[#0A0A0A] dark:border-[#F6F2E8]">
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
                     <span>Focused: {behaviourFocus.replace(/^(stub:)?(src|pat|url|dom|dst|ip|base):/, "")}</span>
                     <span className="opacity-60">(trace isolated)</span>
                     <Button variant="outline" size="sm" onClick={() => setBehaviourFocus(null)} className="ml-auto h-6 px-2 text-[10px]">Clear focus</Button>
@@ -1067,7 +1067,7 @@ export function HostInspectorPage({
                 />
               </>
             ) : (
-              <p className="py-10 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
                 NO DATA IN WINDOW
               </p>
             )}
@@ -1120,8 +1120,8 @@ export function HostInspectorPage({
               <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />
             </div>
           ) : report && !hasRealData && hasSearched ? (
-            <div className="rounded-lg border border-dashed border-border bg-card px-6 py-10 text-center">
-              <p className="font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">No findings for {report.client_ip}</p>
+            <div className="rounded-md bg-muted/50 px-6 py-10 text-center">
+              <p className="text-xs font-medium text-muted-foreground">No findings for {report.client_ip}</p>
               <p className="mt-2 text-sm text-muted-foreground">This client has no findings in the database.</p>
             </div>
           ) : report && hasRealData ? (

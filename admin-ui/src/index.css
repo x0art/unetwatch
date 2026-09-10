@@ -1,105 +1,109 @@
-/* ── Fonts: heavy grotesk + mono for neobrutalist system ──── */
-@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&display=swap');
+/* ── Fonts: clean sans + mono for Notion-style system ──── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 /* ── Dark mode: class-based ────────────────────────────────────── */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Neobrutalist tokens ───────────────────────────────────────── */
+/* ── Notion-style tokens ─────────────────────────────────────────── */
 @theme {
-  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Archivo Black", "Space Grotesk", ui-sans-serif, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* Paper / Ink */
-  --color-background: #F6F2E8;
-  --color-foreground: #0A0A0A;
+  /* Notion neutral whites */
+  --color-background: #FFFFFF;
+  --color-foreground: #37352F;
   --color-card: #FFFFFF;
-  --color-card-foreground: #0A0A0A;
+  --color-card-foreground: #37352F;
   --color-popover: #FFFFFF;
-  --color-popover-foreground: #0A0A0A;
+  --color-popover-foreground: #37352F;
 
-  /* Hazard primaries — flat, no gradients */
-  --color-primary: #FF3B30;
+  /* Notion accent — quiet blue */
+  --color-primary: #2383E2;
   --color-primary-foreground: #FFFFFF;
-  --color-secondary: #FFD60A;
-  --color-secondary-foreground: #0A0A0A;
-  --color-accent: #FFD60A;
-  --color-accent-foreground: #0A0A0A;
+  --color-secondary: #F1F1EF;
+  --color-secondary-foreground: #37352F;
+  --color-accent: #E9E9E8;
+  --color-accent-foreground: #37352F;
 
-  --color-muted: #ECE8DD;
-  --color-muted-foreground: #6B6560;
+  --color-muted: #F7F7F5;
+  --color-muted-foreground: #787774;
 
-  /* Semantic — flat */
-  --color-success: #0A0A0A;
-  --color-success-foreground: #FFD60A;
-  --color-warning: #FFD60A;
-  --color-warning-foreground: #0A0A0A;
-  --color-danger: #FF3B30;
+  /* Semantic — Notion tones */
+  --color-success: #0F7B6C;
+  --color-success-foreground: #FFFFFF;
+  --color-warning: #DFAB01;
+  --color-warning-foreground: #FFFFFF;
+  --color-danger: #EB5757;
   --color-danger-foreground: #FFFFFF;
-  --color-info: #0A7AFF;
+  --color-info: #2383E2;
   --color-info-foreground: #FFFFFF;
   --color-destructive: var(--color-danger);
   --color-destructive-foreground: var(--color-danger-foreground);
 
-  /* Ink borders — everywhere */
-  --color-border: #0A0A0A;
-  --color-input: #0A0A0A;
-  --color-ring: #0A0A0A;
+  /* Hairline borders */
+  --color-border: #E9E9E8;
+  --color-input: #E0E0DE;
+  --color-ring: #2383E2;
 
-  /* Sidebar — ink slab */
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --color-sidebar-muted: #9A9590;
-  --color-sidebar-active: #FFD60A;
-  --color-sidebar-hover: #1A1A1A;
-  --color-sidebar-border: #1A1A1A;
+  /* Sidebar — Notion warm gray */
+  --color-sidebar: #FBFBFA;
+  --color-sidebar-foreground: #37352F;
+  --color-sidebar-muted: #787774;
+  --color-sidebar-active: #E9E9E8;
+  --color-sidebar-hover: #F1F1EF;
+  --color-sidebar-border: #E9E9E8;
 
-  /* Neobrutalist: no radius, hard edges */
-  --radius: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
-  --radius-2xl: 0px;
+  /* Notion: soft rounded corners */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
 
-  --shadow-color: #0A0A0A;
-  --default-transition-duration: 140ms;
+  --shadow-color: rgba(15, 15, 15, 0.1);
+  --default-transition-duration: 150ms;
   --default-transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Light is the default paper — same tokens, kept for explicit .light class */
+/* Light is the Notion default — same tokens, kept for explicit .light class */
 .light {
-  --color-background: #F6F2E8;
-  --color-foreground: #0A0A0A;
+  --color-background: #FFFFFF;
+  --color-foreground: #37352F;
   --color-card: #FFFFFF;
-  --color-card-foreground: #0A0A0A;
+  --color-card-foreground: #37352F;
   --color-popover: #FFFFFF;
-  --color-popover-foreground: #0A0A0A;
-  --color-border: #0A0A0A;
-  --color-input: #0A0A0A;
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --shadow-color: #0A0A0A;
+  --color-popover-foreground: #37352F;
+  --color-border: #E9E9E8;
+  --color-input: #E0E0DE;
+  --color-sidebar: #FBFBFA;
+  --color-sidebar-foreground: #37352F;
+  --shadow-color: rgba(15, 15, 15, 0.1);
 }
 
-/* Dark brutal — inverted paper */
+/* Dark Notion — warm charcoal */
 .dark {
-  --color-background: #0A0A0A;
-  --color-foreground: #F6F2E8;
-  --color-card: #141414;
-  --color-card-foreground: #F6F2E8;
-  --color-popover: #141414;
-  --color-popover-foreground: #F6F2E8;
-  --color-muted: #1E1E1E;
-  --color-muted-foreground: #9A9590;
-  --color-border: #F6F2E8;
-  --color-input: #F6F2E8;
-  --color-ring: #FFD60A;
-  --color-sidebar: #0A0A0A;
-  --color-sidebar-foreground: #F6F2E8;
-  --color-sidebar-border: #2A2A2A;
-  --shadow-color: #F6F2E8;
+  --color-background: #191919;
+  --color-foreground: #E3E2E0;
+  --color-card: #202020;
+  --color-card-foreground: #E3E2E0;
+  --color-popover: #202020;
+  --color-popover-foreground: #E3E2E0;
+  --color-muted: #2F2F2F;
+  --color-muted-foreground: #9B9A97;
+  --color-secondary: #2F2F2F;
+  --color-secondary-foreground: #E3E2E0;
+  --color-accent: #37352F;
+  --color-accent-foreground: #E3E2E0;
+  --color-border: #37352F;
+  --color-input: #37352F;
+  --color-ring: #529CCA;
+  --color-sidebar: #191919;
+  --color-sidebar-foreground: #E3E2E0;
+  --color-sidebar-border: #2F2F2F;
+  --shadow-color: rgba(0, 0, 0, 0.4);
 }
 
 /* ── Base ─────────────────────────────────────────────────────── */
@@ -118,114 +122,37 @@
   ::selection { background: var(--color-primary); color: #fff; }
 }
 
-/* ── Neobrutalist primitives ─────────────────────────────────── */
-.brutal-border { border: 2.5px solid var(--color-border); }
-.brutal-border-thick { border: 3px solid var(--color-border); }
-.brutal-shadow { box-shadow: 4px 4px 0 var(--shadow-color); }
-.brutal-shadow-lg { box-shadow: 6px 6px 0 var(--shadow-color); }
-.brutal-shadow-sm { box-shadow: 3px 3px 0 var(--shadow-color); }
-/* Dark mode: shadows use ink, so cards need light border shadow visible */
-.dark .brutal-shadow,
-.dark .brutal-shadow-lg,
-.dark .brutal-shadow-sm { box-shadow: 4px 4px 0 #F6F2E8; }
-.dark .brutal-shadow-lg { box-shadow: 6px 6px 0 #F6F2E8; }
+/* ── Notion-style primitives ───────────────────────────────────── */
 
-/* Hard press — brutal buttons slam 1px */
-.brutal-press:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--shadow-color) !important; }
-.dark .brutal-press:active { box-shadow: 2px 2px 0 #F6F2E8 !important; }
-
-/* Card = white slab + ink border + hard shadow, no radius */
-.brutal-card {
-  background: var(--color-card);
-  color: var(--color-card-foreground);
-  border: 2.5px solid var(--color-border);
-  box-shadow: 5px 5px 0 var(--shadow-color);
-}
-.dark .brutal-card { border-color: #2A2A2A; box-shadow: 5px 5px 0 #F6F2E8; }
-
-/* Ticker tape / stamp label */
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  border: 2px solid var(--color-border);
-  background: var(--color-secondary);
-  color: var(--color-secondary-foreground);
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  line-height: 1;
-}
-.stamp--red { background: var(--color-primary); color: #fff; border-color: #0A0A0A; }
-.stamp--ink { background: #0A0A0A; color: #F6F2E8; border-color: #0A0A0A; }
-.dark .stamp--ink { background: #F6F2E8; color: #0A0A0A; border-color: #F6F2E8; }
-.stamp--blue { background: var(--color-info); color: #fff; }
-
-/* Halftone — ink dots */
-.halftone {
-  background-image: radial-gradient(circle, #0A0A0A 1.1px, transparent 1.2px);
-  background-size: 10px 10px;
-  opacity: 0.08;
-}
-.dark .halftone { background-image: radial-gradient(circle, #F6F2E8 1.1px, transparent 1.2px); opacity: 0.12; }
-
-/* Hazard stripe bar — 45deg */
-.hazard-bar {
-  height: 10px;
-  background: repeating-linear-gradient(135deg, #0A0A0A 0 12px, #FFD60A 12px 24px);
-  border-top: 2px solid #0A0A0A;
-  border-bottom: 2px solid #0A0A0A;
-}
-.dark .hazard-bar { border-color: #F6F2E8; }
-
-/* Grid paper — 1px blueprint grid */
-.grid-paper {
-  background-image:
-    linear-gradient(to right, color-mix(in oklch, var(--color-foreground) 7%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--color-foreground) 7%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-/* Mono label — telemetry */
+/* Mono label — relaxed tracking */
 .mono-label {
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-muted-foreground);
 }
 
-/* Display — Archivo Black brutal */
+/* Display — clean Inter, no caps */
 .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
-  line-height: 0.95;
-  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
 }
 
-/* Focus — brutal offset ring */
+/* Focus — soft ring */
 :focus-visible {
-  outline: 2.5px solid var(--color-foreground);
+  outline: 2px solid var(--color-ring);
   outline-offset: 2px;
 }
 
-/* Scrollbar — chunky ink */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--color-muted); border-left: 2px solid var(--color-border); }
-::-webkit-scrollbar-thumb { background: var(--color-foreground); border: 1px solid var(--color-background); }
-::-webkit-scrollbar-thumb:hover { background: #000; }
-.dark ::-webkit-scrollbar-thumb { background: #F6F2E8; }
-
-/* Keep legacy helpers but brutalized */
-.grain-overlay { display: none !important; }
-.mesh-ambient { display: none !important; }
-.shadow-tinted { box-shadow: 4px 4px 0 var(--shadow-color) !important; }
-.card-glass { background: var(--color-card) !important; backdrop-filter: none !important; border: 2.5px solid var(--color-border) !important; box-shadow: 5px 5px 0 var(--shadow-color) !important; }
-.spotlight-card::before { display: none !important; }
+/* Scrollbar — slim and quiet */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-muted-foreground); border-radius: 4px; opacity: 0.4; }
+::-webkit-scrollbar-thumb:hover { opacity: 0.6; }
 
 /* Motion */
 @utility animate-in { animation: animate-in 0.18s cubic-bezier(0.16,1,0.3,1); }

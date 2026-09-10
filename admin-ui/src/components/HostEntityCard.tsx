@@ -22,11 +22,11 @@ export function HostEntityCard({ host, risk }: HostEntityCardProps) {
   const blacklistedAllow = risk.blacklistedRequests ?? 0
 
   return (
-    <div className="brutal-card overflow-hidden">
-      <div className="flex items-center gap-2 border-b-[2.5px] border-border bg-muted/40 px-4 py-3">
+    <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-        <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Risk Summary</h3>
-        <span className="ml-auto hidden truncate font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground sm:inline">
+        <h3 className="text-xs font-medium">Risk Summary</h3>
+        <span className="ml-auto hidden truncate text-xs font-medium text-muted-foreground sm:inline">
           {host.hostname || host.primaryIp} · {risk.totalRequests.toLocaleString()} req
         </span>
       </div>

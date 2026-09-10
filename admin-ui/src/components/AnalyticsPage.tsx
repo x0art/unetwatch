@@ -452,7 +452,7 @@ export function AnalyticsPage({
           return (
             <span className="inline-flex items-center gap-1.5" title={title}>
               <span className="whitespace-nowrap font-mono text-xs tabular-nums">{formatBytes(vol)}</span>
-              <span className={`inline-flex items-center border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]" : "border-border bg-muted text-muted-foreground"}`}>
+              <span className={`inline-flex items-center rounded border px-1 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${hasBytes ? "border-transparent bg-foreground text-background" : "border-border bg-muted text-muted-foreground"}`}>
                 {hasBytes ? "real" : "est."}
               </span>
             </span>
@@ -568,7 +568,7 @@ export function AnalyticsPage({
       </PageHeader>
 
       {/* ── Date range & comparison controls ───────────────────────── */}
-      <div className="brutal-card p-4">
+      <div className="rounded-md border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1">
             <Label className="mb-0">Range</Label>

@@ -22,7 +22,7 @@ interface TopDestinationsProps {
 /** Shared empty-state cell for both NOC table halves. */
 function EmptyCell() {
   return (
-    <p className="py-8 text-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
+    <p className="py-8 text-center text-xs font-medium text-muted-foreground">
       NO DATA IN WINDOW
     </p>
   )
@@ -33,11 +33,11 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
   const maxHits = Math.max(1, ...triggeredPatterns.map((p) => p.hits))
 
   return (
-    <div className={cn("brutal-card overflow-hidden", className)}>
-      <div className="flex items-center gap-2 border-b-[2.5px] border-border bg-muted/40 px-4 py-3">
+    <div className={cn("rounded-md border border-border bg-card shadow-sm overflow-hidden", className)}>
+      <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
-        <h3 className="font-mono text-xs font-extrabold uppercase tracking-widest">Top Destinations &amp; Rule Matches</h3>
-        <span className="ml-auto hidden font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground sm:inline">
+        <h3 className="text-xs font-medium">Top Destinations &amp; Rule Matches</h3>
+        <span className="ml-auto hidden text-xs font-medium text-muted-foreground sm:inline">
           Destinations ranked by volume · rules by trigger count
         </span>
       </div>
@@ -46,10 +46,10 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
         {/* ── Left: Top Accessed Domains ─────────────────────────────── */}
         <div>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            <span className="text-xs font-medium text-muted-foreground">
               Top Accessed Domains
             </span>
-            <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {topDomains.length > 0
                 ? `${topDomains.length} domain${topDomains.length === 1 ? "" : "s"}`
                 : "—"}
@@ -61,9 +61,9 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                  <th className="w-10 px-4 py-2 font-mono text-[11px] font-bold uppercase tracking-widest">#</th>
-                  <th className="px-4 py-2 font-mono text-[11px] font-bold uppercase tracking-widest">Domain</th>
-                  <th className="w-28 px-4 py-2 text-right font-mono text-[11px] font-bold uppercase tracking-widest">Share</th>
+                  <th className="w-10 px-4 py-2 text-xs font-medium">#</th>
+                  <th className="px-4 py-2 text-xs font-medium">Domain</th>
+                  <th className="w-28 px-4 py-2 text-right text-xs font-medium">Share</th>
                 </tr>
               </thead>
               <Stagger as="tbody" className="divide-y divide-border">
@@ -101,10 +101,10 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
         {/* ── Right: Triggered URL Patterns ──────────────────────────── */}
         <div>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
-            <span className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            <span className="text-xs font-medium text-muted-foreground">
               Triggered URL Patterns
             </span>
-            <span className="ml-auto font-mono text-[11px] tabular-nums text-muted-foreground">
+            <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {triggeredPatterns.length > 0
                 ? `${triggeredPatterns.length} pattern${triggeredPatterns.length === 1 ? "" : "s"}`
                 : "—"}
@@ -116,8 +116,8 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                  <th className="px-4 py-2 font-mono text-[11px] font-bold uppercase tracking-widest">Pattern</th>
-                  <th className="w-24 px-4 py-2 text-right font-mono text-[11px] font-bold uppercase tracking-widest">Hits</th>
+                  <th className="px-4 py-2 text-xs font-medium">Pattern</th>
+                  <th className="w-24 px-4 py-2 text-right text-xs font-medium">Hits</th>
                 </tr>
               </thead>
               <Stagger as="tbody" className="divide-y divide-border">

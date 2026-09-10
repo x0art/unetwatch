@@ -28,8 +28,8 @@ function CopyField({
   const { toast } = useToast()
   const handleCopy = async () => {
     const ok = await copyText(copyValue)
-    if (ok) toast({ title: "COPIED", description: copyValue, variant: "success" })
-    else toast({ title: "COPY FAILED", variant: "error" })
+    if (ok) toast({ title: "Copied", description: copyValue, variant: "success" })
+    else toast({ title: "Copy failed", variant: "error" })
   }
   return (
     <div>

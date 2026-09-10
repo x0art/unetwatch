@@ -29,27 +29,29 @@ export {
   type ResolvedColors,
 } from "../lib/echartsTheme"
 
-/** Neobrutalist palette — ink/paper/hazard on the flow columns.
+/** Notion-quiet palette on the flow columns.
  * Column order: 0 Patterns · 1 Sources (client IPs) · 2 Domains · 3 Destinations.
  * Layer 2 is the domain (hostname) of the requested URL, and it carries no
  * ALLOW/DENY verdict color — action on a domain is noise for tracing what a
  * client reached. Destinations keep their high-risk red only.
  */
 export const LAYER_COLORS: Record<number, string> = {
-  0: "#6B6560", // Patterns — muted slate
-  1: "#0A7AFF", // Sources — info blue
-  2: "#0A0A0A", // Domains — neutral ink (no action coloring)
-  3: "#9A9590", // Destinations — muted; high-risk override hazard red
+  0: "#787774", // Patterns — muted slate
+  1: "#2383E2", // Sources — info blue
+  2: "#37352F", // Domains — neutral (no action coloring)
+  3: "#787774", // Destinations — muted; high-risk override danger red
 }
 
 /** Layer color resolved for the active theme. LAYER_COLORS holds the
- * light-mode hexes; dark mode swaps the two hexes that vanish on the ink
- * background (#0A0A0A URLs) or read too dim (#6B6560 patterns). */
+ * light-mode hexes; dark mode swaps the two hexes that vanish on the dark
+ * background or read too dim. */
 function layerColor(layer: number, isDark: boolean): string {
   if (isDark) {
     switch (layer) {
-      case 0: return "#9A9590" // Patterns — lighter than muted on dark
-      case 2: return "#F6F2E8" // Domains — paper on ink bg
+      case 0: return "#9B9A97" // Patterns — lighter than muted on dark
+      case 1: return "#529CCA" // Sources — info blue, lifted for dark
+      case 2: return "#E3E2E0" // Domains — light neutral on dark bg
+      case 3: return "#9B9A97" // Destinations — muted on dark
       default: return LAYER_COLORS[layer]
     }
   }
@@ -57,7 +59,7 @@ function layerColor(layer: number, isDark: boolean): string {
 }
 
 function destColor(isHighRisk?: boolean, isDark?: boolean): string {
-  return isHighRisk ? "#FF3B30" : isDark ? "#D4CFC5" : "#9A9590"
+  return isHighRisk ? "#EB5757" : isDark ? "#9B9A97" : "#787774"
 }
 
 function stripSankeyPrefix(id: string): string {
@@ -213,7 +215,7 @@ function buildOption(
   const resolveNodeColor = (n: SankeyNode): string => {
     const layer = n.layer ?? 0
     // Only destinations carry a color override (high-risk red). URL/domain
-    // nodes are neutral ink — ALLOW/DENY verdicts are noise for tracing.
+    // nodes are neutral — ALLOW/DENY verdicts are noise for tracing.
     if (layer === 3) {
       let hr = n.isHighRisk
       if (hr === undefined) {

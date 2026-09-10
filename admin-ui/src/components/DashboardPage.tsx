@@ -136,31 +136,30 @@ export function DashboardPage({
 
   return (
     <div className="space-y-5">
-      {/* ── Header — brutal slab + hazard bar ── */}
-      <div className="brutal-card overflow-hidden">
-        <div className="hazard-bar" aria-hidden="true" />
+      {/* ── Header ── */}
+      <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
           <div>
             <div className="flex items-center gap-2">
-              <span className="h-2 w-2 bg-danger border border-[#0A0A0A] shrink-0" aria-hidden="true" />
+              <span className="h-2 w-2 bg-danger border border-border shrink-0" aria-hidden="true" />
               <span className="mono-label">[ DASHBOARD // UNETWATCH ]</span>
             </div>
-            <h2 className="font-display mt-1 text-[30px] sm:text-[36px]">DASHBOARD</h2>
-            <p className="mt-1 max-w-[52ch] font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+            <h2 className="mt-1 text-[30px] font-semibold tracking-tight sm:text-[36px]">DASHBOARD</h2>
+            <p className="mt-1 max-w-[52ch] text-xs font-medium text-muted-foreground">
               LIVE POLL HEALTH — FINDINGS — REDIRECT WATCH
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 border-[2.5px] border-[#0A0A0A] bg-card px-3 py-1.5 font-mono text-xs font-extrabold uppercase tracking-widest brutal-shadow-sm dark:border-[#F6F2E8]">
-              <span className="relative flex h-2.5 w-2.5 border border-[#0A0A0A] dark:border-[#F6F2E8]">
+            <span className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
+              <span className="relative flex h-2.5 w-2.5 border border-border">
                 {pageVisible && isOnline && (
-                  <span className="absolute inset-0 animate-ping bg-[#0A0A0A] dark:bg-[#F6F2E8]" />
+                  <span className="absolute inset-0 animate-ping bg-foreground" />
                 )}
-                <span className={`absolute inset-0 ${isOnline ? "bg-[#0A0A0A] dark:bg-[#FFD60A]" : "bg-danger"}`} />
+                <span className={`absolute inset-0 ${isOnline ? "bg-foreground" : "bg-danger"}`} />
               </span>
               {statusLabel}
             </span>
-            <span className="border-[2px] border-border bg-muted px-2 py-1 font-mono text-xs font-bold tabular-nums">{formatLastUpdated(lastUpdated)}</span>
+            <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium tabular-nums">{formatLastUpdated(lastUpdated)}</span>
             <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
             <Button variant="outline" size="sm" onClick={onRefresh}>
               <RefreshCcw className="h-4 w-4" />
@@ -170,15 +169,15 @@ export function DashboardPage({
         </div>
       </div>
 
-      {/* ── Banner — stamp style ── */}
+      {/* ── Banner ── */}
       {banner && (
-        <div className="flex flex-wrap items-center gap-4 border-[2.5px] border-[#0A0A0A] bg-secondary p-4 brutal-shadow-sm dark:border-[#F6F2E8]">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#FFD60A]">
+        <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-secondary p-4 shadow-sm">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
             {banner.kind === "setup" ? <ShieldAlert className="h-5 w-5" aria-hidden="true" /> : <RefreshCcw className="h-5 w-5" aria-hidden="true" />}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-xs font-extrabold uppercase tracking-widest">{banner.title}</p>
-            <p className="mt-0.5 font-mono text-xs text-[#0A0A0A]/70">{banner.description}</p>
+            <p className="text-xs font-medium">{banner.title}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{banner.description}</p>
           </div>
           <Button size="sm" variant="outline" onClick={banner.action} className="bg-card">
             {banner.actionLabel}
@@ -205,7 +204,7 @@ export function DashboardPage({
             tone="info"
             hint="PERSISTED BY ES POLL"
             action={
-              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("findings")}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("findings")}>
                 VIEW ALL <ArrowRight className="h-3 w-3" />
               </Button>
             }
@@ -219,7 +218,7 @@ export function DashboardPage({
             tone="danger"
             hint="HOSTS & IPS BLOCKED"
             action={
-              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("blacklist")}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("blacklist")}>
                 MANAGE <ArrowRight className="h-3 w-3" />
               </Button>
             }
@@ -233,7 +232,7 @@ export function DashboardPage({
             tone="warning"
             hint="MONITORED FOR REDIRECTS"
             action={
-              <Button variant="ghost" size="sm" className="h-7 font-mono text-[11px]" onClick={() => onNavigate("redirects")}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => onNavigate("redirects")}>
                 VIEW ALL <ArrowRight className="h-3 w-3" />
               </Button>
             }
@@ -255,19 +254,19 @@ export function DashboardPage({
             {recentLoading ? (
               <Skeleton className="h-32 w-full" />
             ) : recentFindings.length > 0 ? (
-              <div className="overflow-hidden border-[2.5px] border-[#0A0A0A] bg-card dark:border-[#F6F2E8]">
+              <div className="overflow-hidden rounded-md border border-border bg-card">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-white dark:border-[#F6F2E8] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
-                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">CLIENT IP</th>
-                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">BASE URL</th>
-                      <th className="px-3 py-2 text-left font-mono text-[11px] font-extrabold uppercase tracking-widest">DETECTED</th>
+                    <tr className="border-b border-border bg-muted text-muted-foreground">
+                      <th className="px-3 py-2 text-left text-xs font-medium">CLIENT IP</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">BASE URL</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium">DETECTED</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {recentFindings.map((f) => (
-                      <tr key={f.id} className="cursor-pointer hover:bg-secondary/30" onClick={() => onNavigate("findings", f.base_url)}>
-                        <td className="px-3 py-2 font-mono font-bold">{f.client_ip}</td>
+                      <tr key={f.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onNavigate("findings", f.base_url)}>
+                        <td className="px-3 py-2 font-mono font-medium">{f.client_ip}</td>
                         <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground">{f.base_url}</td>
                         <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
                       </tr>
@@ -276,26 +275,26 @@ export function DashboardPage({
                 </table>
               </div>
             ) : (
-              <p className="py-6 text-center font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              <p className="py-6 text-center text-xs font-medium text-muted-foreground">
                 NO FINDINGS YET — THEY APPEAR AFTER THE ES POLL DETECTS MATCHES.
               </p>
             )}
           </div>
         </Panel>
 
-      {/* ── Quick links — brutal slabs ── */}
+      {/* ── Quick links ── */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
         <button
           type="button"
           onClick={() => onNavigate("query")}
-          className="group relative flex items-center gap-4 border-[2.5px] border-[#0A0A0A] bg-card p-5 text-left brutal-shadow brutal-press dark:border-[#F6F2E8] lg:col-span-3 lg:p-6"
+          className="group relative flex items-center gap-4 rounded-md border border-border bg-card p-5 text-left shadow-sm active:scale-[0.98] lg:col-span-3 lg:p-6"
         >
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-info text-white">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-info text-white">
             <FileSearch className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-display text-sm">QUERY CONSOLE</p>
-            <p className="mt-0.5 font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">LIVE ES QUERIES & ACCESS-FLOW</p>
+            <p className="text-sm font-semibold tracking-tight">QUERY CONSOLE</p>
+            <p className="mt-0.5 text-xs font-medium text-muted-foreground">LIVE ES QUERIES & ACCESS-FLOW</p>
           </div>
           <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
         </button>
@@ -304,14 +303,14 @@ export function DashboardPage({
           <button
             type="button"
             onClick={() => onNavigate("query")}
-            className="group flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-card p-4 text-left brutal-shadow-sm brutal-press dark:border-[#F6F2E8]"
+            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98]"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-secondary text-[#0A0A0A]">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-secondary-foreground">
               <Link2 className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-display text-xs">TRAFFIC FLOW</p>
-              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">CLIENT → SERVER → URL</p>
+              <p className="text-xs font-semibold tracking-tight">TRAFFIC FLOW</p>
+              <p className="text-xs font-medium text-muted-foreground">CLIENT → SERVER → URL</p>
             </div>
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>
@@ -319,14 +318,14 @@ export function DashboardPage({
           <button
             type="button"
             onClick={() => onNavigate("patterns")}
-            className="group flex items-center gap-3 border-[2.5px] border-[#0A0A0A] bg-card p-4 text-left brutal-shadow-sm brutal-press dark:border-[#F6F2E8]"
+            className="group flex items-center gap-3 rounded-md border border-border bg-card p-4 text-left shadow-sm active:scale-[0.98]"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#0A0A0A] text-[#FFD60A] dark:bg-[#F6F2E8] dark:text-[#0A0A0A]">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
               <Ban className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-display text-xs">PATTERNS</p>
-              <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-muted-foreground">BLOCK & WHITELIST RULES</p>
+              <p className="text-xs font-semibold tracking-tight">PATTERNS</p>
+              <p className="text-xs font-medium text-muted-foreground">BLOCK & WHITELIST RULES</p>
             </div>
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-1" />
           </button>

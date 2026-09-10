@@ -27,24 +27,18 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
 
   return (
     <div className="relative flex min-h-dvh items-center justify-center bg-background px-4 py-10 sm:py-16">
-      {/* grid paper */}
-      <div className="grid-paper pointer-events-none absolute inset-0 opacity-30" aria-hidden="true" />
-      <div className="halftone pointer-events-none absolute inset-0" aria-hidden="true" />
-
       <div className="fade-in relative m-auto w-full max-w-sm">
-        {/* Brutal slab */}
-        <div className="overflow-hidden border-[3px] border-[#0A0A0A] bg-card brutal-shadow-lg dark:border-[#F6F2E8]">
-          <div className="hazard-bar" aria-hidden="true" />
+        <div className="rounded-xl border border-border bg-card shadow-lg overflow-hidden">
 
           <div className="p-8 sm:p-8">
-            {/* Brand — stamp + display */}
+            {/* Brand */}
             <div className="mb-6 text-center">
-              <span className="inline-flex h-14 w-14 items-center justify-center border-[2.5px] border-[#0A0A0A] bg-[#FFD60A] text-[#0A0A0A] brutal-shadow-sm">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-md border border-transparent bg-primary text-white shadow-sm">
                 <ShieldCheck className="h-7 w-7" aria-hidden="true" />
               </span>
-              <h1 className="font-display mt-4 text-[22px]">UNETWATCH</h1>
+              <h1 className="mt-4 text-[22px] font-semibold tracking-tight">UNETWATCH</h1>
               <p className="mono-label mt-1">[ ADMIN CONSOLE // SIGN IN ]</p>
-              <div className="mx-auto mt-3 h-1 w-12 bg-[#0A0A0A] dark:bg-[#F6F2E8]" aria-hidden="true" />
+              <div className="mx-auto mt-3 h-1 w-12 bg-border" aria-hidden="true" />
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -91,7 +85,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                     aria-label={showPassword ? "Hide password" : "Show password"}
                     aria-controls="login-password"
                     aria-pressed={showPassword}
-                    className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center border-[2px] border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                   </button>
@@ -99,7 +93,7 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
               </div>
 
               {error && (
-                <div className="flex items-start gap-2 border-[2.5px] border-[#0A0A0A] bg-danger px-3 py-2.5 font-mono text-xs font-bold uppercase tracking-widest text-white" role="alert">
+                <div className="flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 px-3 py-2.5 text-xs font-medium text-danger" role="alert">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                   <span className="min-w-0 break-words">{error}</span>
                 </div>
@@ -118,12 +112,12 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
             </form>
           </div>
 
-          <div className="border-t-[3px] border-[#0A0A0A] bg-secondary px-4 py-2 text-center font-mono text-[10px] font-extrabold uppercase tracking-[0.14em] text-[#0A0A0A] dark:border-[#F6F2E8]">
+          <div className="border-t border-border bg-secondary px-4 py-2 text-center text-xs font-medium text-secondary-foreground">
             RESTRICTED AREA — ADMINISTRATORS ONLY
           </div>
         </div>
 
-        <p className="mt-4 text-center font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+        <p className="mt-4 text-center text-xs font-medium text-muted-foreground">
           [ SECURE // ENCRYPTED // AUDITED ]
         </p>
       </div>
