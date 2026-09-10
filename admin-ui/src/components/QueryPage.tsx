@@ -548,9 +548,9 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
 
   const handleRun = () => fetchQuery()
 
-  // Flow (Pattern → client IP → URL → Destination) built from this page's own
+  // Flow (Pattern → client IP → Domain → Destination) built from this page's own
   // result items — no second ES round-trip.
-  const FLOW_SANKEY_OPTS = { maxPat: 12, maxSrc: sankeyTopN, maxUrl: sankeyTopN, maxDst: sankeyTopN, minWeight: hideSingletons ? 2 : 1, groupOthers, keepRisk: true } as const
+  const FLOW_SANKEY_OPTS = { maxPat: 12, maxSrc: sankeyTopN, maxDom: sankeyTopN, maxDst: sankeyTopN, minWeight: hideSingletons ? 2 : 1, groupOthers, keepRisk: true } as const
   const flowSankey = useMemo(
     () => (result && result.items.length > 0 ? buildFlowSankey(result.items, FLOW_SANKEY_OPTS as any) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -834,12 +834,12 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             </Panel>
           </div>
 
-          {/* Flow visualization — Sankey (Pattern → client IP → URL → Destination).
+          {/* Flow visualization — Sankey (Pattern → client IP → Domain → Destination).
               cv-auto skips the panel's paint until scrolled into view. */}
           <Panel
             title="Traffic flow"
             icon={Network}
-            description="Pattern → client IP → URL → Destination · hover traces a path · click isolates it"
+            description="Pattern → client IP → Domain → Destination · hover traces a path · click isolates it"
             action={
               <div className="flex flex-wrap items-center gap-2">
                 <Select
@@ -906,7 +906,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 {(flowSankey as any).meta && ((flowSankey as any).meta.othersCount > 0 || (flowSankey as any).meta.hiddenSingletons > 0) && (
                   <p className="mb-3 font-mono text-[11px] text-muted-foreground">
                     Showing top {sankeyTopN}
-                    {(flowSankey as any).meta.othersCount > 0 ? ` · ${(flowSankey as any).meta.grouped.src + (flowSankey as any).meta.grouped.url + (flowSankey as any).meta.grouped.pat + (flowSankey as any).meta.grouped.dst} items grouped as Others` : ""}
+                    {(flowSankey as any).meta.othersCount > 0 ? ` · ${(flowSankey as any).meta.grouped.src + (flowSankey as any).meta.grouped.dom + (flowSankey as any).meta.grouped.pat + (flowSankey as any).meta.grouped.dst} items grouped as Others` : ""}
                     {(flowSankey as any).meta.hiddenSingletons > 0 ? ` · ${(flowSankey as any).meta.hiddenSingletons} singletons hidden (risk kept)` : ""}
                     {" · "}
                     <button type="button" onClick={() => { setGroupOthers(false); setHideSingletons(false); setSankeyTopN(50) }} className="underline hover:text-foreground">Show all</button>
@@ -925,7 +925,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                     links={flowSankey.links}
                     focusedId={focusedSankeyId}
                     onNodeClick={(info) => { setGlobalFilter(info.name); setFocusedSankeyId(info.id) }}
-                    ariaLabel="Traffic flow — Pattern to client IP to URL to destination IP"
+                    ariaLabel="Traffic flow — Pattern to client IP to Domain to destination IP"
                   />
                 </div>
               </>

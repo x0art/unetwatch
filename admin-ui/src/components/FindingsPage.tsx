@@ -20,6 +20,7 @@ import {
   getFindings,
   getBlacklistSet,
   listPatterns,
+  originOf,
   listTrackedUrls,
   type Pattern,
 } from "../api"
@@ -237,10 +238,10 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
           extra={[
             {
               key: "track",
-              label: FINDINGS_UI.trackedIndex[f.url] ? "Tracked" : "Track redirects",
-              icon: FINDINGS_UI.trackedIndex[f.url] ? History : CornerUpRight,
+              label: FINDINGS_UI.trackedIndex[originOf(f.url)] ? "Tracked" : "Track redirects",
+              icon: FINDINGS_UI.trackedIndex[originOf(f.url)] ? History : CornerUpRight,
               onClick: () => FINDINGS_UI.onTrack(f.url),
-              disabled: FINDINGS_UI.busy || FINDINGS_UI.trackedIndex[f.url],
+              disabled: FINDINGS_UI.busy || FINDINGS_UI.trackedIndex[originOf(f.url)],
             },
             {
               key: "delete",
@@ -454,16 +455,19 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   }
 
   const handleTrackRedirect = async (url: string) => {
+    // Track the origin (protocol://domain), not the full URL path — avoids
+    // duplicate entries when the same domain is tracked via different paths.
+    const origin = originOf(url)
     setBusy(true)
     try {
-      await addTrackedUrl({ url, source: "finding" })
-      toast({ title: "URL added to redirect tracking", description: url, variant: "success" })
-      setTrackedIndex((prev) => ({ ...prev, [url]: true }))
+      await addTrackedUrl({ url: origin, source: "finding" })
+      toast({ title: "Domain added to redirect tracking", description: origin, variant: "success" })
+      setTrackedIndex((prev) => ({ ...prev, [origin]: true }))
     } catch (e) {
       const message = (e as Error).message
       if (message.includes("already tracked")) {
-        setTrackedIndex((prev) => ({ ...prev, [url]: true }))
-        toast({ title: "Already tracked", description: url, variant: "info" })
+        setTrackedIndex((prev) => ({ ...prev, [origin]: true }))
+        toast({ title: "Already tracked", description: origin, variant: "info" })
       } else {
         toast({ title: "Track redirect failed", description: message, variant: "error" })
       }

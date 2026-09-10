@@ -793,6 +793,16 @@ export function timeRangeToMinutesLive(tr: string): number {
   }
 }
 
+/** Extract hostname from a URL string; fall back to the raw value for non-URLs. */
+function domainOf(u: string): string {
+  try { return new URL(u).hostname } catch { return u }
+}
+
+/** Extract origin (protocol://hostname) from a URL string; fall back to the raw value. */
+export function originOf(u: string): string {
+  try { return new URL(u).origin } catch { return u }
+}
+
 /**
  * Build a 4-layer Sankey graph for the Query page (single live-traffic surface).
  *
@@ -858,14 +868,14 @@ export async function getLiveSankey(
 
 /**
  * Build a 4-column Sankey from a QueryPage result's items.
- * Column order (user-confirmed): Pattern → Source (client IP) → URL → Destination.
+ * Column order (user-confirmed): Pattern → Source (client IP) → Domain → Destination.
  * Exported so Query renders the flow from its own result (no duplicate ES call).
  */
 export interface FlowSankeyOptions {
   maxPat?: number
   maxSrc?: number
-  /** Max distinct URL nodes on the URL layer (was maxDom when that layer was domains). */
-  maxUrl?: number
+  /** Max distinct domain nodes on the domain layer. */
+  maxDom?: number
   maxDst?: number
   minWeight?: number
   groupOthers?: boolean
@@ -873,7 +883,7 @@ export interface FlowSankeyOptions {
 }
 
 export interface FlowSankeyMeta {
-  grouped: { pat: number; src: number; url: number; dst: number }
+  grouped: { pat: number; src: number; dom: number; dst: number }
   hiddenSingletons: number
   othersCount: number
 }
@@ -885,18 +895,20 @@ export function buildFlowSankey(
   // Cap per-layer breadth so the diagram stays readable — overridable via opts.
   const MAX_PAT = opts?.maxPat ?? 12
   const MAX_SRC = opts?.maxSrc ?? 20
-  const MAX_URL = opts?.maxUrl ?? 20
+  const MAX_DOM = opts?.maxDom ?? 20
   const MAX_DST = opts?.maxDst ?? 20
   const MIN_WEIGHT = opts?.minWeight ?? 1
   const GROUP_OTHERS = opts?.groupOthers ?? false
   const KEEP_RISK = opts?.keepRisk ?? true
 
-  // Frequency maps for capping. Layer 2 is the requested URL (full path), not
-  // the collapsed host — the whole point of the flow is tracing which URL a
-  // client reached and seeing it fan to multiple destination IPs.
+  // Frequency maps for capping. Layer 2 is the domain (hostname), not the
+  // full URL — URLs sharing a domain merge into one node so the diagram
+  // doesn't sprout duplicate domains with different paths. The full URL
+  // list is preserved in `detail` for the tooltip.
   const patCount = new Map<string, number>()
   const srcCount = new Map<string, number>()
-  const urlCount = new Map<string, number>()
+  const domCount = new Map<string, number>()
+  const domUrls = new Map<string, Set<string>>() // domain → sample URLs (for tooltip detail)
   const dstCount = new Map<string, number>()
   const dstRisk = new Map<string, boolean>()
 
@@ -905,8 +917,13 @@ export function buildFlowSankey(
     for (const p of pats) patCount.set(p, (patCount.get(p) ?? 0) + 1)
     const src = it.client_ip || "unknown"
     srcCount.set(src, (srcCount.get(src) ?? 0) + 1)
-    const u = it.url || it.base_url || "unknown"
-    urlCount.set(u, (urlCount.get(u) ?? 0) + 1)
+    const rawUrl = it.url || it.base_url || "unknown"
+    const dom = domainOf(rawUrl)
+    domCount.set(dom, (domCount.get(dom) ?? 0) + 1)
+    // Collect up to 5 sample URLs per domain for tooltip detail.
+    const samples = domUrls.get(dom) ?? new Set<string>()
+    if (samples.size < 5 && rawUrl !== dom) samples.add(rawUrl)
+    domUrls.set(dom, samples)
     const dst = it.server_ip || "unknown"
     dstCount.set(dst, (dstCount.get(dst) ?? 0) + 1)
     // ADR 0001: DENY is an enforcement (handled), not risk — only a
@@ -922,8 +939,8 @@ export function buildFlowSankey(
   const topSrc = new Set(
     [...srcCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_SRC).map(([k]) => k),
   )
-  const topUrl = new Set(
-    [...urlCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_URL).map(([k]) => k),
+  const topDom = new Set(
+    [...domCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DOM).map(([k]) => k),
   )
   const topDst = new Set(
     [...dstCount.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_DST).map(([k]) => k),
@@ -932,59 +949,55 @@ export function buildFlowSankey(
   const othersCount = {
     pat: Math.max(0, patCount.size - topPat.size),
     src: Math.max(0, srcCount.size - topSrc.size),
-    url: Math.max(0, urlCount.size - topUrl.size),
+    dom: Math.max(0, domCount.size - topDom.size),
     dst: Math.max(0, dstCount.size - topDst.size),
   }
   const OTHER_PAT = "__OTHER__"
   const OTHER_SRC = "__OTHER__"
-  const OTHER_URL = "__OTHER__"
+  const OTHER_DOM = "__OTHER__"
   const OTHER_DST = "__OTHER__"
 
   const idPat = (p: string) => `pat:${p}`
   const idSrc = (ip: string) => `src:${ip}`
-  const idUrl = (u: string) => `url:${u}`
+  const idDom = (d: string) => `dom:${d}`
   const idDst = (ip: string) => `dst:${ip}`
 
-  // A URL node shows a trimmed host+path label but keeps the full URL as
-  // `detail`, surfaced in the tooltip (SankeyDiagram renders `detail`).
-  const urlLabel = (u: string): string => {
-    if (u.length <= 60) return u
-    try {
-      const p = new URL(u)
-      const host = p.hostname
-      const path = `${p.pathname}${p.search}`.slice(0, 40)
-      return `${host}${path}`
-    } catch {
-      return u.slice(0, 60)
-    }
+  // A domain node shows the hostname as the label. If we collected sample
+  // URLs, they become `detail` (surfaced in the SankeyDiagram tooltip).
+  const domDetail = (d: string): string | undefined => {
+    const samples = domUrls.get(d)
+    if (!samples || samples.size === 0) return undefined
+    const list = [...samples]
+    return list.length === 1 ? list[0] : list.join("\n")
   }
 
   const nodes: LiveSankeyNode[] = []
   for (const p of topPat) nodes.push({ id: idPat(p), name: p, layer: 0 })
   for (const s of topSrc) nodes.push({ id: idSrc(s), name: s, layer: 1 })
-  for (const u of topUrl) nodes.push({ id: idUrl(u), name: urlLabel(u), detail: u, layer: 2 })
+  for (const d of topDom) nodes.push({ id: idDom(d), name: d, detail: domDetail(d), layer: 2 })
   for (const d of topDst) nodes.push({ id: idDst(d), name: d, layer: 3, isHighRisk: dstRisk.get(d) ?? false })
   if (GROUP_OTHERS) {
     if (othersCount.pat > 0) nodes.push({ id: idPat(OTHER_PAT), name: `Others (${othersCount.pat})`, layer: 0 })
     if (othersCount.src > 0) nodes.push({ id: idSrc(OTHER_SRC), name: `Others (${othersCount.src})`, layer: 1 })
-    if (othersCount.url > 0) nodes.push({ id: idUrl(OTHER_URL), name: `Others (${othersCount.url})`, layer: 2 })
+    if (othersCount.dom > 0) nodes.push({ id: idDom(OTHER_DOM), name: `Others (${othersCount.dom})`, layer: 2 })
     if (othersCount.dst > 0) nodes.push({ id: idDst(OTHER_DST), name: `Others (${othersCount.dst})`, layer: 3, isHighRisk: false })
   }
 
   const linkKey = (a: string, b: string) => `${a}\0${b}`
   const patSrc = new Map<string, number>()
-  const srcUrl = new Map<string, number>()
-  const urlDst = new Map<string, number>()
-  const urlDstMeta = new Map<string, { isHighRisk: boolean }>()
+  const srcDom = new Map<string, number>()
+  const domDst = new Map<string, number>()
+  const domDstMeta = new Map<string, { isHighRisk: boolean }>()
 
   // Track per-link risk so minWeight can keep risky ribbons.
   const patSrcRisk = new Map<string, boolean>()
-  const srcUrlRisk = new Map<string, boolean>()
+  const srcDomRisk = new Map<string, boolean>()
 
   for (const it of items) {
     const pats = it.blocked_by.length > 0 ? it.blocked_by : ["Unmatched"]
     let src = it.client_ip || "unknown"
-    let u = it.url || it.base_url || "unknown"
+    const rawUrl = it.url || it.base_url || "unknown"
+    let dom = domainOf(rawUrl)
     let dst = it.server_ip || "unknown"
     const risky = it.blacklisted === true
     // Map tail keys to Others bucket when grouping, else skip
@@ -992,9 +1005,9 @@ export function buildFlowSankey(
       if (!GROUP_OTHERS) continue
       src = OTHER_SRC
     }
-    if (!topUrl.has(u)) {
+    if (!topDom.has(dom)) {
       if (!GROUP_OTHERS) continue
-      u = OTHER_URL
+      dom = OTHER_DOM
     }
     if (!topDst.has(dst)) {
       if (!GROUP_OTHERS) continue
@@ -1009,14 +1022,14 @@ export function buildFlowSankey(
       const k1 = linkKey(idPat(patKey), idSrc(src))
       patSrc.set(k1, (patSrc.get(k1) ?? 0) + 1)
       if (risky) patSrcRisk.set(k1, true)
-      const k2 = linkKey(idSrc(src), idUrl(u))
-      srcUrl.set(k2, (srcUrl.get(k2) ?? 0) + 1)
-      if (risky) srcUrlRisk.set(k2, true)
+      const k2 = linkKey(idSrc(src), idDom(dom))
+      srcDom.set(k2, (srcDom.get(k2) ?? 0) + 1)
+      if (risky) srcDomRisk.set(k2, true)
     }
-    const k3 = linkKey(idUrl(u), idDst(dst))
-    urlDst.set(k3, (urlDst.get(k3) ?? 0) + 1)
-    const prev = urlDstMeta.get(k3)
-    if (!prev) urlDstMeta.set(k3, { isHighRisk: risky })
+    const k3 = linkKey(idDom(dom), idDst(dst))
+    domDst.set(k3, (domDst.get(k3) ?? 0) + 1)
+    const prev = domDstMeta.get(k3)
+    if (!prev) domDstMeta.set(k3, { isHighRisk: risky })
     else if (risky) prev.isHighRisk = true
   }
 
@@ -1028,21 +1041,21 @@ export function buildFlowSankey(
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
-  for (const [k, v] of srcUrl) {
-    const isRisky = srcUrlRisk.get(k) === true
+  for (const [k, v] of srcDom) {
+    const isRisky = srcDomRisk.get(k) === true
     if (v < MIN_WEIGHT && !(KEEP_RISK && isRisky)) { hiddenSingletons += 1; continue }
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v })
   }
-  for (const [k, v] of urlDst) {
-    const meta = urlDstMeta.get(k)
+  for (const [k, v] of domDst) {
+    const meta = domDstMeta.get(k)
     const isRisky = meta?.isHighRisk === true
     if (v < MIN_WEIGHT && !(KEEP_RISK && isRisky)) { hiddenSingletons += 1; continue }
     const [source, target] = k.split("\0")
     links.push({ source, target, value: v, isHighRisk: meta?.isHighRisk })
   }
 
-  const totalOthers = othersCount.pat + othersCount.src + othersCount.url + othersCount.dst
+  const totalOthers = othersCount.pat + othersCount.src + othersCount.dom + othersCount.dst
   return { nodes, links, meta: { grouped: othersCount, hiddenSingletons, othersCount: totalOthers } }
 }
 
@@ -1058,7 +1071,8 @@ function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {
   const dstCount = new Map<string, number>()
   for (const f of graph.flows) {
     srcCount.set(f.client_ip, (srcCount.get(f.client_ip) ?? 0) + f.count)
-    domCount.set(f.base_url, (domCount.get(f.base_url) ?? 0) + f.count)
+    const dom = domainOf(f.base_url)
+    domCount.set(dom, (domCount.get(dom) ?? 0) + f.count)
     const dst = f.server_ip || f.base_url
     dstCount.set(dst, (dstCount.get(dst) ?? 0) + f.count)
   }
@@ -1081,11 +1095,12 @@ function buildLiveSankeyFromFindings(graph: FindingsGraph): LiveSankeyGraph {
   const patDom = new Map<string, number>()
   const domDst = new Map<string, number>()
   for (const f of graph.flows) {
-    if (!topSrc.has(f.client_ip) || !topDom.has(f.base_url)) continue
+    const dom = domainOf(f.base_url)
+    if (!topSrc.has(f.client_ip) || !topDom.has(dom)) continue
     const dst = f.server_ip || f.base_url
     if (!topDst.has(dst)) continue
     const sId = idSrc(f.client_ip)
-    const dId = idDom(f.base_url)
+    const dId = idDom(dom)
     const tId = idDst(dst)
     const k1 = `${sId}\0${idPat}`
     srcPat.set(k1, (srcPat.get(k1) ?? 0) + f.count)

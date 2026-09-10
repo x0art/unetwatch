@@ -639,7 +639,7 @@ export function HostInspectorPage({
     return buildFlowSankey(items, {
       maxPat: 12,
       maxSrc: 5,
-      maxUrl: 20,
+      maxDom: 20,
       maxDst: 20,
       minWeight: 1,
       groupOthers: true,
@@ -1038,11 +1038,11 @@ export function HostInspectorPage({
             )}
           </Panel>
 
-          {/* 3) Client behaviour flow — pattern → this client → URL → dest IP */}
+          {/* 3) Client behaviour flow — pattern → this client → Domain → dest IP */}
           <Panel
             title="Client Behaviour Flow"
             icon={Network}
-            description="Pattern → this client → URL → destination · hover traces a path · click isolates it"
+            description="Pattern → this client → Domain → destination · hover traces a path · click isolates it"
           >
             {sectionsLoading ? (
               <Skeleton className="h-64 w-full" />
@@ -1063,7 +1063,7 @@ export function HostInspectorPage({
                     if (info.kind === "node") setBehaviourFocus((cur) => (cur === info.id ? null : info.id))
                     else setBehaviourFocus(info.id)
                   }}
-                  ariaLabel="Client behaviour — pattern to client to URL to destination"
+                  ariaLabel="Client behaviour — pattern to client to Domain to destination"
                 />
               </>
             ) : (

@@ -30,15 +30,15 @@ export {
 } from "../lib/echartsTheme"
 
 /** Neobrutalist palette — ink/paper/hazard on the flow columns.
- * Column order: 0 Patterns · 1 Sources (client IPs) · 2 URLs · 3 Destinations.
- * Layer 2 is the requested URL (not the collapsed host), and it carries no
+ * Column order: 0 Patterns · 1 Sources (client IPs) · 2 Domains · 3 Destinations.
+ * Layer 2 is the domain (hostname) of the requested URL, and it carries no
  * ALLOW/DENY verdict color — action on a domain is noise for tracing what a
  * client reached. Destinations keep their high-risk red only.
  */
 export const LAYER_COLORS: Record<number, string> = {
   0: "#6B6560", // Patterns — muted slate
   1: "#0A7AFF", // Sources — info blue
-  2: "#0A0A0A", // URLs — neutral ink (no action coloring)
+  2: "#0A0A0A", // Domains — neutral ink (no action coloring)
   3: "#9A9590", // Destinations — muted; high-risk override hazard red
 }
 
@@ -49,7 +49,7 @@ function layerColor(layer: number, isDark: boolean): string {
   if (isDark) {
     switch (layer) {
       case 0: return "#9A9590" // Patterns — lighter than muted on dark
-      case 2: return "#F6F2E8" // URLs — paper on ink bg
+      case 2: return "#F6F2E8" // Domains — paper on ink bg
       default: return LAYER_COLORS[layer]
     }
   }
