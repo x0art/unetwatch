@@ -102,6 +102,8 @@
   --color-primary: #529CCA;
   --color-sidebar: #191919;
   --color-sidebar-foreground: #E3E2E0;
+  --color-sidebar-active: #37352F;
+  --color-sidebar-hover: #2F2F2F;
   --color-sidebar-border: #2F2F2F;
   --shadow-color: rgba(0, 0, 0, 0.4);
 }
