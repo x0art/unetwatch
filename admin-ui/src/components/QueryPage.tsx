@@ -150,7 +150,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     header: "Timestamp",
     accessor: (d) => d.timestamp,
     cell: (d) => (
-      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatFull(d.timestamp)}</span>
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatFull(d.timestamp)}</span>
     ),
     className: "whitespace-nowrap",
     width: "w-44",
@@ -249,7 +249,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
       d.duration_seconds === null || d.duration_seconds === undefined ? (
         <span className="text-muted-foreground">—</span>
       ) : (
-        <span className="tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
+        <span className="font-mono tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
       ),
     align: "right",
     width: "w-20",
@@ -287,7 +287,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
             icon={ShieldAlert}
             title="Blacklisted destination still allowed through — highest risk"
           >
-            blacklist risk
+            Blacklist risk
           </ListBadge>
         )}
         {d.whitelisted && (
@@ -296,7 +296,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
             icon={CheckCircle2}
             title="URL matches a whitelist pattern — excluded from findings"
           >
-            whitelist
+            Whitelist
           </ListBadge>
         )}
         {d.blacklisted && d.action !== "ALLOW" && (
@@ -309,7 +309,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
                 : "Host is on the blacklist"
             }
           >
-            blacklist{d.blacklist_source === "ip" ? " · ip" : ""}
+            Blacklist{d.blacklist_source === "ip" ? " · IP" : ""}
           </ListBadge>
         )}
         {!d.whitelisted && !d.blacklisted && (
@@ -321,7 +321,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   },
   {
     id: "actions",
-    header: "",
+    header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     cell: (d) => (
       <span onClick={(e) => e.stopPropagation()}>
@@ -714,7 +714,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             type="button"
             onClick={() => setViewMode("all")}
             aria-pressed={viewMode === "all"}
-            className={`rounded-sm px-2.5 py-1 text-xs font-medium uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               viewMode === "all"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -726,7 +726,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             type="button"
             onClick={() => setViewMode("flagged")}
             aria-pressed={viewMode === "flagged"}
-            className={`rounded-sm px-2.5 py-1 text-xs font-medium uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+            className={`rounded-sm px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               viewMode === "flagged"
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -1019,6 +1019,11 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 description: q
                   ? "Nothing matches your filter — try a different IP or URL substring."
                   : "Try a longer window or trigger a manual run.",
+                action: q ? (
+                  <Button variant="outline" size="sm" onClick={() => setDocSearch("")}>
+                    Clear filter
+                  </Button>
+                ) : undefined,
               }}
               defaultSortBy="timestamp"
               defaultSortDir="desc"

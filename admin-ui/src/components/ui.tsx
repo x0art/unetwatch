@@ -626,13 +626,14 @@ export function RankedTable({ rows, className, onRowClick }: { rows: { label: st
   const max = Math.max(1, ...rows.map((r) => r.count))
   if (rows.length === 0) return <p className="py-8 text-center text-sm text-muted-foreground">No data in window</p>
   return (
+    // Compact variant: px-3 py-2 density (vs DataTable px-4 py-3) — intentional.
     <div className={cn("overflow-hidden rounded-md border border-border bg-card", className)}>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/50">
-            <th className="w-9 px-3 py-2 text-left text-xs font-medium text-muted-foreground">#</th>
-            <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Label</th>
-            <th className="w-20 px-3 py-2 text-right text-xs font-medium text-muted-foreground">Count</th>
+            <th className="mono-label w-9 px-3 py-2 text-left text-xs font-medium text-muted-foreground">#</th>
+            <th className="mono-label px-3 py-2 text-left text-xs font-medium text-muted-foreground">Label</th>
+            <th className="mono-label w-20 px-3 py-2 text-right text-xs font-medium text-muted-foreground">Count</th>
           </tr>
         </thead>
         <Stagger as="tbody" className="divide-y divide-border">
@@ -640,14 +641,14 @@ export function RankedTable({ rows, className, onRowClick }: { rows: { label: st
             <StaggerItem
               as="tr"
               key={r.label}
-              className={cn("transition-colors", onRowClick ? "cursor-pointer hover:bg-muted/60" : "hover:bg-muted/40")}
+              className={cn("transition-colors", onRowClick ? "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" : "hover:bg-muted/40")}
               title={`${r.label} — ${r.count.toLocaleString()}`}
               onClick={onRowClick ? () => onRowClick(r.label) : undefined}
               onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(r.label) } } : undefined}
               tabIndex={onRowClick ? 0 : undefined}
               role={onRowClick ? "button" : undefined}
             >
-              <td className={cn("px-3 py-2 text-muted-foreground", i < 3 ? "text-foreground" : "")}>{String(i + 1).padStart(2, "0")}</td>
+              <td className={cn("px-3 py-2 tabular-nums text-muted-foreground", i < 3 ? "text-foreground" : "")}>{String(i + 1).padStart(2, "0")}</td>
               <td className="px-3 py-2">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="block max-w-[240px] truncate font-medium">{r.label}</span>
@@ -725,9 +726,9 @@ export function Pagination({
     <div className={cn("flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-3 py-3", className)} role="navigation" aria-label="Pagination">
       <p className="text-sm text-muted-foreground">
         {hasTotal ? (
-          <>Showing <span className="font-medium text-foreground">{rangeStart}</span>–<span className="font-medium text-foreground">{Math.min(rangeEnd, total!)}</span> of <span className="font-medium text-foreground">{total}</span></>
+          <>Showing <span className="font-medium text-foreground tabular-nums">{rangeStart}</span>–<span className="font-medium text-foreground tabular-nums">{Math.min(rangeEnd, total!)}</span> of <span className="font-medium text-foreground tabular-nums">{total}</span></>
         ) : (
-          <>Showing <span className="font-medium text-foreground">{rangeStart}</span>–<span className="font-medium text-foreground">{rangeEnd}</span></>
+          <>Showing <span className="font-medium text-foreground tabular-nums">{rangeStart}</span>–<span className="font-medium text-foreground tabular-nums">{rangeEnd}</span></>
         )}
         {onPageSizeChange && (
           <span className="ml-3">

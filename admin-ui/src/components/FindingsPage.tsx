@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  CheckCircle2,
   Copy,
   CornerUpRight,
   Eraser,
@@ -25,6 +24,7 @@ import {
   type Pattern,
 } from "../api"
 import {
+  Badge,
   Button,
   ConfirmDialog,
   CopyUrlButton,
@@ -95,7 +95,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     defaultSortDir: "asc",
     cell: (f) => (
       <span className="flex items-center gap-1.5">
-        <span className="font-mono text-sm">{f.client_ip}</span>
+        <span className="font-mono text-xs">{f.client_ip}</span>
         <button
           type="button"
           onClick={() => FINDINGS_UI.onInspectHost(f.client_ip)}
@@ -116,7 +116,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     defaultSortDir: "asc",
     cell: (f) => (
       <span className="flex items-center gap-1.5">
-        <span className="font-mono text-sm">{f.server_ip}</span>
+        <span className="font-mono text-xs">{f.server_ip}</span>
         <CopyUrlButton value={f.server_ip} label="Server IP" />
       </span>
     ),
@@ -160,7 +160,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     defaultSortDir: "asc",
     cell: (f) => (
       <div className="flex items-center gap-2">
-        <span className="truncate font-mono text-sm text-muted-foreground">{f.base_url}</span>
+        <span className="block max-w-[220px] truncate font-mono text-sm text-muted-foreground" title={f.base_url}>{f.base_url}</span>
         <button
           type="button"
           onClick={() => FINDINGS_UI.onInspectUrl(f.base_url)}
@@ -172,23 +172,9 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
         </button>
         <CopyUrlButton value={f.base_url} label="Base URL" />
         {FINDINGS_UI.whitelistIndex[f.base_url] ? (
-          <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning/20 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning"
-            title="Already in whitelist"
-            aria-label="Already in whitelist"
-          >
-            <CheckCircle2 className="h-3 w-3" />
-            Whitelist
-          </span>
+          <Badge variant="warning">Whitelist</Badge>
         ) : FINDINGS_UI.blacklistIndex[f.base_url] ? (
-          <span
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-danger/20 bg-danger/10 px-2 py-0.5 text-xs font-medium text-danger"
-            title="In blacklist"
-            aria-label="In blacklist"
-          >
-            <CheckCircle2 className="h-3 w-3" />
-            Blacklist
-          </span>
+          <Badge variant="destructive">Blacklist</Badge>
         ) : null}
       </div>
     ),
@@ -220,7 +206,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     header: "Detected",
     accessor: (f) => f.log_timestamp,
     cell: (f) => (
-      <span className="whitespace-nowrap text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
     ),
     defaultSortDir: "desc",
   },

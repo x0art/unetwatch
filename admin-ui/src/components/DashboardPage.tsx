@@ -304,18 +304,18 @@ export function DashboardPage({
               <div className="overflow-hidden rounded-md border border-border bg-card">
                 <table className="w-full text-xs">
                   <thead>
-                    <tr className="border-b border-border bg-muted text-muted-foreground">
-                      <th className="px-3 py-2 text-left text-xs font-medium">Client IP</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium">Base URL</th>
-                      <th className="px-3 py-2 text-left text-xs font-medium">Detected</th>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground">
+                      <th className="px-4 py-3 text-left text-xs font-medium">Client IP</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium">Base URL</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium">Detected</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {recentFindings.map((f) => (
                       <tr key={f.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onNavigate("findings", f.base_url)}>
-                        <td className="px-3 py-2 font-mono font-medium">{f.client_ip}</td>
-                        <td className="max-w-[200px] truncate px-3 py-2 font-mono text-muted-foreground" title={f.base_url}>{f.base_url}</td>
-                        <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
+                        <td className="px-4 py-3 font-mono font-medium">{f.client_ip}</td>
+                        <td className="max-w-[200px] truncate px-4 py-3 font-mono text-muted-foreground" title={f.base_url}>{f.base_url}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
                       </tr>
                     ))}
                   </tbody>

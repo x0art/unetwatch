@@ -14,7 +14,7 @@ import {
   Download,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, useToast, StatCard } from "./ui"
+import { Button, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
@@ -713,7 +713,7 @@ export function HostInspectorPage({
       },
       {
         id: "url",
-        header: "Full URL / Dest Domain",
+        header: "Full URL / dest domain",
         accessor: (r) => r.url,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -771,7 +771,7 @@ export function HostInspectorPage({
       },
       {
         id: "pattern",
-        header: "Triggered Pattern",
+        header: "Triggered pattern",
         accessor: (r) => getMatchedRule(r),
         cell: (r) => (
           <span className="block max-w-[200px] truncate font-mono text-xs" title={getMatchedRule(r)}>
@@ -784,14 +784,14 @@ export function HostInspectorPage({
         id: "category",
         header: "Category",
         accessor: (r) => r.category,
-        cell: (r) => <span className="font-mono text-xs text-muted-foreground">{r.category || "—"}</span>,
+        cell: (r) => <span className="text-xs text-muted-foreground">{r.category || "—"}</span>,
         width: "w-24",
       },
       {
         id: "method",
         header: "Method",
         accessor: (r) => r.http_method,
-        cell: (r) => <span className="font-mono text-xs">{r.http_method || "—"}</span>,
+        cell: (r) => <span className="text-xs">{r.http_method || "—"}</span>,
         width: "w-20",
       },
       {
@@ -806,7 +806,7 @@ export function HostInspectorPage({
         id: "country",
         header: "Country",
         accessor: (r) => r.country_code,
-        cell: (r) => <span className="font-mono text-xs">{r.country_code || "—"}</span>,
+        cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
         width: "w-20",
       },
       {
@@ -832,7 +832,7 @@ export function HostInspectorPage({
         accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
         cell: (r) => {
           const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
-          return <span className="block max-w-[140px] truncate font-mono text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+          return <span className="block max-w-[140px] truncate text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
         },
         width: "w-28",
       },
@@ -845,7 +845,7 @@ export function HostInspectorPage({
     { id: "domain", header: "Domain", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
     { id: "count", header: "Requests", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
     { id: "volume", header: "Volume", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
-    { id: "pct", header: "% Total", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
+    { id: "pct", header: "% total", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
   ], [])
 
   const patternColumns = useMemo<DataTableColumn<{ pattern: string; hits: number }>[]>(() => [
@@ -1112,6 +1112,7 @@ export function HostInspectorPage({
                 icon: SearchX,
                 title: "No log entries",
                 description: "Try a broader time range or clear the action filter.",
+                action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button>,
               }}
               defaultSortBy="timestamp"
               defaultSortDir="desc"
@@ -1154,16 +1155,16 @@ export function HostInspectorPage({
               </div>
 
               <div className="grid gap-4 lg:grid-cols-2">
-                <Panel title="Top Domains" icon={Globe}>
-                  <DataTable columns={domainColumns} data={report.top_domains} rowId={(r) => r.domain} empty={{ icon: Globe, title: "No domains in window", description: "Try a broader date range." }} ariaLabel="Top domains" />
+                <Panel title="Top domains" icon={Globe}>
+                  <DataTable columns={domainColumns} data={report.top_domains} rowId={(r) => r.domain} empty={{ icon: Globe, title: "No domains in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top domains" />
                 </Panel>
-                <Panel title="Top Patterns" icon={Link2}>
-                  <DataTable columns={patternColumns} data={report.top_patterns} rowId={(r) => r.pattern} empty={{ icon: SearchX, title: "No patterns in window", description: "No matched patterns." }} ariaLabel="Top patterns" />
+                <Panel title="Top patterns" icon={Link2}>
+                  <DataTable columns={patternColumns} data={report.top_patterns} rowId={(r) => r.pattern} empty={{ icon: SearchX, title: "No patterns in window", description: "No matched patterns.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top patterns" />
                 </Panel>
               </div>
 
               <Panel title="Top URLs" icon={Link2} description="Click to investigate">
-                <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} empty={{ icon: SearchX, title: "No URLs in window" }} ariaLabel="Top URLs" />
+                <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} empty={{ icon: SearchX, title: "No URLs in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top URLs" />
               </Panel>
 
               {rawError && (
@@ -1174,10 +1175,10 @@ export function HostInspectorPage({
               )}
               <Panel title={`Raw Findings — ${report.client_ip}`} icon={Database} description={`${rawTotal.toLocaleString()} docs`}>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <input type="search" placeholder="Filter (URL)..." value={rawSearch} onChange={(e) => { setRawSearch(e.target.value); setRawPage(0) }} className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Filter raw findings" />
+                  <SearchInput placeholder="Filter (URL)..." value={rawSearch} onChange={(v) => { setRawSearch(v); setRawPage(0) }} className="w-64" aria-label="Filter raw findings" />
                   <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">findings table · whitelist-excluded</span>
                 </div>
-                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window" }} ariaLabel="Raw findings" />
+                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Raw findings" />
               </Panel>
             </>
           ) : null}

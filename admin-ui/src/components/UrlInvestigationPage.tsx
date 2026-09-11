@@ -254,7 +254,7 @@ export function UrlInvestigationPage({
             <StatCard
               icon={Globe}
               label="URL"
-              value={<span className="block max-w-[220px] truncate" title={result.url}>{result.url}</span>}
+              value={<span className="block max-w-[220px] truncate font-mono" title={result.url}>{result.url}</span>}
               tone="info"
               hint={host}
             />
@@ -299,30 +299,21 @@ export function UrlInvestigationPage({
             icon={Users}
             description="Each client IP links to Host Inspector"
           >
-            {result.clients.length > 0 ? (
-              <DataTable
-                columns={columns}
-                data={result.clients}
-                rowId={(r) => r.client_ip}
-                loading={false}
-                defaultSortBy="count"
-                defaultSortDir="desc"
-                ariaLabel="Clients accessing this URL"
-                empty={{
-                  icon: SearchX,
-                  title: "No clients found",
-                  description: "This URL has no persisted accesses in the window.",
-                  action: <Button variant="outline" size="sm" onClick={() => void investigate(url)}>Search again</Button>,
-                }}
-              />
-            ) : (
-              <EmptyState
-                icon={SearchX}
-                title="No clients found"
-                description="No persisted accesses for this URL."
-                action={<Button variant="outline" size="sm" onClick={() => void investigate(url)}>Search again</Button>}
-              />
-            )}
+            <DataTable
+              columns={columns}
+              data={result.clients}
+              rowId={(r) => r.client_ip}
+              loading={false}
+              defaultSortBy="count"
+              defaultSortDir="desc"
+              ariaLabel="Clients accessing this URL"
+              empty={{
+                icon: SearchX,
+                title: "No clients found",
+                description: "This URL has no persisted accesses in the window.",
+                action: <Button variant="outline" size="sm" onClick={() => void investigate(url)}>Search again</Button>,
+              }}
+            />
           </Panel>
 
         </>

@@ -458,7 +458,7 @@ export function DataTable<T>({
                       >
                         {col.header}
                         {filterActive && (
-                          <Filter className="h-3 w-3 text-warning" aria-hidden="true" />
+                          <Filter className="h-3 w-3 text-primary" aria-hidden="true" />
                         )}
                         {active ? (
                           sortState.dir === "asc" ? (
@@ -495,7 +495,7 @@ export function DataTable<T>({
                   const filterable = col.enableSorting !== false && !col.srOnly && col.enableColumnFilter !== false
                   const val = filters[col.id] ?? ""
                   return (
-                    <td key={col.id} className={cn("px-2 py-1.5", alignClass(col.align))}>
+                    <td key={col.id} className={cn("px-4 py-1.5", alignClass(col.align))}>
                       {filterable ? (
                         filterControl === "combobox" ? (
                           <div className="flex items-center gap-1">
@@ -527,10 +527,10 @@ export function DataTable<T>({
                               type="search"
                               value={val}
                               onChange={(e) => setFilter(col.id, e.target.value)}
-                              placeholder="Filter..."
+                              placeholder="Filter"
                               aria-label={`Filter by ${String(col.header)}`}
                               className={cn(
-                                "h-7 w-full rounded border-[1.5px] border-border bg-card py-1 pr-6 pl-7 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring",
+                                "h-7 w-full rounded border border-border bg-card py-1 pr-6 pl-7 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring",
                                 col.align === "right" && "text-right",
                               )}
                             />
@@ -538,7 +538,7 @@ export function DataTable<T>({
                               <button
                                 type="button"
                                 onClick={() => setFilter(col.id, "")}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted"
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 aria-label={`Clear filter on ${String(col.header)}`}
                               >
                                 <X className="h-3 w-3" aria-hidden="true" />
@@ -606,8 +606,8 @@ export function DataTable<T>({
                     as="tr"
                     key={id}
                     className={cn(
-                      "border-b border-border transition-colors hover:bg-muted/30",
-                      isSelected && "bg-muted/40",
+                      "border-b border-border transition-colors",
+                      isSelected ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/30",
                       onRowClick && "cursor-pointer",
                     )}
                     onClick={onRowClick ? () => onRowClick(row) : undefined}

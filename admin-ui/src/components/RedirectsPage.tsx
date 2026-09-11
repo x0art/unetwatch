@@ -129,7 +129,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     header: "HTTP",
     accessor: (i) => i.http_status,
     cell: (i) => (
-      <span className="tabular-nums text-xs text-muted-foreground">
+      <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
         {i.http_status ?? "—"}
       </span>
     ),
@@ -165,7 +165,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     header: "Last checked",
     accessor: (i) => i.last_checked_at,
     cell: (i) => (
-      <span className="whitespace-nowrap text-xs text-muted-foreground">{formatWhen(i.last_checked_at)}</span>
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(i.last_checked_at)}</span>
     ),
     width: "w-40",
   },
@@ -173,7 +173,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     id: "history_count",
     header: "Targets",
     accessor: (i) => i.history_count,
-    cell: (i) => <span className="tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
+    cell: (i) => <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
     align: "right",
     width: "w-16",
   },

@@ -18,6 +18,7 @@ import {
   Label,
   PageHeader,
   Panel,
+  SearchInput,
   Select,
   Skeleton,
   StatCard,
@@ -284,7 +285,7 @@ export function AnalyticsPage({
       },
       {
         id: "pct",
-        header: "% Total",
+        header: "% total",
         accessor: (r) => r.pct,
         align: "right",
         cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>,
@@ -409,7 +410,7 @@ export function AnalyticsPage({
         id: "action",
         header: "Action",
         accessor: (r) => r.action,
-        cell: (r) => <span className="font-mono text-xs">{r.action || "ALLOW"}</span>,
+        cell: (r) => <Badge variant="secondary">{r.action || "ALLOW"}</Badge>,
         width: "w-24",
       },
       {
@@ -709,12 +710,11 @@ export function AnalyticsPage({
         description={`${rawTotal.toLocaleString()} docs · ${rangeLabel(range)} window`}
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <input
-            type="search"
+          <SearchInput
             placeholder="Filter raw data (IP / URL)..."
             value={rawSearch}
-            onChange={(e) => { setRawSearch(e.target.value); setRawPage(0) }}
-            className="w-64 rounded-md border border-border bg-card px-3 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(v) => { setRawSearch(v); setRawPage(0) }}
+            className="w-64"
             aria-label="Filter raw findings"
           />
           <Button
@@ -723,7 +723,7 @@ export function AnalyticsPage({
             onClick={() => setRawUniqueDomains((v) => !v)}
             aria-pressed={rawUniqueDomains}
           >
-            {rawUniqueDomains ? "Unique domains" : "Unique domains"}
+            Unique domains
           </Button>
           <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />

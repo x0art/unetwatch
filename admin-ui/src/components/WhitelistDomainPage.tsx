@@ -179,14 +179,17 @@ export function WhitelistDomainPage() {
             <div className="overflow-hidden rounded-md border border-border shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border bg-muted/30 text-left text-muted-foreground">
+                  <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
                     <th className="w-12 px-4 py-3 text-center text-xs font-medium">#</th>
                     <th className="px-4 py-3 text-xs font-medium">Pattern</th>
                     <th className="w-24 px-4 py-3 text-right text-xs font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {items.map((item, idx) => {
+                  {items.length === 0 ? (
+                    <tr><td colSpan={3} className="px-4 py-3 text-center text-xs text-muted-foreground">No entries — add URLs above.</td></tr>
+                  ) : (
+                  items.map((item, idx) => {
                     const isEditing = editingIdx === idx
                     return (
                       <tr
@@ -233,28 +236,30 @@ export function WhitelistDomainPage() {
                             </div>
                           ) : (
                             <div className="flex justify-end gap-1">
-                              <button
-                                type="button"
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => startEdit(idx)}
                                 aria-label={`Edit ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="h-7 w-7"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => removeItem(idx)}
                                 aria-label={`Remove ${item}`}
-                                className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="h-7 w-7 hover:text-destructive"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </td>
                       </tr>
                     )
-                  })}
+                  }))}
                 </tbody>
               </table>
             </div>

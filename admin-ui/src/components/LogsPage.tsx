@@ -8,6 +8,7 @@ import {
   Link2,
   RefreshCcw,
   ScrollText,
+  SearchX,
   Send,
   Trash2,
   XCircle,
@@ -84,7 +85,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     header: "Time",
     accessor: (l) => l.started_at,
     cell: (l) => (
-      <span className="whitespace-nowrap text-xs text-muted-foreground" title={l.started_at}>
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground" title={l.started_at}>
         {formatWhen(l.started_at)}
       </span>
     ),
@@ -108,7 +109,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     header: "Window",
     accessor: (l) => l.minutes,
     cell: (l) => (
-      <span className="tabular-nums text-xs text-muted-foreground">
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
         {l.minutes !== null && l.minutes !== undefined ? `${l.minutes}m` : "—"}
       </span>
     ),
@@ -119,7 +120,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     id: "matches",
     header: "Hits",
     accessor: (l) => l.matches,
-    cell: (l) => <span className="tabular-nums">{l.matches.toLocaleString()}</span>,
+    cell: (l) => <span className="font-mono tabular-nums text-xs">{l.matches.toLocaleString()}</span>,
     align: "right",
     width: "w-20",
   },
@@ -128,7 +129,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     header: "Stored",
     accessor: (l) => l.stored,
     cell: (l) => (
-      <span className="tabular-nums text-muted-foreground">
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
         {l.kind === "poll" ? l.stored.toLocaleString() : "—"}
       </span>
     ),
@@ -171,7 +172,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     id: "duration_ms",
     header: "Duration",
     accessor: (l) => l.duration_ms,
-    cell: (l) => <span className="tabular-nums text-xs">{formatDuration(l.duration_ms)}</span>,
+    cell: (l) => <span className="font-mono tabular-nums text-xs">{formatDuration(l.duration_ms)}</span>,
     align: "right",
     width: "w-20",
   },
@@ -187,7 +188,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
       ) : (
         <span className="inline-flex items-center gap-1 text-xs text-success">
           <CheckCircle2 className="h-3.5 w-3.5" />
-          ok
+          OK
         </span>
       ),
   },
@@ -493,6 +494,13 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           total={total}
           onPageChange={setPage}
           ariaLabel="Monitor logs"
+          empty={{
+            icon: SearchX,
+            title: debouncedSearch ? "No matching logs" : "No logs yet",
+            description: debouncedSearch
+              ? "Nothing matches your filter — try a different search."
+              : "Every monitor poll and Query page run is recorded here.",
+          }}
         />
       )}
 

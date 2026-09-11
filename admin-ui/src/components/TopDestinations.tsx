@@ -47,7 +47,7 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
         <div>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
             <span className="text-xs font-medium text-muted-foreground">
-              Top Accessed Domains
+              Top accessed domains
             </span>
             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {topDomains.length > 0
@@ -61,9 +61,9 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                  <th className="w-10 px-4 py-2 text-xs font-medium">#</th>
-                  <th className="px-4 py-2 text-xs font-medium">Domain</th>
-                  <th className="w-28 px-4 py-2 text-right text-xs font-medium">Share</th>
+                  <th className="w-10 px-4 py-3 text-xs font-medium">#</th>
+                  <th className="px-4 py-3 text-xs font-medium">Domain</th>
+                  <th className="w-28 px-4 py-3 text-right text-xs font-medium">Share</th>
                 </tr>
               </thead>
               <Stagger as="tbody" className="divide-y divide-border">
@@ -102,7 +102,7 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
         <div>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
             <span className="text-xs font-medium text-muted-foreground">
-              Triggered URL Patterns
+              Triggered URL patterns
             </span>
             <span className="ml-auto text-xs tabular-nums text-muted-foreground">
               {triggeredPatterns.length > 0
@@ -116,8 +116,8 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                  <th className="px-4 py-2 text-xs font-medium">Pattern</th>
-                  <th className="w-24 px-4 py-2 text-right text-xs font-medium">Hits</th>
+                  <th className="px-4 py-3 text-xs font-medium">Pattern</th>
+                  <th className="w-24 px-4 py-3 text-right text-xs font-medium">Hits</th>
                 </tr>
               </thead>
               <Stagger as="tbody" className="divide-y divide-border">

@@ -75,7 +75,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     defaultSortDir: "asc",
     cell: (p) => (
       <Badge variant={p.pattern_type === "block" ? "destructive" : "secondary"}>
-        {p.pattern_type}
+        {p.pattern_type === "block" ? "Block" : "Whitelist"}
       </Badge>
     ),
     width: "w-24",
@@ -85,7 +85,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     header: "Created",
     accessor: (p) => p.created_at,
     cell: (p) => (
-      <span className="whitespace-nowrap text-xs text-muted-foreground">
+      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
         {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
       </span>
     ),
@@ -333,7 +333,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
         <AddPatternButton onOpen={() => setCreateOpen(true)} />
         <Button variant="outline" onClick={() => setBulkOpen(true)}>
           <Upload className="h-4 w-4 mr-1.5" />
-          Bulk Import
+          Bulk import
         </Button>
       </PageHeader>
 
@@ -373,6 +373,11 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
             debouncedSearch || filterType !== "all"
               ? "Try adjusting your search or filter"
               : "Add your first pattern to get started",
+          action: (
+            <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
+              Add pattern
+            </Button>
+          ),
         }}
         sortBy={sortBy}
         sortDir={sortDir}
