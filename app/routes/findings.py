@@ -176,11 +176,28 @@ def _whitelist_fully_sql(patterns: list[str], sql_clauses: list[str]) -> bool:
     return len([p for p in map(str.strip, patterns) if p]) == len(sql_clauses)
 
 
+def _normalize_url_host(value: str) -> str:
+    """Extract the bare hostname from a full URL, origin or bare host.
+
+    Strips scheme, userinfo, port, path, query and fragment so a drill-down
+    from a full URL (``https://evil.example:8443/deep/path?q=1``) matches the
+    persisted ``base_url`` host (``evil.example``). Falls back to the raw
+    input trimmed/lowered when no host can be extracted.
+    """
+    raw = (value or "").strip().lower()
+    if not raw:
+        return raw
+    authority = raw.split("://", 1)[-1].split("/", 1)[0]
+    authority = authority.rsplit("@", 1)[-1]
+    host = authority.split(":", 1)[0].split("?", 1)[0].strip()
+    return host or raw
+
+
 @router.get("/url/{url:path}")
 async def url_breakdown(
     url: str,
     db=Depends(get_db_conn),
-    minutes: int | None = Query(None, ge=0, le=43200),
+    minutes: int | None = Query(None, ge=0, le=525600),
     limit: int = Query(50, ge=1, le=200),
     source: str = Query("findings", pattern="^(findings|live)$"),
 ):
@@ -209,7 +226,8 @@ async def url_breakdown(
                 await _db.close()
             if _bps:
                 _wregex = _bpr(_wps)
-                _q = _blq(_bps, minutes or 1440, _settings.es_query_size, search=url)
+                _norm = _normalize_url_host(url)
+                _q = _blq(_bps, minutes or 1440, _settings.es_query_size, search=_norm)
                 import pandas as _pd
 
                 async with _esc(_settings, timeout=30) as _es:
@@ -218,7 +236,7 @@ async def url_breakdown(
                 if _hits:
                     _df = _af(_pd.DataFrame([h["_source"] for h in _hits]), _wregex, actions=None)
                     # keep only rows whose url/base_url contains the target (same rule as findings reverse)
-                    _low = url.lower()
+                    _low = _norm
                     _df = _df[_df["url"].astype(str).str.lower().str.contains(_low, na=False) | _df["base_url"].astype(str).str.lower().str.contains(_low, na=False)]
                     if not _df.empty:
                         _max = _df["@timestamp"].astype(str).max() if "@timestamp" in _df.columns else ""
@@ -237,10 +255,12 @@ async def url_breakdown(
     whitelist_regex = _build_pattern_regex(whitelist_patterns)
     sql_clauses = _whitelist_sql_clauses(whitelist_patterns)
 
-    # Match on both the exact URL and the base_url (host) so clicking a
-    # host-level node in the graph finds all IPs that hit any path on it.
-    where = ["(url = ? OR base_url = ?)", *sql_clauses]
-    params: list = [url, url]
+    # Match on the exact URL plus a LIKE on the normalized hostname so a
+    # full-URL/origin drill-down finds every path on that host (LIKE match),
+    # while an exact stored URL still hits directly (= match).
+    norm = _normalize_url_host(url)
+    where = ["(url LIKE ? OR base_url LIKE ? OR url = ? OR base_url = ?)", *sql_clauses]
+    params: list = [f"%{norm}%", f"%{norm}%", url, url]
     if minutes:
         where.append("log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
         params.append(f"-{minutes} minutes")
@@ -372,7 +392,7 @@ async def top_clients(
 async def client_breakdown(
     ip: str,
     db=Depends(get_db_conn),
-    minutes: int | None = Query(None, ge=0, le=43200),
+    minutes: int | None = Query(None, ge=0, le=525600),
     search: str | None = Query(None, max_length=200),
     limit: int = Query(12, ge=1, le=50),
 ):
@@ -509,7 +529,7 @@ async def delete_finding(finding_id: int, db=Depends(get_db_conn)):
 async def list_findings(
     db=Depends(get_db_conn),
     search: str | None = Query(None, max_length=200),
-    minutes: int | None = Query(None, ge=0, le=43200),
+    minutes: int | None = Query(None, ge=0, le=525600),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):

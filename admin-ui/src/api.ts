@@ -532,7 +532,7 @@ export interface PatternSimulationResult {
 /**
  * Run a pattern against recent logs (spec §3.3 Live Kibana Simulation).
  *
- * `timeRange` is a UI label ("1h" / "24h" / "7d" / "30d") translated to
+ * `timeRange` is a UI label ("1h" / "24h" / "7d" / "30d" / "90d" / "1y") translated to
  * minutes server-side; the backend caps the fetch at 1000 rows and returns
  * at most 10 preview matches.
  */
@@ -783,11 +783,15 @@ export function timeRangeToMinutesLive(tr: string): number {
       return 10080
     case "30d":
       return 43200
+    case "90d":
+      return 129600
+    case "1y":
+      return 525600
     case "24h":
       return 1440
     default: {
       const n = Number(tr)
-      if (Number.isFinite(n) && n > 0) return Math.min(n, 43200)
+      if (Number.isFinite(n) && n > 0) return Math.min(n, 525600)
       return 1440
     }
   }

@@ -26,7 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
-import { cn, copyText } from "../lib/utils"
+import { cn, copyText, formatRelativeTime } from "../lib/utils"
 import { AnimatedNumber, Stagger, StaggerItem } from "./motion"
 
 /* ────────────────────────────────────────────────────────────────
@@ -90,6 +90,20 @@ export function Button({
 /** Shared spinner for "processing" button states. */
 export function LoadingIcon({ className }: { className?: string }) {
   return <Loader2 className={cn("h-4 w-4 animate-spin", className)} aria-hidden="true" />
+}
+
+/** Notion-style timestamp cell: relative time on top, absolute below.
+ * Pass the RAW timestamp (ISO string or epoch-ms) — the component derives
+ * both lines, so relative time never parses a lossy locale string. */
+export function TimestampCell({ value, className }: { value: string | number; className?: string }) {
+  const ms = typeof value === "number" ? value : Date.parse(value)
+  const absolute = Number.isNaN(ms) ? String(value) : new Date(ms).toLocaleString()
+  return (
+    <span className={cn("block whitespace-nowrap", className)} title={absolute}>
+      <span className="block text-foreground">{formatRelativeTime(value)}</span>
+      <span className="block font-mono text-xs text-muted-foreground">{absolute}</span>
+    </span>
+  )
 }
 
 export function CopyUrlButton({

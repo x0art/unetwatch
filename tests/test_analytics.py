@@ -236,3 +236,19 @@ async def test_findings_list_minutes_window(client, db_path):
     data = res.json()
     assert data["total"] == 1
     assert data["items"][0]["client_ip"] == "1.1.1.1"
+
+
+async def test_summary_accepts_90d_and_1y_ranges(client, db_path):
+    """90d/1y ranges are supported (1-year Deep Dive window)."""
+    await _seed(
+        client,
+        db_path,
+        [
+            ("1.1.1.1", "", "http://evil.example/a", "evil.example", _now(), json.dumps(["*evil*"]), "ALLOW"),
+        ],
+        add_action_col=True,
+    )
+    for r in ("90d", "1y"):
+        res = client.get(f"/api/analytics/summary?range={r}")
+        assert res.status_code == 200
+        assert res.json()["range"] == r

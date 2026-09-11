@@ -14,7 +14,7 @@ import {
   Download,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, useToast, StatCard } from "./ui"
+import { Button, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
@@ -51,6 +51,8 @@ const TIME_RANGE_OPTIONS = [
   { value: "24h", label: "Last 24h" },
   { value: "7d", label: "Last 7d" },
   { value: "30d", label: "Last 30d" },
+  { value: "90d", label: "Last 90d" },
+  { value: "1y", label: "Last 1y" },
 ]
 
 const ACTION_FILTER_OPTIONS = [
@@ -109,12 +111,6 @@ function formatHour(iso: string): string {
   const hh = String(d.getHours()).padStart(2, "0")
   const mm = String(d.getMinutes()).padStart(2, "0")
   return `${hh}:${mm}`
-}
-
-function formatWhen(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
 }
 
 function buildTopDomains(items: QueryDoc[]): TopDomain[] {
@@ -705,9 +701,7 @@ export function HostInspectorPage({
         id: "timestamp",
         header: "Timestamp",
         accessor: (r) => r.timestamp,
-        cell: (r) => (
-          <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.timestamp)}</span>
-        ),
+        cell: (r) => <TimestampCell value={r.timestamp} />,
         width: "w-48",
         defaultSortDir: "desc" as const,
       },
@@ -864,7 +858,7 @@ export function HostInspectorPage({
   ], [openUrlInInvestigation])
 
   const rawColumns = useMemo<DataTableColumn<Finding>[]>(() => [
-    { id: "log_timestamp", header: "Timestamp", accessor: (r) => r.log_timestamp, cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.log_timestamp)}</span>, width: "w-44", defaultSortDir: "desc" },
+    { id: "log_timestamp", header: "Timestamp", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
     { id: "url", header: "URL", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
     { id: "base_url", header: "Domain", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
     { id: "pattern", header: "Pattern", enableSorting: false, accessor: (r) => r.matched_patterns, cell: (r) => {

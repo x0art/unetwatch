@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
-export type TimeRange = "1h" | "24h" | "7d" | "30d"
+export type TimeRange = "1h" | "24h" | "7d" | "30d" | "90d" | "1y"
 
 /** Global workspace action filter — "All" means no action filter applied. */
 export type ActionFilter = "All" | "ALLOW" | "DENY" | "FLAG"
@@ -47,13 +47,13 @@ function readInitialTimeRange(): TimeRange {
   try {
     const params = new URLSearchParams(window.location.search)
     const q = params.get("range")
-    if (q === "1h" || q === "24h" || q === "7d" || q === "30d") return q
+    if (q === "1h" || q === "24h" || q === "7d" || q === "30d" || q === "90d" || q === "1y") return q
   } catch {
     /* ignore */
   }
   try {
     const stored = window.localStorage.getItem(TIME_RANGE_KEY)
-    if (stored === "1h" || stored === "24h" || stored === "7d" || stored === "30d") return stored
+    if (stored === "1h" || stored === "24h" || stored === "7d" || stored === "30d" || stored === "90d" || stored === "1y") return stored
   } catch {
     /* ignore */
   }
@@ -181,7 +181,7 @@ export function FilterProvider({ children }: { children: ReactNode }) {
         const q = params.get(GLOBAL_FILTER_QS_KEY) ?? ""
         setGlobalFilterRaw(q)
         const r = params.get("range")
-        if (r === "1h" || r === "24h" || r === "7d" || r === "30d") setTimeRangeRaw(r)
+        if (r === "1h" || r === "24h" || r === "7d" || r === "30d" || r === "90d" || r === "1y") setTimeRangeRaw(r)
         const a = params.get(ACTION_FILTER_QS_KEY)
         if (a === "All" || a === "ALLOW" || a === "DENY" || a === "FLAG") setActionFilterRaw(a)
         else if (a === null) setActionFilterRaw("All")

@@ -41,6 +41,7 @@ import {
   Select,
   Skeleton,
   StatCard,
+  TimestampCell,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
@@ -50,12 +51,14 @@ import { EventInspectorSidebar } from "./EventInspectorSidebar"
 
 const DEFAULT_PAGE_SIZE = 25
 
-// Shared workspace time window — same 1h/24h/7d/30d as FilterContext.
+// Shared workspace time window — same 1h/24h/7d/30d/90d/1y as FilterContext.
 const TIME_RANGE_OPTIONS = [
   { value: "1h", label: "Last 1h" },
   { value: "24h", label: "Last 24h" },
   { value: "7d", label: "Last 7d" },
   { value: "30d", label: "Last 30d" },
+  { value: "90d", label: "Last 90d" },
+  { value: "1y", label: "Last 1y" },
 ]
 
 const WHITELIST_OPTIONS = [
@@ -149,9 +152,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     id: "timestamp",
     header: "Timestamp",
     accessor: (d) => d.timestamp,
-    cell: (d) => (
-      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatFull(d.timestamp)}</span>
-    ),
+    cell: (d) => <TimestampCell value={d.timestamp} />,
     className: "whitespace-nowrap",
     width: "w-44",
     defaultSortDir: "desc",
@@ -492,7 +493,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [focusedSankeyId, setFocusedSankeyId] = useState<string | null>(null)
   // Auto-collapse Sankey when entering a long window
   useEffect(() => {
-    if (timeRange === "7d" || timeRange === "30d") setFlowCollapsed(true)
+    if (timeRange === "7d" || timeRange === "30d" || timeRange === "90d" || timeRange === "1y") setFlowCollapsed(true)
     else setFlowCollapsed(false)
   }, [timeRange])
 
@@ -883,7 +884,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
                   {loading ? "Refreshing…" : "Refresh"}
                 </Button>
-                {(timeRange === "7d" || timeRange === "30d") && (
+                {(timeRange === "7d" || timeRange === "30d" || timeRange === "90d" || timeRange === "1y") && (
                   <Button variant="ghost" size="sm" onClick={() => setFlowCollapsed((v) => !v)}>
                     {flowCollapsed ? "Show flow" : "Collapse"}
                   </Button>
@@ -1017,7 +1018,9 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 icon: SearchX,
                 title: "No matching documents",
                 description: q
-                  ? "Nothing matches your filter — try a different IP or URL substring."
+                  ? viewMode === "all"
+                    ? "Nothing matches your filter — the row may be outside the window or blacklisted, try a longer window."
+                    : "Nothing matches your filter — try a different IP or URL substring."
                   : "Try a longer window or trigger a manual run.",
                 action: q ? (
                   <Button variant="outline" size="sm" onClick={() => setDocSearch("")}>

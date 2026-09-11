@@ -80,6 +80,30 @@ export function usePageVisible(): boolean {
 }
 
 /**
+ * Relative time for table timestamp cells (Notion-style two-liner: relative
+ * on top, absolute below). Accepts ISO strings or epoch-ms. Returns the
+ * input unchanged when it cannot be parsed.
+ */
+export function formatRelativeTime(input: string | number): string {
+  const t = typeof input === "number" ? input : Date.parse(input)
+  if (Number.isNaN(t)) return String(input)
+  const diff = Date.now() - t
+  if (diff < 0) return String(input)
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 10) return "Just now"
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
+
+/**
  * Copy text to the clipboard, falling back to a hidden textarea +
  * execCommand for older browsers / non-secure contexts. Resolves
  * `false` when neither path works.

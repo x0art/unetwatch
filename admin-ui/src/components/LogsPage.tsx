@@ -30,6 +30,7 @@ import {
   SearchInput,
   Select,
   Skeleton,
+  TimestampCell,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
@@ -84,11 +85,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     id: "started_at",
     header: "Time",
     accessor: (l) => l.started_at,
-    cell: (l) => (
-      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground" title={l.started_at}>
-        {formatWhen(l.started_at)}
-      </span>
-    ),
+    cell: (l) => <TimestampCell value={l.started_at} />,
     width: "w-44",
     defaultSortDir: "desc",
   },

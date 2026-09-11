@@ -230,6 +230,25 @@ def test_apply_filters_actions_param():
 # ── build_client_session_query (filter-only, no query_string) ────────────────
 
 
+def test_build_all_query_searches_domain_and_base_url():
+    """Non-pattern traffic is visible: per-token clause also hits domain/base_url."""
+    from app.services.query_builder import build_all_query
+
+    q = build_all_query(60, 500, search="evil.example")
+    must = q["query"]["bool"]["must"]
+    assert len(must) == 2  # range clause + search clause
+    search_qs = must[1]["query_string"]["query"]
+    assert (
+        "(url.keyword:*evil.example* OR domain.keyword:*evil.example*"
+        " OR base_url.keyword:*evil.example*"
+        " OR client_ip.keyword:*evil.example* OR server_ip.keyword:*evil.example*)"
+    ) in search_qs
+
+    # No search term → range clause only (flagged path untouched elsewhere).
+    plain = build_all_query(60, 500)
+    assert len(plain["query"]["bool"]["must"]) == 1
+
+
 def test_build_client_session_query_shape():
     from app.services.query_builder import build_client_session_query
 

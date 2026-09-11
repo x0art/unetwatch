@@ -50,12 +50,14 @@ import {
 
 /* ── Selector options ─────────────────────────────────────────────── */
 
-// Ranges match the app-wide FilterContext presets (1h/24h/7d/30d).
+// Ranges match the app-wide FilterContext presets (1h/24h/7d/30d/90d/1y).
 const RANGE_OPTIONS: SelectOption[] = [
   { value: "1h", label: "Last 1h" },
   { value: "24h", label: "Last 24h" },
   { value: "7d", label: "Last 7 Days" },
   { value: "30d", label: "Last 30 Days" },
+  { value: "90d", label: "Last 90 Days" },
+  { value: "1y", label: "Last 1 Year" },
 ]
 
 const COMPARE_OPTIONS: SelectOption[] = [
@@ -63,7 +65,7 @@ const COMPARE_OPTIONS: SelectOption[] = [
   { value: "previous", label: "Previous Period" },
 ]
 
-const RANGE_MINUTES: Record<string, number> = { "1h": 60, "24h": 1440, "7d": 10080, "30d": 43200 }
+const RANGE_MINUTES: Record<string, number> = { "1h": 60, "24h": 1440, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600 }
 
 function rangeLabel(r: string): string {
   return RANGE_OPTIONS.find((o) => o.value === r)?.label ?? r
@@ -410,7 +412,7 @@ export function AnalyticsPage({
         id: "action",
         header: "Action",
         accessor: (r) => r.action,
-        cell: (r) => <Badge variant="secondary">{r.action || "ALLOW"}</Badge>,
+        cell: (r) => <Badge variant={r.action === "DENY" ? "destructive" : r.action === "FLAG" ? "warning" : "success"}>{r.action || "ALLOW"}</Badge>,
         width: "w-24",
       },
       {

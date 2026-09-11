@@ -58,7 +58,7 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 # Canonical ranges the Analytics page offers; anything else is rejected 422.
 # 1h added so the Analytics presets match the app-wide FilterContext ranges.
-SUPPORTED_RANGES = {"1h", "24h", "7d", "30d"}
+SUPPORTED_RANGES = {"1h", "24h", "7d", "30d", "90d", "1y"}
 
 # Per-request byte heuristic used when the feed carries no byte accounting
 # (documented fallback — see module docstring).
@@ -66,7 +66,7 @@ DEFAULT_BYTES_PER_REQUEST = 8192  # 8 KiB
 
 
 def _minutes_for_range(range_: str) -> int:
-    return {"1h": 60, "24h": 1440, "7d": 10080, "30d": 43200}[range_]
+    return {"1h": 60, "24h": 1440, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600}[range_]
 
 
 def _validate_range(range_: str) -> str:

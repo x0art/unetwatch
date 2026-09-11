@@ -376,7 +376,7 @@ export function DataTable<T>({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.18, ease: EASE }}
-            className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-secondary px-3 py-2 text-xs font-medium text-foreground shadow-sm"
+            className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-sm"
             role="toolbar"
             aria-label="Bulk actions"
           >
@@ -411,10 +411,10 @@ export function DataTable<T>({
         )}
       </AnimatePresence>
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto rounded-md border border-border bg-card shadow-none">
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b border-border bg-muted/50 text-muted-foreground">
+            <tr className="border-b border-border bg-transparent text-muted-foreground">
               {selectable && (
                 <th className="w-12 px-4 py-3 text-left font-medium text-muted-foreground">
                   <Checkbox
@@ -607,7 +607,7 @@ export function DataTable<T>({
                     key={id}
                     className={cn(
                       "border-b border-border transition-colors",
-                      isSelected ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/30",
+                      isSelected ? "bg-primary/[0.04] hover:bg-primary/[0.06]" : "hover:bg-muted/50",
                       onRowClick && "cursor-pointer",
                     )}
                     onClick={onRowClick ? () => onRowClick(row) : undefined}

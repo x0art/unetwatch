@@ -151,7 +151,9 @@ def build_all_query(
     Live Monitor can show the full proxy stream, not just flagged matches.
     ``minutes <= 0`` is the all-time sentinel (no range clause). ``ip``
     narrows to a single client via a ``term`` filter. ``fields`` optionally
-    projects ``_source`` to the listed names.
+    projects ``_source`` to the listed names. Every whitespace-separated
+    search token must appear as a substring of the URL, domain, base_url,
+    client IP or server IP.
     """
     must: list[dict] = []
     filters: list[dict] = []
@@ -163,7 +165,8 @@ def build_all_query(
     if terms:
         clauses = [
             "("
-            "url.keyword:*{t}* OR client_ip.keyword:*{t}* OR server_ip.keyword:*{t}*"
+            "url.keyword:*{t}* OR domain.keyword:*{t}* OR base_url.keyword:*{t}*"
+            " OR client_ip.keyword:*{t}* OR server_ip.keyword:*{t}*"
             ")".format(t=escape_query_string(term))
             for term in terms
         ]

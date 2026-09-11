@@ -32,6 +32,7 @@ import {
   Panel,
   RefreshIntervalSelect,
   SearchInput,
+  TimestampCell,
   useToast,
 } from "./ui"
 import { ListActionCell } from "./ListActionDropdown"
@@ -40,12 +41,6 @@ import { useAutoRefresh, useDebounce } from "../lib/utils"
 import { useFilter } from "../contexts/FilterContext"
 
 const DEFAULT_PAGE_SIZE = 25
-
-function formatDetected(ts: string) {
-  const date = new Date(ts)
-  if (Number.isNaN(date.getTime())) return ts
-  return date.toLocaleString()
-}
 
 /* Module-level handles to component state, synced each render, so
  * FINDINGS_COLUMNS stays referentially stable at module scope while its
@@ -205,9 +200,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     id: "log_timestamp",
     header: "Detected",
     accessor: (f) => f.log_timestamp,
-    cell: (f) => (
-      <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatDetected(f.log_timestamp)}</span>
-    ),
+    cell: (f) => <TimestampCell value={f.log_timestamp} />,
     defaultSortDir: "desc",
   },
   {

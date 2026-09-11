@@ -47,3 +47,19 @@ async def test_host_profile_ip_validation(client):
     res = client.get("/api/hosts/1.2.3.4")
     assert res.status_code == 200
     assert res.json()["ip"] == "1.2.3.4"
+
+
+async def test_host_profile_accepts_90d_and_1y_labels(client):
+    """90d/1y timeRange labels map to long windows (no silent 24h fallback)."""
+    from app.routes.hosts import _aggregate_host  # noqa: F401  (import guard)
+    import app.routes.hosts as hosts_mod
+    import inspect
+
+    src = inspect.getsource(hosts_mod)
+    assert '"90d": 129600' in src
+    assert '"1y": 525600' in src
+    # Endpoint still degrades gracefully offline for the new labels.
+    res = client.get("/api/hosts/10.0.0.7?timeRange=90d")
+    assert res.status_code == 200
+    res = client.get("/api/hosts/10.0.0.7?timeRange=1y")
+    assert res.status_code == 200

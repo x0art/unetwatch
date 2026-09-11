@@ -228,6 +228,9 @@ export function UrlInvestigationPage({
             <button type="button" onClick={() => setUSource("live")} aria-pressed={uSource === "live"} className={`rounded-sm px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${uSource === "live" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Live</button>
           </div>
         </div>
+        {uSource === "findings" && (
+          <p className="mt-2 text-xs text-muted-foreground">Findings covers pattern-matched traffic only — switch to Live for the full stream.</p>
+        )}
       </form>
 
       {error && (

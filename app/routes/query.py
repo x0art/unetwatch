@@ -5,7 +5,7 @@ router = APIRouter(prefix="/api/query", tags=["query"])
 
 @router.get("/run")
 async def run_query(
-    minutes: int = Query(60, ge=0, le=43200),
+    minutes: int = Query(60, ge=0, le=525600),
     ip: str | None = Query(
         None, max_length=64, description="Client IP filter (ES term filter, used by Host Inspector)"
     ),
@@ -40,7 +40,13 @@ async def run_query(
     from app.services.monitor import run_query as run_query_service
 
     if view_mode == "all":
-        return await run_all_query(minutes, limit=500, search=q or None, ip=ip or None)
+        return await run_all_query(
+            minutes,
+            limit=500,
+            search=q or None,
+            ip=ip or None,
+            exclude_blacklist=exclude_blacklist,
+        )
 
     return await run_query_service(
         minutes,
@@ -54,7 +60,7 @@ async def run_query(
 @router.get("/client")
 async def client_breakdown_live(
     ip: str = Query(..., min_length=1, max_length=64),
-    minutes: int = Query(60, ge=0, le=43200),
+    minutes: int = Query(60, ge=0, le=525600),
     search: str | None = Query(None, max_length=200),
     limit: int = Query(12, ge=1, le=50),
 ):
