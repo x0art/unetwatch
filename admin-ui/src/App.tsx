@@ -11,6 +11,7 @@ import {
 import { LoginPage } from "./components/LoginPage"
 import { AppShell } from "./components/AppShell"
 import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
+import { AddBlacklistDialog, AddBlacklistButton } from "./components/AddBlacklistDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { FilterProvider } from "./contexts/FilterContext"
 import { ToastProvider, Skeleton } from "./components/ui"
@@ -91,6 +92,7 @@ function AppRoutes() {
   const [counts, setCounts] = useState<PatternCounts | null>(null)
   const [lastUpdated, setLastUpdated] = useState(Date.now())
   const [patternDialogOpen, setPatternDialogOpen] = useState(false)
+  const [blacklistDialogOpen, setBlacklistDialogOpen] = useState(false)
 
   // Countdown timer — computed from the backend's last_poll_at timestamp
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
@@ -219,6 +221,11 @@ function AppRoutes() {
       description="Pattern console"
       actions={
         <>
+          <AddBlacklistButton onOpen={() => setBlacklistDialogOpen(true)} />
+          <AddBlacklistDialog
+            open={blacklistDialogOpen}
+            onClose={() => setBlacklistDialogOpen(false)}
+          />
           <AddPatternButton onOpen={() => setPatternDialogOpen(true)} />
           <AddPatternDialog
             open={patternDialogOpen}
