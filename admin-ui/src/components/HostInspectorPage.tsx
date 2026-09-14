@@ -30,6 +30,7 @@ import {
   getClientReportFindings,
   getClientReportCsvUrl,
   getToken,
+  notifySessionExpired,
   type QueryDoc,
   type HostProfile,
   type ClientReport,
@@ -615,6 +616,11 @@ export function HostInspectorPage({
     const tok = getToken()
     fetch(`/api${apiUrl.replace(/^\/api/, "") || apiUrl}`, { headers: tok ? { "X-API-Key": tok } : {} })
       .then(async (res) => {
+        if (res.status === 401) {
+          notifySessionExpired()
+          toast({ title: "Session expired — please log in again", variant: "error" })
+          return
+        }
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const blob = await res.blob()
         const url = URL.createObjectURL(blob)

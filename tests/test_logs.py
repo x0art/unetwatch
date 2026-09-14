@@ -16,6 +16,21 @@ def test_logs_requires_auth(db_path):
         assert c.get("/api/query/run").status_code == 401
 
 
+def test_unauth_401_does_not_trigger_browser_basic_prompt(db_path):
+    """401s must not carry 'WWW-Authenticate: Basic' — browsers show a native
+    sign-in modal on that challenge, preempting the SPA login page."""
+    asyncio.run(init_db())
+    with TestClient(app, raise_server_exceptions=False) as c:
+        c.headers.clear()
+        for path in ("/api/logs/", "/api/query/run"):
+            resp = c.get(path)
+            assert resp.status_code == 401
+            challenge = resp.headers.get("www-authenticate", "")
+            assert not challenge.lower().startswith("basic"), (
+                f"{path} must not challenge with Basic (got {challenge!r})"
+            )
+
+
 def test_logs_list_empty(client):
     resp = client.get("/api/logs/")
     assert resp.status_code == 200

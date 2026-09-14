@@ -113,5 +113,10 @@ async def verify_admin(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid API key or credentials",
-        headers={"WWW-Authenticate": "Basic"},
+        # NOTE: must NOT use "Basic" here — browsers intercept ANY
+        # 401 + WWW-Authenticate: Basic and show a native sign-in modal,
+        # preempting the SPA's JS 401 -> LoginPage flow. "Bearer" avoids
+        # the native prompt. Preemptive Authorization: Basic is still
+        # accepted above — only this challenge header changes.
+        headers={"WWW-Authenticate": 'Bearer realm="uNetWatch"'},
     )

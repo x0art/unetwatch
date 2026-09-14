@@ -401,6 +401,12 @@ export function onSessionExpired(cb: () => void) {
   _onSessionExpired = cb
 }
 
+/** Shared 401 handler for raw-fetch call sites that bypass request(). */
+export function notifySessionExpired() {
+  setToken(null)
+  _onSessionExpired?.()
+}
+
 export function setToken(t: string | null) {
   _token = t
   if (t) localStorage.setItem(TOKEN_KEY, t)
