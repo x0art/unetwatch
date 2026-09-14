@@ -146,6 +146,22 @@ async def bulk_delete_blacklist(payload: BlacklistBulkDelete, db=Depends(get_db_
     return {"deleted": deleted}
 
 
+@router.post("/upstream-sync", dependencies=[Depends(verify_admin)])
+async def upstream_sync():
+    """Run an upstream blacklist sync now; returns the sync stats."""
+    from app.services.upstream_blacklist import sync_upstream_blacklist
+
+    return await sync_upstream_blacklist()
+
+
+@router.get("/upstream-status", dependencies=[Depends(verify_admin)])
+async def upstream_status():
+    """Current upstream blacklist status."""
+    from app.services.upstream_blacklist import get_upstream_status
+
+    return await get_upstream_status()
+
+
 @router.delete(
     "/{kind}/{value}",
     status_code=status.HTTP_204_NO_CONTENT,

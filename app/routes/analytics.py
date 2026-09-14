@@ -39,6 +39,9 @@ Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
     GET /api/analytics/top-enforced?range=7d&compare=previous&hostGroup=all
         { items: [{ domain, enforcements, primaryRule }], range, hostGroup, es_online }
 
+    GET /api/analytics/top-clients?range=7d&compare=previous&hostGroup=all
+        { items: [{ client_ip, count, last_seen }], range, compare, hostGroup, es_online }
+
 ``compare`` and ``hostGroup`` are accepted and echoed but do not change the
 aggregation (documented honest no-op — see each endpoint docstring).
 """
@@ -58,7 +61,7 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
 # Canonical ranges the Analytics page offers; anything else is rejected 422.
 # 1h added so the Analytics presets match the app-wide FilterContext ranges.
-SUPPORTED_RANGES = {"1h", "24h", "7d", "30d", "90d", "1y"}
+SUPPORTED_RANGES = {"1h", "24h", "3d", "7d", "30d", "90d", "1y"}
 
 # Per-request byte heuristic used when the feed carries no byte accounting
 # (documented fallback — see module docstring).
@@ -66,7 +69,10 @@ DEFAULT_BYTES_PER_REQUEST = 8192  # 8 KiB
 
 
 def _minutes_for_range(range_: str) -> int:
-    return {"1h": 60, "24h": 1440, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600}[range_]
+    return {
+        "1h": 60, "24h": 1440, "3d": 4320, "7d": 10080,
+        "30d": 43200, "90d": 129600, "1y": 525600,
+    }[range_]
 
 
 def _validate_range(range_: str) -> str:
@@ -281,14 +287,22 @@ async def _previous_period_summary(db, minutes: int) -> dict | None:
     """Summarize the fixed period immediately before the window.
 
     The previous window is the comparable slice before the current one:
-    24h / 7d windows compare against the prior 7 days, 30d against the prior
-    30 days. Bounds are evaluated by SQLite (UTC) via ``strftime`` modifiers so
-    the filter is consistent with ``_window_clause``.
+    1h → prior day, 3d → prior 3 days, 24h / 7d → prior 7 days,
+    30d and longer → prior 30 days. Bounds are evaluated by SQLite (UTC) via
+    ``strftime`` modifiers so the filter is consistent with ``_window_clause``.
     """
     if minutes <= 0:
         return None
-    # Comparable prior window: 1h → 1 day, 24h and 7d → 7 days, 30d → 30 days.
-    offset_days = 1 if minutes == 60 else (7 if minutes in (1440, 10080) else 30)
+    # Comparable prior window: 1h → 1 day, 3d → 3 days, 24h and 7d → 7 days,
+    # 30d and longer → 30 days.
+    if minutes == 60:
+        offset_days = 1
+    elif minutes == 4320:
+        offset_days = 3
+    elif minutes in (1440, 10080):
+        offset_days = 7
+    else:
+        offset_days = 30
     offset_minutes = minutes + offset_days * 1440
     params: list = [f"-{offset_minutes} minutes", f"-{minutes} minutes"]
     where = (
@@ -468,6 +482,19 @@ async def _findings_top_enforced(db, minutes: int, limit: int) -> list[dict]:
     return items[:limit]
 
 
+async def _findings_top_clients(db, minutes: int, limit: int) -> list[dict]:
+    """Top client_ips in the findings table in-window by request count."""
+    params: list = []
+    where = _window_clause(minutes, params)
+    cursor = await db.execute(
+        "SELECT client_ip, COUNT(*) AS count, MAX(log_timestamp) AS last_seen"
+        f" FROM findings WHERE client_ip != ''{where}"
+        " GROUP BY client_ip ORDER BY count DESC, client_ip LIMIT ?",
+        [*params, limit],
+    )
+    return [dict(r) for r in await cursor.fetchall()]
+
+
 # ── ES-backed aggregation (honest best-effort when the rich fields exist) ──
 
 
@@ -513,7 +540,7 @@ async def _es_summary(minutes: int) -> dict | None:
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(block_patterns, minutes, settings.es_query_size)
 
-        async with es_client(settings, timeout=30) as es:
+        async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
             res = await es.search(index=settings.elastic_index, body=query)
 
         hits = res.get("hits", {}).get("hits", [])
@@ -640,7 +667,7 @@ async def _es_enforcements(minutes: int) -> list[dict] | None:
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(block_patterns, minutes, settings.es_query_size)
 
-        async with es_client(settings, timeout=30) as es:
+        async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
             res = await es.search(index=settings.elastic_index, body=query)
 
         hits = res.get("hits", {}).get("hits", [])
@@ -714,7 +741,7 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_logs_query(block_patterns, minutes, settings.es_query_size)
 
-        async with es_client(settings, timeout=30) as es:
+        async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
             res = await es.search(index=settings.elastic_index, body=query)
 
         hits = res.get("hits", {}).get("hits", [])
@@ -976,4 +1003,29 @@ async def top_denied(
         "hostGroup": host_group,
         "es_online": source == "es",
         "source": source,
+    }
+
+
+@router.get("/top-clients")
+async def top_clients(
+    range_: str = Query("7d", alias="range"),
+    compare: str = Query("none", max_length=32),
+    host_group: str = Query("all", alias="hostGroup", max_length=64),
+    db=Depends(get_db_conn),
+    limit: int = Query(10, ge=1, le=100),
+):
+    """Top client_ips in the findings table in-window, by request count.
+
+    ``compare`` and ``hostGroup`` are accepted and echoed but do not change
+    the aggregation (honest no-op, like the sibling endpoints).
+    """
+    _validate_range(range_)
+    minutes = _minutes_for_range(range_)
+    items = await _findings_top_clients(db, minutes, limit)
+    return {
+        "items": items,
+        "range": range_,
+        "compare": compare,
+        "hostGroup": host_group,
+        "es_online": False,
     }

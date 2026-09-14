@@ -167,7 +167,10 @@ async def host_profile(
     # Prefer the explicit minutes param; map the FilterContext timeRange label
     # when no minutes is passed.
     if minutes == 1440 and timeRange:
-        minutes = {"1h": 60, "24h": 1440, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600}.get(timeRange, 1440)
+        minutes = {
+            "1h": 60, "24h": 1440, "3d": 4320, "7d": 10080,
+            "30d": 43200, "90d": 129600, "1y": 525600,
+        }.get(timeRange, 1440)
 
     agg = await _aggregate_host(ip, minutes)
     es_online = bool(agg and agg["es_online"])

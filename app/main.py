@@ -84,7 +84,23 @@ async def lifespan(app: FastAPI):
         "interval",
         minutes=settings.redirect_check_interval_minutes,
     )
+    from app.services.upstream_blacklist import sync_upstream_blacklist
+
+    scheduler.add_job(
+        sync_upstream_blacklist,
+        "interval",
+        minutes=5,
+        id="upstream-blacklist-sync",
+        coalesce=True,
+        max_instances=1,
+    )
     scheduler.start()
+
+    # One best-effort immediate upstream sync; never blocks boot.
+    try:
+        await sync_upstream_blacklist()
+    except Exception as e:
+        log.warning("initial upstream blacklist sync failed: %s", e)
 
     # Warm ES field inventory (best-effort, never crashes boot)
     from app.services.monitor import warm_field_inventory

@@ -253,8 +253,8 @@ def test_build_all_query_searches_domain_and_base_url():
     # No search term → range clause only (flagged path untouched elsewhere).
     plain = build_all_query(60, 500)
     assert len(plain["query"]["bool"]["must"]) == 1
-    # Server-side bound: ES times out before the 30s client timeout.
-    assert q["timeout"] == "25s"
+    # Server-side bound: ES times out before the 120s client timeout.
+    assert q["timeout"] == "60s"
     assert q["track_total_hits"] is False
 
 
@@ -271,7 +271,7 @@ def test_build_logs_query_is_scoring_free_and_bounded():
     assert len(bool_q["must"]) == 1
     assert "evil.example" in bool_q["must"][0]["query_string"]["query"]
     # Bounded: ES-side timeout + no exact hit counting.
-    assert q["timeout"] == "25s"
+    assert q["timeout"] == "60s"
     assert q["track_total_hits"] is False
     # Projection plumbing passes the requested fields through.
     assert set(QUERY_SOURCE_FIELDS) >= {"url", "client_ip", "@timestamp"}

@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     base_url: str = ""
     poll_interval_minutes: int = 10
     es_query_size: int = 5000
+    # Client-side ES timeout (seconds) for interactive query paths — long
+    # windows (e.g. 1y scans) exceed the old 30s bound; the poll path uses
+    # its own 180s timeout and is untouched.
+    es_timeout_seconds: int = 120
     redirect_check_interval_minutes: int = 60
     redirect_timeout_seconds: int = 10
     # Monitor log audit trail bounds: prune rows older than this many days,
@@ -38,6 +42,9 @@ class Settings(BaseSettings):
     # Relative to the working directory: resolves to ./data locally and to
     # /app/data in the container (the volume mounted in docker-compose.yml).
     blacklist_dir: str = "./data"
+    # Upstream blacklist: GitHub raw gist URL (one host/IPv4 per line,
+    # `#`/`;` comments). Empty = disabled.
+    upstream_blacklist_url: str = ""
     api_key: str = ""
     admin_user: str = "admin"
     admin_pass: str = "changeme"

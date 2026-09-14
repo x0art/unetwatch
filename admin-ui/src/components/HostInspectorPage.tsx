@@ -50,6 +50,7 @@ import {
 const TIME_RANGE_OPTIONS = [
   { value: "1h", label: "Last 1h" },
   { value: "24h", label: "Last 24h" },
+  { value: "3d", label: "Last 3d" },
   { value: "7d", label: "Last 7d" },
   { value: "30d", label: "Last 30d" },
   { value: "90d", label: "Last 90d" },

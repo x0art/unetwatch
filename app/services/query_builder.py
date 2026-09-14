@@ -148,7 +148,7 @@ def build_logs_query(
     result: dict = {
         "size": size,
         "query": {"bool": {"filter": filters, "must": must}},
-        "timeout": "25s",
+        "timeout": "60s",
         "track_total_hits": False,
     }
     if fields is not None:
@@ -202,7 +202,7 @@ def build_all_query(
         "query": {"bool": {"must": must, "filter": filters}},
         "size": size,
         "sort": [{"@timestamp": {"order": "desc"}}],
-        "timeout": "25s",
+        "timeout": "60s",
         "track_total_hits": False,
     }
     if fields is not None:

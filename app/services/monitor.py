@@ -200,7 +200,7 @@ async def run_client_query(
             fields=QUERY_SOURCE_FIELDS,
         )
 
-        async with _es_client_context(settings, timeout=30) as es:
+        async with _es_client_context(settings, timeout=settings.es_timeout_seconds) as es:
             try:
                 res = await es.search(index=settings.elastic_index, body=query)
             except Exception:
@@ -326,7 +326,7 @@ async def run_query(
         result["query"] = query
         log["es_query"] = query
 
-        async with _es_client_context(settings, timeout=30) as es:
+        async with _es_client_context(settings, timeout=settings.es_timeout_seconds) as es:
             try:
                 res = await es.search(index=settings.elastic_index, body=query)
             except Exception as e:
@@ -474,7 +474,7 @@ async def run_all_query(
         result["query"] = query
         log["es_query"] = query
 
-        async with _es_client_context(settings, timeout=30) as es:
+        async with _es_client_context(settings, timeout=settings.es_timeout_seconds) as es:
             try:
                 res = await es.search(index=settings.elastic_index, body=query)
             except Exception as e:

@@ -786,6 +786,8 @@ export function timeRangeToMinutesLive(tr: string): number {
   switch (tr) {
     case "1h":
       return 60
+    case "3d":
+      return 4320
     case "7d":
       return 10080
     case "30d":
@@ -1651,6 +1653,21 @@ export interface AnalyticsTopEnforced {
   es_online: boolean
 }
 
+/** Top client_ips in the findings table (spec §3 — replaces top-enforced panel). */
+export interface TopFindingsClient {
+  client_ip: string
+  count: number // requests
+  last_seen: string
+}
+
+export interface AnalyticsTopClients {
+  items: TopFindingsClient[]
+  range: string
+  compare: string
+  hostGroup: string
+  es_online: boolean
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1734,6 +1751,20 @@ export async function getAnalyticsTopEnforced(params: {
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
   return request(`/analytics/top-enforced?${qs}`)
+}
+
+export async function getAnalyticsTopClients(params: {
+  range?: string
+  compare?: string
+  hostGroup?: string
+  limit?: number
+} = {}): Promise<AnalyticsTopClients> {
+  const qs = new URLSearchParams()
+  qs.set("range", params.range ?? "7d")
+  if (params.compare) qs.set("compare", params.compare)
+  if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
+  if (params.limit) qs.set("limit", String(params.limit))
+  return request(`/analytics/top-clients?${qs}`)
 }
 
 /* ── System & Kibana Settings (Task 11 — spec §3.5) ─────────────────── */

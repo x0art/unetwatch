@@ -51,10 +51,11 @@ import { EventInspectorSidebar } from "./EventInspectorSidebar"
 
 const DEFAULT_PAGE_SIZE = 25
 
-// Shared workspace time window — same 1h/24h/7d/30d/90d/1y as FilterContext.
+// Shared workspace time window — same 1h/24h/3d/7d/30d/90d/1y as FilterContext.
 const TIME_RANGE_OPTIONS = [
   { value: "1h", label: "Last 1h" },
   { value: "24h", label: "Last 24h" },
+  { value: "3d", label: "Last 3d" },
   { value: "7d", label: "Last 7d" },
   { value: "30d", label: "Last 30d" },
   { value: "90d", label: "Last 90d" },

@@ -101,8 +101,9 @@ interface DataTableProps<T> {
   /**
    * The per-column filter control. `combobox` (default) renders a compact
    * dropdown of the distinct accessor values over the current `data`, exact-matching
-   * the selected value. `text` keeps a substring input. Only paginated tables
-   * (onPageChange + page) render the filter row at all.
+   * the selected value. `text` keeps a substring input. The filter row renders
+   * on every table with at least one filterable column (pagination not required);
+   * only the page-0 reset on filter change needs pagination.
    */
   filterControl?: "combobox" | "text"
   onRowClick?: (row: T) => void
@@ -288,9 +289,10 @@ export function DataTable<T>({
   )
 
   // ── Per-column filtering (runs before sorting) ─────────────────────
-  // Combobox mode (the default on paginated tables) matches the exact
-  // accessor value the user picked. Text mode keeps case-insensitive substring
-  // matching.
+  // Combobox mode (the default) matches the exact accessor value the user
+  // picked. Text mode keeps case-insensitive substring matching.
+  // NOTE: filterability is intentionally coupled to sortability — a column
+  // opts out of both with enableSorting={false} (or enableColumnFilter).
   const filterMatches = (row: T, filters: Record<string, string>): boolean => {
     const ids = Object.keys(filters)
     if (ids.length === 0) return true
@@ -485,10 +487,17 @@ export function DataTable<T>({
                 )
               })}
             </tr>
-            {/* Per-column filter row - only on paginated tables. Combobox of distinct
-                accessor values in combobox mode, or a mono substring input in
-                text mode. */}
-            {enableFiltering && hasPagination && (
+            {/* Per-column filter row - on every table with a filterable column.
+                Combobox of distinct accessor values in combobox mode, or a
+                sans substring input in text mode. Non-paginated tables filter
+                their current `data`; options derive from the visible rows. */}
+            {enableFiltering &&
+              columns.some(
+                (col) =>
+                  col.enableSorting !== false &&
+                  !col.srOnly &&
+                  col.enableColumnFilter !== false,
+              ) && (
               <tr className="border-b border-border bg-muted/40">
                 {selectable && <td className="px-4 py-1.5" />}
                 {columns.map((col) => {

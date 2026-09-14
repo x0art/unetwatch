@@ -239,7 +239,7 @@ async def test_findings_list_minutes_window(client, db_path):
 
 
 async def test_summary_accepts_90d_and_1y_ranges(client, db_path):
-    """90d/1y ranges are supported (1-year Deep Dive window)."""
+    """90d/1y/3d ranges are supported (1-year Deep Dive window)."""
     await _seed(
         client,
         db_path,
@@ -248,7 +248,47 @@ async def test_summary_accepts_90d_and_1y_ranges(client, db_path):
         ],
         add_action_col=True,
     )
-    for r in ("90d", "1y"):
+    for r in ("3d", "90d", "1y"):
         res = client.get(f"/api/analytics/summary?range={r}")
         assert res.status_code == 200
         assert res.json()["range"] == r
+
+
+async def test_top_clients_groups_counts_and_window(client, db_path):
+    """GET /api/analytics/top-clients groups findings by client_ip in-window."""
+    from datetime import timedelta
+
+    now = datetime.now(UTC)
+    recent = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    old = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pats = json.dumps(["*evil*"])
+    await _seed(
+        client,
+        db_path,
+        [
+            ("1.1.1.1", "", "http://evil.example/a", "evil.example", recent, pats, "ALLOW"),
+            ("1.1.1.1", "", "http://evil.example/b", "evil.example", recent, pats, "ALLOW"),
+            ("2.2.2.2", "", "http://bad.example/c", "bad.example", recent, pats, "ALLOW"),
+            # Outside the 7d window — must not count.
+            ("9.9.9.9", "", "http://old.example/d", "old.example", old, pats, "ALLOW"),
+        ],
+        add_action_col=True,
+    )
+
+    res = client.get("/api/analytics/top-clients?range=7d&compare=previous&hostGroup=all")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["range"] == "7d"
+    assert data["compare"] == "previous"
+    assert data["hostGroup"] == "all"
+    assert data["es_online"] is False
+    assert [i["client_ip"] for i in data["items"]] == ["1.1.1.1", "2.2.2.2"]
+    assert data["items"][0]["count"] == 2
+    assert data["items"][1]["count"] == 1
+    assert data["items"][0]["last_seen"]
+
+
+async def test_top_clients_rejects_bad_range(client, db_path):
+    """GET /api/analytics/top-clients 422s on an unknown range."""
+    res = client.get("/api/analytics/top-clients?range=bogus")
+    assert res.status_code == 422

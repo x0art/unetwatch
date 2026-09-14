@@ -24,6 +24,7 @@ import {
   StatCard,
   useToast,
   Badge,
+  TimestampCell,
   type SelectOption,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
@@ -35,25 +36,26 @@ import {
   getAnalyticsBandwidth,
   getAnalyticsEnforcements,
   getAnalyticsTopDomains,
-  getAnalyticsTopEnforced,
+  getAnalyticsTopClients,
   getFindings,
   formatBytes,
   type AnalyticsSummary,
   type AnalyticsBandwidth,
   type AnalyticsEnforcements,
   type AnalyticsTopDomains,
-  type AnalyticsTopEnforced,
+  type AnalyticsTopClients,
   type TopDomainRow,
-  type TopEnforcedRow,
+  type TopFindingsClient,
   type Finding,
 } from "../api"
 
 /* ── Selector options ─────────────────────────────────────────────── */
 
-// Ranges match the app-wide FilterContext presets (1h/24h/7d/30d/90d/1y).
+// Ranges match the app-wide FilterContext presets (1h/24h/3d/7d/30d/90d/1y).
 const RANGE_OPTIONS: SelectOption[] = [
   { value: "1h", label: "Last 1h" },
   { value: "24h", label: "Last 24h" },
+  { value: "3d", label: "Last 3 Days" },
   { value: "7d", label: "Last 7 Days" },
   { value: "30d", label: "Last 30 Days" },
   { value: "90d", label: "Last 90 Days" },
@@ -65,7 +67,7 @@ const COMPARE_OPTIONS: SelectOption[] = [
   { value: "previous", label: "Previous Period" },
 ]
 
-const RANGE_MINUTES: Record<string, number> = { "1h": 60, "24h": 1440, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600 }
+const RANGE_MINUTES: Record<string, number> = { "1h": 60, "24h": 1440, "3d": 4320, "7d": 10080, "30d": 43200, "90d": 129600, "1y": 525600 }
 
 function rangeLabel(r: string): string {
   return RANGE_OPTIONS.find((o) => o.value === r)?.label ?? r
@@ -130,7 +132,7 @@ export function AnalyticsPage({
   const [bandwidth, setBandwidth] = useState<AnalyticsBandwidth | null>(null)
   const [enforcements, setEnforcements] = useState<AnalyticsEnforcements | null>(null)
   const [topDomains, setTopDomains] = useState<AnalyticsTopDomains | null>(null)
-  const [topEnforced, setTopEnforced] = useState<AnalyticsTopEnforced | null>(null)
+  const [topClients, setTopClients] = useState<AnalyticsTopClients | null>(null)
   const [raw, setRaw] = useState<Finding[]>([])
   const [rawTotal, setRawTotal] = useState(0)
 
@@ -156,18 +158,18 @@ export function AnalyticsPage({
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [s, b, e, td, ten] = await Promise.all([
+      const [s, b, e, td, tc] = await Promise.all([
         getAnalyticsSummary({ range, compare }),
         getAnalyticsBandwidth({ range, compare }),
         getAnalyticsEnforcements({ range, compare }),
         getAnalyticsTopDomains({ range, compare, limit: 10 }),
-        getAnalyticsTopEnforced({ range, compare, limit: 10 }),
+        getAnalyticsTopClients({ range, compare, limit: 10 }),
       ])
       setSummary(s)
       setBandwidth(b)
       setEnforcements(e)
       setTopDomains(td)
-      setTopEnforced(ten)
+      setTopClients(tc)
       setError(null)
     } catch (err) {
       const msg = (err as Error).message || "Failed to load analytics"
@@ -297,15 +299,26 @@ export function AnalyticsPage({
     [],
   )
 
-  const enforcedColumns = useMemo<DataTableColumn<TopEnforcedRow>[]>(
+  const clientsColumns = useMemo<DataTableColumn<TopFindingsClient>[]>(
     () => [
       {
-        id: "domain",
-        header: "Domain",
-        accessor: (r) => r.domain,
+        id: "client_ip",
+        header: "Client IP",
+        accessor: (r) => r.client_ip,
         cell: (r) => (
-          <span className="block max-w-[220px] truncate font-mono text-[13px] font-semibold" title={r.domain}>
-            {r.domain}
+          <span className="flex items-center gap-1.5">
+            <span className="block max-w-[220px] truncate font-mono text-[13px] font-semibold" title={r.client_ip}>
+              {r.client_ip}
+            </span>
+            <button
+              type="button"
+              onClick={() => openHost(r.client_ip)}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in Host Inspector"
+              title="Open in Host Inspector"
+            >
+              <Search className="h-3 w-3" />
+            </button>
           </span>
         ),
       },
@@ -318,25 +331,13 @@ export function AnalyticsPage({
         width: "w-20",
       },
       {
-        id: "enforcements",
-        header: "Enforcements",
-        accessor: (r) => r.enforcements,
-        align: "right",
-        cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.enforcements.toLocaleString()}</span>,
-        width: "w-28",
-      },
-      {
-        id: "primaryRule",
-        header: "Primary Rule",
-        accessor: (r) => r.primaryRule,
-        cell: (r) => (
-          <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={r.primaryRule}>
-            {r.primaryRule}
-          </span>
-        ),
+        id: "last_seen",
+        header: "Last seen",
+        accessor: (r) => r.last_seen,
+        cell: (r) => <TimestampCell value={r.last_seen} />,
       },
     ],
-    [],
+    [openHost],
   )
 
   const rawColumns = useMemo<DataTableColumn<Finding>[]>(
@@ -520,11 +521,11 @@ export function AnalyticsPage({
           (topDomains?.items ?? []).map((r) => [r.domain, r.count, r.volume, r.pct]),
         ),
       )
-      sections.push("Top Enforced Target Domains")
+      sections.push("Top findings clients")
       sections.push(
         csvRows(
-          ["domain", "count", "enforcements", "primaryRule"],
-          (topEnforced?.items ?? []).map((r) => [r.domain, r.count, r.enforcements, r.primaryRule]),
+          ["client_ip", "count", "last_seen"],
+          (topClients?.items ?? []).map((r) => [r.client_ip, r.count, r.last_seen]),
         ),
       )
       sections.push("Raw Findings")
@@ -688,19 +689,19 @@ export function AnalyticsPage({
             ariaLabel="Top bandwidth consuming domains"
           />
         </Panel>
-        <Panel title="Top Enforced Target Domains" icon={ShieldCheck}>
+        <Panel title="Top findings clients" icon={Server}>
           <DataTable
-            columns={enforcedColumns}
-            data={topEnforced?.items ?? []}
-            rowId={(r) => r.domain}
-            loading={loading && !topEnforced}
+            columns={clientsColumns}
+            data={topClients?.items ?? []}
+            rowId={(r) => r.client_ip}
+            loading={loading && !topClients}
             empty={{
-              icon: ShieldCheck,
-              title: "No enforced domains in window",
-              description: "DENY rows appear here — the proxy handled them.",
+              icon: Server,
+              title: "No clients with findings in window",
+              description: "Client IPs with findings appear here.",
               action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
-            ariaLabel="Top enforced target domains"
+            ariaLabel="Top findings clients"
           />
         </Panel>
       </div>
