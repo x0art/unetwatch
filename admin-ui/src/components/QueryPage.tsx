@@ -511,7 +511,18 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   }
   const columns: DataTableColumn<QueryDoc>[] = QUERY_COLUMNS
 
+  // Abort in-flight request before starting a new one (anti-pileup on long
+  // windows) and on unmount. Aborted requests reject with AbortError, which
+  // is silently ignored below so a superseded request never flashes an error.
+  const abortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => {
+    abortRef.current?.abort()
+  }, [])
+
   const fetchQuery = useCallback(() => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     let cancelled = false
     setLoading(true)
     setError(null)
@@ -521,13 +532,20 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
       excludeWhitelist: whitelistMode === "exclude",
       excludeBlacklist: blacklistMode === "exclude",
       viewMode,
+      signal: controller.signal,
     })
       .then((res) => {
         if (!cancelled) setResult(res)
       })
       .catch((e) => {
         if (!cancelled) {
-          setError((e as Error).message)
+          if ((e as Error).name === "AbortError") return
+          const msg = (e as Error).message
+          setError(
+            /timeout|timed out/i.test(msg)
+              ? "Elasticsearch timed out — try a shorter time window (e.g. 30d instead of 1y)."
+              : msg,
+          )
           setResult(null)
         }
       })

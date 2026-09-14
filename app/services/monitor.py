@@ -26,6 +26,7 @@ from app.services.es_client import (  # noqa: F401
 
 # ── Re-exports from deep modules (backward compatibility) ──────────────────
 from app.services.query_builder import (  # noqa: F401
+    QUERY_SOURCE_FIELDS,
     build_all_query,
     build_logs_query,
     build_pattern_regex as _build_pattern_regex,
@@ -196,6 +197,7 @@ async def run_client_query(
             settings.es_query_size,
             search=search,
             client_ip=ip,
+            fields=QUERY_SOURCE_FIELDS,
         )
 
         async with _es_client_context(settings, timeout=30) as es:
@@ -319,6 +321,7 @@ async def run_query(
             settings.es_query_size,
             search=search,
             client_ip=client_ip,
+            fields=QUERY_SOURCE_FIELDS,
         )
         result["query"] = query
         log["es_query"] = query
@@ -465,7 +468,8 @@ async def run_all_query(
     try:
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
         query = build_all_query(
-            minutes, settings.es_query_size, search=search, ip=ip
+            minutes, settings.es_query_size, search=search, ip=ip,
+            fields=QUERY_SOURCE_FIELDS,
         )
         result["query"] = query
         log["es_query"] = query

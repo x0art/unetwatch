@@ -79,11 +79,16 @@ def test_escape_query_string_full_url():
 
 def test_build_logs_query_escapes_block_patterns():
     q = build_logs_query(["*porn*", "bad+site", "http://x/"], 10, 50)
-    qs = q["query"]["bool"]["must"][0]["query_string"]["query"]
+    bool_q = q["query"]["bool"]
+    qs_clauses = [
+        f["query_string"]["query"] for f in bool_q["filter"] if "query_string" in f
+    ]
+    assert len(qs_clauses) == 1
+    qs = qs_clauses[0]
     assert "*porn*" in qs  # wildcard preserved
     assert "bad\\+site" in qs  # operator escaped
     assert "http\\:\\/\\/x\\/" in qs  # field delimiters escaped
-    assert q["query"]["bool"]["filter"][0]["range"]["@timestamp"]["gte"] == "now-10m"
+    assert bool_q["filter"][0]["range"]["@timestamp"]["gte"] == "now-10m"
     assert q["size"] == 50
 
 def test_build_logs_query_all_time_omits_range_filter():
@@ -104,14 +109,15 @@ def test_build_logs_query_narrows_matches_when_search_given():
     q = build_logs_query(["*porn*"], 10, 50, search=" 1.2.3.4   bad.example ")
     must = q["query"]["bool"]["must"]
     # Tokenized, whitespace-collapsed, and escaped — must never break grammar.
-    assert len(must) == 2  # block-pattern clause + search clause
-    search_qs = must[1]["query_string"]["query"]
+    # must holds ONLY the search clause; the block-pattern clause is a filter.
+    assert len(must) == 1
+    search_qs = must[0]["query_string"]["query"]
     assert "(url.keyword:*1.2.3.4* OR client_ip.keyword:*1.2.3.4* OR server_ip.keyword:*1.2.3.4*)" in search_qs
     assert "(url.keyword:*bad.example* OR client_ip.keyword:*bad.example* OR server_ip.keyword:*bad.example*)" in search_qs
 
-    # No search term → only the block-pattern clause.
+    # No search term → must is empty (ES accepts "must": []).
     plain = build_logs_query(["*porn*"], 10, 50)
-    assert len(plain["query"]["bool"]["must"]) == 1
+    assert len(plain["query"]["bool"]["must"]) == 0
 
 
 def test_build_logs_query_caps_search_tokens():
@@ -119,8 +125,8 @@ def test_build_logs_query_caps_search_tokens():
     long_search = " ".join(f"tok{i}" for i in range(40))
     q = build_logs_query(["*porn*"], 10, 50, search=long_search)
     must = q["query"]["bool"]["must"]
-    assert len(must) == 2
-    search_qs = must[1]["query_string"]["query"]
+    assert len(must) == 1
+    search_qs = must[0]["query_string"]["query"]
     # Exactly 20 ANDed clauses; token 20+ dropped.
     assert search_qs.count("(url.keyword:*tok") == 20
     assert "(url.keyword:*tok39*" not in search_qs
@@ -247,6 +253,33 @@ def test_build_all_query_searches_domain_and_base_url():
     # No search term → range clause only (flagged path untouched elsewhere).
     plain = build_all_query(60, 500)
     assert len(plain["query"]["bool"]["must"]) == 1
+    # Server-side bound: ES times out before the 30s client timeout.
+    assert q["timeout"] == "25s"
+    assert q["track_total_hits"] is False
+
+
+def test_build_logs_query_is_scoring_free_and_bounded():
+    """Block-pattern clause is a filter (same docs, no scores); ES is bounded."""
+    from app.services.query_builder import QUERY_SOURCE_FIELDS
+
+    q = build_logs_query(["*porn*"], 10, 50, search="evil.example")
+    bool_q = q["query"]["bool"]
+    # Pattern query_string lives in filter (after the range clause).
+    assert bool_q["filter"][0]["range"]["@timestamp"]["gte"] == "now-10m"
+    assert "*porn*" in bool_q["filter"][1]["query_string"]["query"]
+    # must contains no block-pattern clause — only the search clause.
+    assert len(bool_q["must"]) == 1
+    assert "evil.example" in bool_q["must"][0]["query_string"]["query"]
+    # Bounded: ES-side timeout + no exact hit counting.
+    assert q["timeout"] == "25s"
+    assert q["track_total_hits"] is False
+    # Projection plumbing passes the requested fields through.
+    assert set(QUERY_SOURCE_FIELDS) >= {"url", "client_ip", "@timestamp"}
+
+
+def test_build_logs_query_projects_source_fields():
+    q = build_logs_query(["*porn*"], 10, 50, fields=["url"])
+    assert q["_source"] == ["url"]
 
 
 def test_build_client_session_query_shape():

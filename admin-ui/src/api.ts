@@ -278,6 +278,7 @@ export async function runQuery(
     excludeWhitelist?: boolean
     excludeBlacklist?: boolean
     viewMode?: "all" | "flagged"
+    signal?: AbortSignal
   },
 ): Promise<QueryResult> {
   const params = new URLSearchParams({ minutes: String(minutes) })
@@ -288,7 +289,7 @@ export async function runQuery(
   if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
   if (opts?.excludeBlacklist) params.set("exclude_blacklist", "true")
   if (opts?.viewMode && opts.viewMode !== "flagged") params.set("view_mode", opts.viewMode)
-  return request(`/query/run?${params}`)
+  return request(`/query/run?${params}`, opts?.signal ? { signal: opts.signal } : undefined)
 }
 
 /* ── Monitor logs (ES query + webhook audit trail) ───────────────── */

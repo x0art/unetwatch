@@ -14,6 +14,17 @@ import re
 _QUERY_STRING_SPECIAL = re.compile(r"([+\-!(){}[\]^\"~:\\\/&| ])")
 
 
+# Columns read by apply_filters / build_items / _build_timeline / _build_flow.
+# Projecting _source to these fields keeps long-window fetches small; extra
+# fields are harmless.
+QUERY_SOURCE_FIELDS = [
+    "url", "client_ip", "server_ip", "@timestamp", "action",
+    "duration_seconds", "domain", "base_url", "category", "http_method",
+    "http_status_code", "country_code", "bytes_downloaded", "bytes_uploaded",
+    "rule_info", "rule_name", "user_id", "matched_patterns", "user_agent",
+]
+
+
 def glob_to_regex(pattern: str) -> str:
     """Convert a wildcard pattern (``*``/``?``) into a safe literal-match regex.
 
@@ -97,9 +108,10 @@ def build_logs_query(
     query_string = " OR ".join(
         f"url : {escape_query_string(p)}" for p in block_patterns
     )
-    must: list[dict] = [
-        {"query_string": {"query": query_string, "analyze_wildcard": True}}
-    ]
+    # Scoring-free: the block-pattern clause is a filter (same doc set, no
+    # scores). Only the optional user search stays in must (possibly empty —
+    # ES accepts "must": []).
+    must: list[dict] = []
     terms = [t for t in re.split(r"\s+", search.strip()) if t] if search else []
     # Cap the number of ANDed wildcard clauses: each token becomes three
     # leading-wildcard subqueries (url/client_ip/server_ip), which are
@@ -123,15 +135,21 @@ def build_logs_query(
         )
     filters: list[dict] = []
     # minutes <= 0 is the "all time" sentinel — no time range filter at all.
+    # Order: range first, then pattern clause, then client_ip term.
     if minutes > 0:
         filters.append(
             {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
         )
+    filters.append(
+        {"query_string": {"query": query_string, "analyze_wildcard": True}}
+    )
     if client_ip:
         filters.append({"term": {"client_ip": client_ip}})
     result: dict = {
         "size": size,
         "query": {"bool": {"filter": filters, "must": must}},
+        "timeout": "25s",
+        "track_total_hits": False,
     }
     if fields is not None:
         result["_source"] = fields
@@ -184,6 +202,8 @@ def build_all_query(
         "query": {"bool": {"must": must, "filter": filters}},
         "size": size,
         "sort": [{"@timestamp": {"order": "desc"}}],
+        "timeout": "25s",
+        "track_total_hits": False,
     }
     if fields is not None:
         body["_source"] = fields
