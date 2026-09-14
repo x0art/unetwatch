@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CheckCircle2,
   CircleSlash,
+  Download,
   Eraser,
   Eye,
   FileJson,
@@ -11,12 +12,16 @@ import {
   SearchX,
   Send,
   Trash2,
+  Upload,
   XCircle,
 } from "lucide-react"
 import {
+  type BackupImportResult,
   type MonitorLog,
   bulkDeleteLogs,
   clearLogs,
+  exportBackup,
+  importBackup,
   listLogs,
   retryWebhook,
 } from "../api"
@@ -27,6 +32,7 @@ import {
   Dialog,
   EmptyState,
   PageHeader,
+  Panel,
   SearchInput,
   Select,
   Skeleton,
@@ -84,6 +90,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "started_at",
     header: "Time",
+    filterType: "datetime",
     accessor: (l) => l.started_at,
     cell: (l) => <TimestampCell value={l.started_at} />,
     width: "w-44",
@@ -92,6 +99,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "kind",
     header: "Type",
+    filterType: "enum",
     accessor: (l) => l.kind,
     defaultSortDir: "asc",
     cell: (l) => (
@@ -104,6 +112,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "minutes",
     header: "Window",
+    filterType: "number",
     accessor: (l) => l.minutes,
     cell: (l) => (
       <span className="font-mono tabular-nums text-xs text-muted-foreground">
@@ -116,6 +125,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "matches",
     header: "Hits",
+    filterType: "number",
     accessor: (l) => l.matches,
     cell: (l) => <span className="font-mono tabular-nums text-xs">{l.matches.toLocaleString()}</span>,
     align: "right",
@@ -124,6 +134,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "stored",
     header: "Stored",
+    filterType: "number",
     accessor: (l) => l.stored,
     cell: (l) => (
       <span className="font-mono tabular-nums text-xs text-muted-foreground">
@@ -136,6 +147,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "flagged",
     header: "Flagged URLs",
+    filterType: "number",
     accessor: (l) => (l.topUrls?.length ?? 0),
     cell: (l) => {
       const urls = l.topUrls ?? []
@@ -160,6 +172,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "webhook_status",
     header: "Webhook",
+    filterType: "enum",
     accessor: (l) => l.webhook_status,
     cell: (l) => <WebhookBadge log={l} />,
     enableSorting: true,
@@ -168,6 +181,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "duration_ms",
     header: "Duration",
+    filterType: "number",
     accessor: (l) => l.duration_ms,
     cell: (l) => <span className="font-mono tabular-nums text-xs">{formatDuration(l.duration_ms)}</span>,
     align: "right",
@@ -176,6 +190,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "error",
     header: "Outcome",
+    filterType: "text",
     accessor: (l) => l.error,
     cell: (l) =>
       l.error ? (
@@ -285,6 +300,154 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
         </span>
       )}
     </span>
+  )
+}
+
+/* ── Backup & restore (System area panel) ─────────────────────── */
+
+const BACKUP_SECTIONS = ["patterns", "whitelist", "findings", "blacklist", "tracked_urls", "redirect_edges"] as const
+
+function sectionTotal(r: BackupImportResult): number {
+  return BACKUP_SECTIONS.reduce(
+    (n, s) => n + (r.added[s] ?? 0) + (r.skipped[s] ?? 0),
+    0,
+  )
+}
+
+function BackupPanel() {
+  const { toast } = useToast()
+  const [exporting, setExporting] = useState(false)
+  const [preview, setPreview] = useState<BackupImportResult | null>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [working, setWorking] = useState(false)
+  const [confirmApply, setConfirmApply] = useState(false)
+
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await exportBackup()
+      toast({ title: "Backup exported", variant: "success" })
+    } catch (e) {
+      toast({ title: "Export failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const handlePick = async (file: File | undefined) => {
+    if (!file) return
+    setPreview(null)
+    setPendingFile(file)
+    setWorking(true)
+    try {
+      const res = await importBackup(file, true)
+      setPreview(res)
+    } catch (e) {
+      toast({ title: "Restore preview failed", description: (e as Error).message, variant: "error" })
+      setPendingFile(null)
+    } finally {
+      setWorking(false)
+      // Reset so re-picking the same file fires change again (retry path).
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  const handleApply = async () => {
+    if (!pendingFile) return
+    setConfirmApply(false)
+    setWorking(true)
+    try {
+      const res = await importBackup(pendingFile, false)
+      setPreview(res)
+      setPendingFile(null)
+      toast({ title: `Restore applied — ${sectionTotal(res)} row${sectionTotal(res) === 1 ? "" : "s"} processed`, variant: "success" })
+    } catch (e) {
+      toast({ title: "Restore failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  return (
+    <>
+      <Panel
+        title="Backup & restore"
+        description="Operator data only — no credentials, no monitor logs"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || working}>
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting…" : "Export backup"}
+          </Button>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/50 focus-within:outline-none focus-within:ring-2 focus-within:ring-ring">
+            <Upload className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            Choose backup file…
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              disabled={working}
+              onChange={(e) => void handlePick(e.target.files?.[0])}
+              aria-label="Choose backup file"
+            />
+          </label>
+          {working && <span role="status" className="text-xs text-muted-foreground">Working…</span>}
+          {pendingFile && !working && (
+            <span className="max-w-[280px] truncate font-mono text-[11px] text-muted-foreground" title={pendingFile.name}>
+              {pendingFile.name}
+            </span>
+          )}
+        </div>
+
+        {preview && (
+          <div className="mt-3 overflow-hidden rounded-md border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th scope="col" className="px-4 py-2 text-left font-medium text-muted-foreground">Section</th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium tabular-nums text-muted-foreground">
+                    {preview.dry_run ? "Would add" : "Added"}
+                  </th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium tabular-nums text-muted-foreground">Skipped</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {BACKUP_SECTIONS.map((s) => (
+                  <tr key={s} className="hover:bg-muted/40">
+                    <td className="px-4 py-2 font-mono text-[11px]">{s}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">{(preview.added[s] ?? 0).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                      {(preview.skipped[s] ?? 0).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {preview.dry_run && pendingFile && (
+              <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-4 py-2.5">
+                <span className="flex-1 text-xs text-muted-foreground">
+                  Dry run — nothing was written.
+                </span>
+                <Button size="sm" onClick={() => setConfirmApply(true)} disabled={working}>
+                  Apply restore
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
+
+      <ConfirmDialog
+        open={confirmApply}
+        title="Apply restore?"
+        description="New rows from the backup file will be added. Nothing is ever deleted."
+        confirmLabel="Apply restore"
+        onConfirm={handleApply}
+        onCancel={() => setConfirmApply(false)}
+      />
+    </>
   )
 }
 
@@ -500,6 +663,8 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           }}
         />
       )}
+
+      <BackupPanel />
 
       <ConfirmDialog
         open={confirmBulkDelete}

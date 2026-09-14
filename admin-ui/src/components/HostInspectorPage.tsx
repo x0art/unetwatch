@@ -707,6 +707,7 @@ export function HostInspectorPage({
       {
         id: "timestamp",
         header: "Timestamp",
+        filterType: "datetime",
         accessor: (r) => r.timestamp,
         cell: (r) => <TimestampCell value={r.timestamp} />,
         width: "w-48",
@@ -715,6 +716,7 @@ export function HostInspectorPage({
       {
         id: "url",
         header: "Full URL / dest domain",
+        filterType: "text",
         accessor: (r) => r.url,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -736,6 +738,7 @@ export function HostInspectorPage({
       {
         id: "dest_ip",
         header: "Dest IP",
+        filterType: "text",
         accessor: (r) => getDestIp(r),
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -755,6 +758,7 @@ export function HostInspectorPage({
       {
         id: "action",
         header: "Action",
+        filterType: "enum",
         accessor: (r) => r.action,
         cell: (r) => <Badge variant={actionVariant(r.action ?? "")}>{r.action || "—"}</Badge>,
         width: "w-24",
@@ -762,6 +766,7 @@ export function HostInspectorPage({
       {
         id: "duration",
         header: "Duration",
+        filterType: "number",
         accessor: (r) => getDurationMs(r),
         cell: (r) => {
           const ms = getDurationMs(r)
@@ -773,6 +778,7 @@ export function HostInspectorPage({
       {
         id: "pattern",
         header: "Triggered pattern",
+        filterType: "text",
         accessor: (r) => getMatchedRule(r),
         cell: (r) => (
           <span className="block max-w-[200px] truncate font-mono text-xs" title={getMatchedRule(r)}>
@@ -784,6 +790,7 @@ export function HostInspectorPage({
       {
         id: "category",
         header: "Category",
+        filterType: "enum",
         accessor: (r) => r.category,
         cell: (r) => <span className="text-xs text-muted-foreground">{r.category || "—"}</span>,
         width: "w-24",
@@ -791,6 +798,7 @@ export function HostInspectorPage({
       {
         id: "method",
         header: "Method",
+        filterType: "enum",
         accessor: (r) => r.http_method,
         cell: (r) => <span className="text-xs">{r.http_method || "—"}</span>,
         width: "w-20",
@@ -798,6 +806,7 @@ export function HostInspectorPage({
       {
         id: "status",
         header: "Status",
+        filterType: "number",
         accessor: (r) => r.http_status_code,
         cell: (r) => <span className="font-mono text-xs tabular-nums">{r.http_status_code ?? "—"}</span>,
         width: "w-20",
@@ -806,6 +815,7 @@ export function HostInspectorPage({
       {
         id: "country",
         header: "Country",
+        filterType: "enum",
         accessor: (r) => r.country_code,
         cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
         width: "w-20",
@@ -813,6 +823,7 @@ export function HostInspectorPage({
       {
         id: "bytes",
         header: "↓/↑ Bytes",
+        filterType: "number",
         accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
         cell: (r) => {
           const dn = Number(r.bytes_downloaded) || 0
@@ -830,6 +841,7 @@ export function HostInspectorPage({
       {
         id: "rule",
         header: "Rule",
+        filterType: "text",
         accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
         cell: (r) => {
           const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
@@ -843,31 +855,31 @@ export function HostInspectorPage({
 
   /* ── Findings branch columns (ported from Client Report) ── */
   const domainColumns = useMemo<DataTableColumn<{ domain: string; count: number; volume: number; pct: number }>[]>(() => [
-    { id: "domain", header: "Domain", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
-    { id: "count", header: "Requests", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
-    { id: "volume", header: "Volume", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
-    { id: "pct", header: "% total", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
+    { id: "domain", header: "Domain", filterType: "text", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
+    { id: "count", header: "Requests", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+    { id: "volume", header: "Volume", filterType: "number", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
+    { id: "pct", header: "% total", filterType: "number", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
   ], [])
 
   const patternColumns = useMemo<DataTableColumn<{ pattern: string; hits: number }>[]>(() => [
-    { id: "pattern", header: "Pattern", accessor: (r) => r.pattern, cell: (r) => <span className="block max-w-[280px] truncate font-mono text-xs" title={r.pattern}>{r.pattern}</span> },
-    { id: "hits", header: "Hits", accessor: (r) => r.hits, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.hits.toLocaleString()}</span>, width: "w-24" },
+    { id: "pattern", header: "Pattern", filterType: "text", accessor: (r) => r.pattern, cell: (r) => <span className="block max-w-[280px] truncate font-mono text-xs" title={r.pattern}>{r.pattern}</span> },
+    { id: "hits", header: "Hits", filterType: "number", accessor: (r) => r.hits, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.hits.toLocaleString()}</span>, width: "w-24" },
   ], [])
 
   const urlColumns = useMemo<DataTableColumn<{ url: string; base_url: string; count: number; last_seen: string }>[]>(() => [
-    { id: "url", header: "URL", accessor: (r) => r.url, cell: (r) => (
+    { id: "url", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => (
       <span className="flex items-center gap-1.5">
         <span className="block max-w-[560px] truncate font-mono text-xs" title={r.url}>{r.url}</span>
         <button type="button" onClick={() => openUrlInInvestigation(r.url)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground" aria-label="Open in URL Investigation"><Search className="h-3 w-3" /></button>
       </span>
     )},
-    { id: "count", header: "Hits", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+    { id: "count", header: "Hits", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
   ], [openUrlInInvestigation])
 
   const rawColumns = useMemo<DataTableColumn<Finding>[]>(() => [
-    { id: "log_timestamp", header: "Timestamp", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
-    { id: "url", header: "URL", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
-    { id: "base_url", header: "Domain", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
+    { id: "log_timestamp", header: "Timestamp", filterType: "datetime", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
+    { id: "url", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
+    { id: "base_url", header: "Domain", filterType: "text", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
     { id: "pattern", header: "Pattern", enableSorting: false, accessor: (r) => r.matched_patterns, cell: (r) => {
       let pats: string[] = []
       try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch {}
@@ -884,7 +896,7 @@ export function HostInspectorPage({
         </span>
       )
     } },
-    { id: "volume", header: "Volume", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
+    { id: "volume", header: "Volume", filterType: "number", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
       const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
       return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><Badge variant={hasBytes ? "success" : "secondary"}>{hasBytes ? "Real" : "Estimated"}</Badge></span>
     }, width: "w-32" },

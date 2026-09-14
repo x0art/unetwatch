@@ -260,6 +260,7 @@ export function AnalyticsPage({
       {
         id: "domain",
         header: "Domain",
+        filterType: "text",
         accessor: (r) => r.domain,
         cell: (r) => (
           <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>
@@ -270,6 +271,7 @@ export function AnalyticsPage({
       {
         id: "count",
         header: "Requests",
+        filterType: "number",
         accessor: (r) => r.count,
         align: "right",
         cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>,
@@ -278,6 +280,7 @@ export function AnalyticsPage({
       {
         id: "volume",
         header: "Volume",
+        filterType: "number",
         accessor: (r) => r.volume,
         align: "right",
         cell: (r) => (
@@ -290,6 +293,7 @@ export function AnalyticsPage({
       {
         id: "pct",
         header: "% total",
+        filterType: "number",
         accessor: (r) => r.pct,
         align: "right",
         cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>,
@@ -304,6 +308,7 @@ export function AnalyticsPage({
       {
         id: "client_ip",
         header: "Client IP",
+        filterType: "text",
         accessor: (r) => r.client_ip,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -325,6 +330,7 @@ export function AnalyticsPage({
       {
         id: "count",
         header: "Requests",
+        filterType: "number",
         accessor: (r) => r.count,
         align: "right",
         cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>,
@@ -333,6 +339,7 @@ export function AnalyticsPage({
       {
         id: "last_seen",
         header: "Last seen",
+        filterType: "datetime",
         accessor: (r) => r.last_seen,
         cell: (r) => <TimestampCell value={r.last_seen} />,
       },
@@ -345,6 +352,7 @@ export function AnalyticsPage({
       {
         id: "log_timestamp",
         header: "Timestamp",
+        filterType: "datetime",
         accessor: (r) => r.log_timestamp,
         cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.log_timestamp)}</span>,
         width: "w-44",
@@ -353,6 +361,7 @@ export function AnalyticsPage({
       {
         id: "client_ip",
         header: "Client IP",
+        filterType: "text",
         accessor: (r) => r.client_ip,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -372,6 +381,7 @@ export function AnalyticsPage({
       {
         id: "url",
         header: "URL",
+        filterType: "text",
         accessor: (r) => r.url,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -393,6 +403,7 @@ export function AnalyticsPage({
       {
         id: "base_url",
         header: "Domain",
+        filterType: "text",
         accessor: (r) => r.base_url,
         cell: (r) => (
           <span className="flex items-center gap-1.5">
@@ -412,6 +423,7 @@ export function AnalyticsPage({
       {
         id: "action",
         header: "Action",
+        filterType: "enum",
         accessor: (r) => r.action,
         cell: (r) => <Badge variant={r.action === "DENY" ? "destructive" : r.action === "FLAG" ? "warning" : "success"}>{r.action || "ALLOW"}</Badge>,
         width: "w-24",
@@ -441,6 +453,7 @@ export function AnalyticsPage({
       {
         id: "volume",
         header: "Volume",
+        filterType: "number",
         accessor: (r) => {
           const dn = Number(r.bytes_downloaded) || 0
           const up = Number(r.bytes_uploaded) || 0
@@ -470,6 +483,7 @@ export function AnalyticsPage({
       {
         id: "duration",
         header: "Duration",
+        filterType: "number",
         accessor: (r) => r.duration_seconds,
         align: "right",
         cell: (r) =>

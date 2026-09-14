@@ -53,6 +53,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
     id: "id",
     header: "ID",
+    filterType: "number",
     accessor: (p) => p.id,
     cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
     width: "w-14",
@@ -60,6 +61,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
     id: "pattern",
     header: "Pattern",
+    filterType: "text",
     accessor: (p) => p.pattern,
     defaultSortDir: "asc",
     cell: (p) => (
@@ -71,6 +73,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
     id: "pattern_type",
     header: "Type",
+    filterType: "enum",
     accessor: (p) => p.pattern_type,
     defaultSortDir: "asc",
     cell: (p) => (
@@ -83,6 +86,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
     id: "created_at",
     header: "Created",
+    filterType: "datetime",
     accessor: (p) => p.created_at,
     cell: (p) => (
       <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">

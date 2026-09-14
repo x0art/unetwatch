@@ -152,6 +152,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "timestamp",
     header: "Timestamp",
+    filterType: "datetime",
     accessor: (d) => d.timestamp,
     cell: (d) => <TimestampCell value={d.timestamp} />,
     className: "whitespace-nowrap",
@@ -161,6 +162,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "client_ip",
     header: "Client IP",
+    filterType: "text",
     accessor: (d) => d.client_ip,
     defaultSortDir: "asc",
     cell: (d) => (
@@ -174,6 +176,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "server_ip",
     header: "Server IP",
+    filterType: "text",
     accessor: (d) => d.server_ip,
     defaultSortDir: "asc",
     cell: (d) => (
@@ -186,6 +189,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "url",
     header: "URL",
+    filterType: "text",
     accessor: (d) => d.url,
     defaultSortDir: "asc",
     cell: (d) => (
@@ -201,6 +205,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "base_url",
     header: "Base URL",
+    filterType: "text",
     accessor: (d) => d.base_url,
     defaultSortDir: "asc",
     cell: (d) => (
@@ -216,6 +221,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "bytes_downloaded",
     header: "↓ Bytes",
+    filterType: "number",
     accessor: (d) => d.bytes_downloaded,
     align: "right",
     cell: (d) => {
@@ -231,6 +237,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "bytes_uploaded",
     header: "↑ Bytes",
+    filterType: "number",
     accessor: (d) => d.bytes_uploaded,
     align: "right",
     cell: (d) => {
@@ -246,6 +253,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "duration",
     header: "Duration",
+    filterType: "number",
     accessor: (d) => d.duration_seconds,
     cell: (d) =>
       d.duration_seconds === null || d.duration_seconds === undefined ? (
@@ -259,6 +267,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "action",
     header: "Action",
+    filterType: "enum",
     accessor: (d) => d.action,
     cell: (d) => (
       <Badge variant={d.action === "ALLOW" ? "success" : "warning"}>{d.action}</Badge>

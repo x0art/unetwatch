@@ -42,9 +42,11 @@ class Settings(BaseSettings):
     # Relative to the working directory: resolves to ./data locally and to
     # /app/data in the container (the volume mounted in docker-compose.yml).
     blacklist_dir: str = "./data"
-    # Upstream blacklist: GitHub raw gist URL (one host/IPv4 per line,
-    # `#`/`;` comments). Empty = disabled.
-    upstream_blacklist_url: str = ""
+    # Upstream blacklists: two independent feeds — domains/hosts and IPv4s
+    # (one entry per line, `#`/`;` comments). Each empty value = that
+    # feed disabled.
+    upstream_blacklist_urls: str = ""
+    upstream_blacklist_ips: str = ""
     api_key: str = ""
     admin_user: str = "admin"
     admin_pass: str = "changeme"

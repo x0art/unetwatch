@@ -79,6 +79,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "id",
     header: "ID",
+    filterType: "number",
     accessor: (f) => f.id,
     cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
     width: "w-14",
@@ -86,6 +87,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "client_ip",
     header: "Client IP",
+    filterType: "text",
     accessor: (f) => f.client_ip,
     defaultSortDir: "asc",
     cell: (f) => (
@@ -107,6 +109,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "server_ip",
     header: "Server IP",
+    filterType: "text",
     accessor: (f) => f.server_ip,
     defaultSortDir: "asc",
     cell: (f) => (
@@ -119,6 +122,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "url",
     header: "URL",
+    filterType: "text",
     accessor: (f) => f.url,
     defaultSortDir: "asc",
     cell: (f) => (
@@ -151,6 +155,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "base_url",
     header: "Base URL",
+    filterType: "text",
     accessor: (f) => f.base_url,
     defaultSortDir: "asc",
     cell: (f) => (
@@ -199,6 +204,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
     id: "log_timestamp",
     header: "Detected",
+    filterType: "datetime",
     accessor: (f) => f.log_timestamp,
     cell: (f) => <TimestampCell value={f.log_timestamp} />,
     defaultSortDir: "desc",

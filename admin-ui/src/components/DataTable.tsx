@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "framer-motion"
 import { ArrowDown, ArrowUp, ArrowUpDown, Filter, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/utils"
@@ -34,6 +35,44 @@ import { EASE, Stagger, StaggerItem } from "./motion"
 export type SortDir = "asc" | "desc"
 export type SortKey = string
 
+/** Per-column filter control type. Defaults to `'enum'` (exact-match dropdown). */
+export type FilterType = "enum" | "text" | "datetime" | "number"
+
+/** Range filter for `datetime` columns: ISO-ish from/to bounds (open-ended when empty). */
+export interface DatetimeFilter {
+  from: string
+  to: string
+}
+
+/** Range filter for `number` columns: min/max bounds (open-ended when empty). */
+export interface NumberFilter {
+  min: string
+  max: string
+}
+
+/** A column filter value: scalar for `enum`/`text`, range object for `datetime`/`number`. */
+export type ColumnFilterValue = string | DatetimeFilter | NumberFilter
+
+export function isActiveFilter(value: ColumnFilterValue | undefined): boolean {
+  if (value === undefined) return false
+  if (typeof value === "string") return value.trim() !== ""
+  return Object.values(value).some((v) => v.trim() !== "")
+}
+
+function isDatetimeFilter(value: ColumnFilterValue): value is DatetimeFilter {
+  return typeof value === "object" && "from" in value
+}
+
+function isNumberFilter(value: ColumnFilterValue): value is NumberFilter {
+  return typeof value === "object" && "min" in value
+}
+
+function emptyFilterFor(type: FilterType): ColumnFilterValue {
+  if (type === "datetime") return { from: "", to: "" }
+  if (type === "number") return { min: "", max: "" }
+  return ""
+}
+
 export interface DataTableColumn<T> {
   /** Unique key; used for sorting. */
   id: string
@@ -46,6 +85,8 @@ export interface DataTableColumn<T> {
   enableSorting?: boolean
   /** Hide the per-column filter affordance on this column (default: on). */
   enableColumnFilter?: boolean
+  /** Type-matched header filter control (default `'enum'`: exact-match dropdown). */
+  filterType?: FilterType
   /** Default direction when this column becomes the active sort. */
   defaultSortDir?: SortDir
   align?: "left" | "center" | "right"
@@ -94,18 +135,10 @@ interface DataTableProps<T> {
   defaultSortDir?: SortDir
   /** Per-column filter state (controlled from the parent); when absent the
    * component owns its own column filters internally. */
-  columnFilters?: Record<string, string>
-  onColumnFiltersChange?: (filters: Record<string, string>) => void
-  /** Hide the entire per-column filter row across the table. */
+  columnFilters?: Record<string, ColumnFilterValue>
+  onColumnFiltersChange?: (filters: Record<string, ColumnFilterValue>) => void
+  /** Hide every per-column header filter across the table. */
   enableFiltering?: boolean
-  /**
-   * The per-column filter control. `combobox` (default) renders a compact
-   * dropdown of the distinct accessor values over the current `data`, exact-matching
-   * the selected value. `text` keeps a substring input. The filter row renders
-   * on every table with at least one filterable column (pagination not required);
-   * only the page-0 reset on filter change needs pagination.
-   */
-  filterControl?: "combobox" | "text"
   onRowClick?: (row: T) => void
   /* Optional pagination slot rendered below the table. */
   page?: number
@@ -131,6 +164,218 @@ function compareValues(a: unknown, b: unknown): number {
   if (b === undefined || b === null || b === "") return -1
   if (typeof a === "number" && typeof b === "number") return a - b
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
+}
+
+/**
+ * HeaderFilter — popover filter anchored in the `th`, with the type-matched
+ * control + Clear/Apply. Draft state lives locally until Apply commits it via
+ * `onApply`, so typing never refilters mid-keystroke.
+ */
+function HeaderFilter<T>({
+  col,
+  value,
+  onApply,
+  options,
+}: {
+  col: DataTableColumn<T>
+  value: ColumnFilterValue | undefined
+  onApply: (value: ColumnFilterValue) => void
+  options: { value: string; label: string }[]
+}) {
+  const type = col.filterType ?? "enum"
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<ColumnFilterValue>(value ?? emptyFilterFor(type))
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // Portal the popover to document.body — the table wrapper is
+  // overflow-x-auto, which forces overflow-y to auto and would clip an
+  // absolutely-positioned panel inside the th on wide/scrolled tables.
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null)
+      return
+    }
+    const place = () => {
+      const r = triggerRef.current?.getBoundingClientRect()
+      if (!r) return
+      // Clamp horizontally so right-edge columns never run off-viewport
+      // (panel is w-56 = 224px).
+      setPanelPos({
+        top: r.bottom + window.scrollY + 4,
+        left: Math.max(8, Math.min(r.left + window.scrollX, window.innerWidth - 232)),
+      })
+    }
+    place()
+    window.addEventListener("scroll", place, true)
+    window.addEventListener("resize", place)
+    return () => {
+      window.removeEventListener("scroll", place, true)
+      window.removeEventListener("resize", place)
+    }
+  }, [open ])
+
+  // Resync the draft when the committed filter changes from outside
+  // (Clear from the trigger state, parent-controlled resets).
+  const committedKey = JSON.stringify(value ?? null)
+  useEffect(() => {
+    setDraft(value ?? emptyFilterFor(type))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [committedKey])
+
+  // Dismiss on outside click / Escape.
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: PointerEvent) => {
+      const t = e.target as Node
+      if (panelRef.current?.contains(t) || triggerRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointer)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("pointerdown", onPointer)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open ])
+
+  const active = isActiveFilter(value)
+  const label = String(col.header)
+  const inputClass =
+    "h-8 w-full rounded border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+
+  return (
+    <span className="relative inline-flex">
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`Filter by ${label}`}
+        aria-expanded={open}
+        aria-pressed={active}
+        title={`Filter by ${label}`}
+        className={cn(
+          "inline-flex h-6 w-6 items-center justify-center rounded border border-transparent transition-colors hover:border-border hover:bg-muted",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "text-primary" : "text-muted-foreground/60 hover:text-muted-foreground",
+          open && "border-border bg-muted",
+        )}
+      >
+        <Filter className={cn("h-3 w-3", active && "fill-current")} aria-hidden="true" />
+        {active && (
+          <span
+            className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
+            aria-hidden="true"
+          />
+        )}
+      </button>
+      {open && panelPos && createPortal(
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-label={`Filter by ${label}`}
+          style={{ top: panelPos.top, left: panelPos.left }}
+          className="fixed z-50 mt-1 w-56 rounded-md border border-border bg-card p-3 text-left shadow-md"
+        >
+          {type === "enum" && (
+            <Select
+              value={typeof draft === "string" ? draft : ""}
+              onChange={(v) => setDraft(v)}
+              options={[{ value: "", label: "All" }, ...options]}
+              placeholder="All"
+              size="sm"
+              aria-label={`Filter by ${label}`}
+              className="w-full"
+            />
+          )}
+          {type === "text" && (
+            <input
+              type="search"
+              value={typeof draft === "string" ? draft : ""}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Filter"
+              aria-label={`Filter by ${label}`}
+              className={inputClass}
+            />
+          )}
+          {type === "datetime" && (
+            <div className="space-y-2">
+              <label className="mono-label block">
+                From
+                <input
+                  type="datetime-local"
+                  value={isDatetimeFilter(draft) ? draft.from : ""}
+                  onChange={(e) =>
+                    setDraft({ from: e.target.value, to: isDatetimeFilter(draft) ? draft.to : "" })
+                  }
+                  aria-label={`Filter by ${label}, from`}
+                  className={cn(inputClass, "mt-1")}
+                />
+              </label>
+              <label className="mono-label block">
+                To
+                <input
+                  type="datetime-local"
+                  value={isDatetimeFilter(draft) ? draft.to : ""}
+                  onChange={(e) =>
+                    setDraft({ to: e.target.value, from: isDatetimeFilter(draft) ? draft.from : "" })
+                  }
+                  aria-label={`Filter by ${label}, to`}
+                  className={cn(inputClass, "mt-1")}
+                />
+              </label>
+            </div>
+          )}
+          {type === "number" && (
+            <div className="flex items-center gap-2">
+              <label className="mono-label flex-1">
+                Min
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={isNumberFilter(draft) ? draft.min : ""}
+                  onChange={(e) =>
+                    setDraft({ min: e.target.value, max: isNumberFilter(draft) ? draft.max : "" })
+                  }
+                  aria-label={`Filter by ${label}, minimum`}
+                  className={cn(inputClass, "mt-1")}
+                />
+              </label>
+              <label className="mono-label flex-1">
+                Max
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={isNumberFilter(draft) ? draft.max : ""}
+                  onChange={(e) =>
+                    setDraft({ max: e.target.value, min: isNumberFilter(draft) ? draft.min : "" })
+                  }
+                  aria-label={`Filter by ${label}, maximum`}
+                  className={cn(inputClass, "mt-1")}
+                />
+              </label>
+            </div>
+          )}
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => { setDraft(emptyFilterFor(type)); onApply(emptyFilterFor(type)); setOpen(false) }}>
+              Clear
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => { onApply(draft); setOpen(false) }}
+            >
+              Apply
+            </Button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </span>
+  )
 }
 
 function Checkbox({
@@ -180,7 +425,6 @@ export function DataTable<T>({
   columnFilters: controlledFilters,
   onColumnFiltersChange,
   enableFiltering = true,
-  filterControl = "combobox",
   onRowClick,
   page,
   pageSize,
@@ -201,11 +445,11 @@ export function DataTable<T>({
     ? { key: sortBy ?? null, dir: sortDir ?? "asc" }
     : internalSort
   const filtersControlled = controlledFilters !== undefined
-  const [internalFilters, setInternalFilters] = useState<Record<string, string>>({})
+  const [internalFilters, setInternalFilters] = useState<Record<string, ColumnFilterValue>>({})
   const filters = filtersControlled ? controlledFilters : internalFilters
-  const setFilter = (id: string, value: string) => {
+  const setFilter = (id: string, value: ColumnFilterValue) => {
     const next = { ...filters, [id]: value }
-    if (!value) delete next[id]
+    if (!isActiveFilter(value)) delete next[id]
     if (filtersControlled) onColumnFiltersChange?.(next)
     else setInternalFilters(next)
   }
@@ -215,9 +459,9 @@ export function DataTable<T>({
   // (uncontrolled or not) can't fire the reset spuriously.
   const hasPagination = onPageChange !== undefined && page !== undefined
   const filterKey = Object.keys(filters)
-    .filter((k) => filters[k] && filters[k].trim())
+    .filter((k) => isActiveFilter(filters[k]))
     .sort()
-    .map((k) => `${k}=${filters[k].trim().toLowerCase()}`)
+    .map((k) => `${k}=${JSON.stringify(filters[k]).toLowerCase()}`)
     .join("|")
   useEffect(() => {
     if (!hasPagination || !page || !filterKey) return
@@ -289,21 +533,59 @@ export function DataTable<T>({
   )
 
   // ── Per-column filtering (runs before sorting) ─────────────────────
-  // Combobox mode (the default) matches the exact accessor value the user
-  // picked. Text mode keeps case-insensitive substring matching.
-  // NOTE: filterability is intentionally coupled to sortability — a column
-  // opts out of both with enableSorting={false} (or enableColumnFilter).
-  const filterMatches = (row: T, filters: Record<string, string>): boolean => {
+  // The control is picked per column by `filterType` (default `enum`):
+  // enum = exact match, text = case-insensitive substring, datetime/number =
+  // open-ended range match. NOTE: filterability is intentionally coupled to
+  // sortability — a column opts out of both with enableSorting={false}
+  // (or enableColumnFilter).
+  const filterMatches = (row: T, filters: Record<string, ColumnFilterValue>): boolean => {
     const ids = Object.keys(filters)
     if (ids.length === 0) return true
     return ids.every((id) => {
-      const want = filters[id].trim().toLowerCase()
-      if (!want) return true
+      const want = filters[id]
+      if (!isActiveFilter(want)) return true
       const col = columnsRef.current.find((c) => c.id === id)
       if (!col) return true
+      const type = col.filterType ?? "enum"
       const val = col.accessor ? col.accessor(row) : renderCellValue(col, row)
-      if (filterControl === "combobox") return String(val ?? "").toLowerCase() === want
-      return String(val ?? "").toLowerCase().includes(want)
+      if (typeof want === "string") {
+        const needle = want.trim().toLowerCase()
+        if (!needle) return true
+        const hay = String(val ?? "").toLowerCase()
+        if (type === "text") return hay.includes(needle)
+        return hay === needle
+      }
+      if (isDatetimeFilter(want)) {
+        const ts = Date.parse(String(val ?? ""))
+        if (Number.isNaN(ts)) return false
+        const fromEmpty = want.from.trim() === ""
+        const toEmpty = want.to.trim() === ""
+        if (!fromEmpty) {
+          const fromMs = Date.parse(want.from)
+          if (Number.isNaN(fromMs) || ts < fromMs) return false
+        }
+        if (!toEmpty) {
+          const toMs = Date.parse(want.to)
+          if (Number.isNaN(toMs) || ts > toMs) return false
+        }
+        return true
+      }
+      if (isNumberFilter(want)) {
+        const n = Number(val)
+        if (val === null || val === undefined || val === "" || Number.isNaN(n)) return false
+        const minEmpty = want.min.trim() === ""
+        const maxEmpty = want.max.trim() === ""
+        if (!minEmpty) {
+          const min = Number(want.min)
+          if (Number.isNaN(min) || n < min) return false
+        }
+        if (!maxEmpty) {
+          const max = Number(want.max)
+          if (Number.isNaN(max) || n > max) return false
+        }
+        return true
+      }
+      return true
     })
   }
 
@@ -312,16 +594,16 @@ export function DataTable<T>({
     if (!f || Object.keys(f ?? {}).length === 0) return data
     return data.filter((r) => filterMatches(r, f ?? {}))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, controlledFilters, internalFilters, filtersControlled, filterControl])
+  }, [data, controlledFilters, internalFilters, filtersControlled, columns])
 
-  // Distinct values per filterable column over the current `data`, for the
-  // combobox options. Built once per data/filter-column set; values are
+  // Distinct values per enum-filterable column over the current `data`, for
+  // the dropdown options. Built once per data/filter-column set; values are
   // de-duplicated string forms of the accessor result.
   const filterOptions = useMemo(() => {
     const map = new Map<string, { value: string; label: string }[]>()
-    if (filterControl !== "combobox") return map
     for (const col of columnsRef.current) {
       if (col.enableSorting === false || col.srOnly || col.enableColumnFilter === false) continue
+      if ((col.filterType ?? "enum") !== "enum") continue
       const seen = new Map<string, string>()
       for (const row of data) {
         const v = col.accessor ? col.accessor(row) : renderCellValue(col, row)
@@ -336,7 +618,7 @@ export function DataTable<T>({
     }
     return map
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, columns, filterControl])
+  }, [data, columns])
 
   const sortedData = useMemo(() => {
     const base = filteredData
@@ -432,7 +714,6 @@ export function DataTable<T>({
                 const sortable = col.enableSorting !== false && !col.srOnly
                 const active = sortable && sortState.key === col.id
                 const filterable = sortable && enableFiltering && col.enableColumnFilter !== false
-                const filterActive = filterable && !!filters[col.id]
                 return (
                   <th
                     key={col.id}
@@ -447,31 +728,49 @@ export function DataTable<T>({
                     }
                   >
                     {sortable ? (
-                      <button
-                        type="button"
-                        onClick={() => handleSort(col)}
+                      <span
                         className={cn(
-                          "inline-flex cursor-pointer items-center gap-1 mono-label transition-colors hover:text-foreground",
-                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background rounded-sm",
+                          "inline-flex items-center gap-1",
                           col.align === "right" && "flex-row-reverse",
                           col.align === "center" && "justify-center",
                         )}
-                        aria-label={`Sort by ${String(col.header)}${active ? `, currently ${sortState.dir}ending` : ""}`}
                       >
-                        {col.header}
-                        {filterActive && (
-                          <Filter className="h-3 w-3 text-primary" aria-hidden="true" />
-                        )}
-                        {active ? (
-                          sortState.dir === "asc" ? (
-                            <ArrowUp className="h-3 w-3 opacity-100" aria-hidden="true" />
+                        <button
+                          type="button"
+                          onClick={() => handleSort(col)}
+                          className={cn(
+                            "inline-flex cursor-pointer items-center gap-1 mono-label transition-colors hover:text-foreground",
+                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background rounded-sm",
+                          )}
+                          aria-label={`Sort by ${String(col.header)}${active ? `, currently ${sortState.dir}ending` : ""}`}
+                        >
+                          {col.header}
+                          {active ? (
+                            sortState.dir === "asc" ? (
+                              <ArrowUp className="h-3 w-3 opacity-100" aria-hidden="true" />
+                            ) : (
+                              <ArrowDown className="h-3 w-3 opacity-100" aria-hidden="true" />
+                            )
                           ) : (
-                            <ArrowDown className="h-3 w-3 opacity-100" aria-hidden="true" />
-                          )
-                        ) : (
-                          <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />
+                            <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />
+                          )}
+                        </button>
+                        {filterable && (
+                          <HeaderFilter
+                            col={col}
+                            value={filters[col.id]}
+                            onApply={(v) => setFilter(col.id, v)}
+                            options={(() => {
+                              const opts = filterOptions.get(col.id) ?? []
+                              const cur = filters[col.id]
+                              const curStr = typeof cur === "string" ? cur : ""
+                              return curStr && !opts.some((o) => o.value === curStr)
+                                ? [...opts, { value: curStr, label: curStr }]
+                                : opts
+                            })()}
+                          />
                         )}
-                      </button>
+                      </span>
                     ) : (
                       <span
                         className={cn(
@@ -487,82 +786,6 @@ export function DataTable<T>({
                 )
               })}
             </tr>
-            {/* Per-column filter row - on every table with a filterable column.
-                Combobox of distinct accessor values in combobox mode, or a
-                sans substring input in text mode. Non-paginated tables filter
-                their current `data`; options derive from the visible rows. */}
-            {enableFiltering &&
-              columns.some(
-                (col) =>
-                  col.enableSorting !== false &&
-                  !col.srOnly &&
-                  col.enableColumnFilter !== false,
-              ) && (
-              <tr className="border-b border-border bg-muted/40">
-                {selectable && <td className="px-4 py-1.5" />}
-                {columns.map((col) => {
-                  const filterable = col.enableSorting !== false && !col.srOnly && col.enableColumnFilter !== false
-                  const val = filters[col.id] ?? ""
-                  return (
-                    <td key={col.id} className={cn("px-4 py-1.5", alignClass(col.align))}>
-                      {filterable ? (
-                        filterControl === "combobox" ? (
-                          <div className="flex items-center gap-1">
-                            <Filter className="h-3 w-3 shrink-0 opacity-40" aria-hidden="true" />
-                            {(() => {
-                              const opts = filterOptions.get(col.id) ?? []
-                              const patched = val && !opts.some((o) => o.value === val)
-                                ? [...opts, { value: val, label: val }]
-                                : opts
-                              return (
-                                <Select
-                                  value={val}
-                                  onChange={(v) => setFilter(col.id, v)}
-                                  options={[{ value: "", label: "All" }, ...patched]}
-                                  placeholder="All"
-                                  size="sm"
-                                  aria-label={`Filter by ${String(col.header)}`}
-                                  className="flex-1"
-                                />
-                              )
-                            })()}
-                          </div>
-                        ) : (
-                          <div className={cn("group relative", col.align === "right" && "ml-auto", col.width ? `max-w-full` : "", "w-full")}>
-                            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 opacity-40">
-                              <Filter className="h-3 w-3" aria-hidden="true" />
-                            </span>
-                            <input
-                              type="search"
-                              value={val}
-                              onChange={(e) => setFilter(col.id, e.target.value)}
-                              placeholder="Filter"
-                              aria-label={`Filter by ${String(col.header)}`}
-                              className={cn(
-                                "h-7 w-full rounded border border-border bg-card py-1 pr-6 pl-7 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring",
-                                col.align === "right" && "text-right",
-                              )}
-                            />
-                            {val && (
-                              <button
-                                type="button"
-                                onClick={() => setFilter(col.id, "")}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded border border-transparent p-0.5 text-muted-foreground hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                aria-label={`Clear filter on ${String(col.header)}`}
-                              >
-                                <X className="h-3 w-3" aria-hidden="true" />
-                              </button>
-                            )}
-                          </div>
-                        )
-                      ) : (
-                        <span />
-                      )}
-                    </td>
-                  )
-                })}
-              </tr>
-            )}
           </thead>
           {loading ? (
             <tbody>

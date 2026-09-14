@@ -164,6 +164,7 @@ export function UrlInvestigationPage({
     {
       id: "client_ip",
       header: "Client IP",
+      filterType: "text",
       accessor: (r) => r.client_ip,
       cell: (r) => (
         <button
@@ -179,6 +180,7 @@ export function UrlInvestigationPage({
     {
       id: "count",
       header: "Accesses",
+      filterType: "number",
       accessor: (r) => r.count,
       align: "right",
       cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{formatCount(r.count)}</span>,
@@ -187,6 +189,7 @@ export function UrlInvestigationPage({
     {
       id: "last_seen",
       header: "Last seen",
+      filterType: "datetime",
       accessor: (r) => r.last_seen,
       cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.last_seen)}</span>,
       width: "w-44",

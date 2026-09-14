@@ -96,6 +96,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "id",
     header: "ID",
+    filterType: "number",
     accessor: (i) => i.id,
     cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.id}</span>,
     width: "w-14",
@@ -103,6 +104,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "url",
     header: "URL",
+    filterType: "text",
     accessor: (i) => i.url,
     defaultSortDir: "asc",
     cell: (i) => (
@@ -117,6 +119,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "status",
     header: "Status",
+    filterType: "enum",
     accessor: (i) => i.status,
     defaultSortDir: "asc",
     cell: (i) => (
@@ -127,6 +130,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "http_status",
     header: "HTTP",
+    filterType: "number",
     accessor: (i) => i.http_status,
     cell: (i) => (
       <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
@@ -139,6 +143,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "final_url",
     header: "Final URL",
+    filterType: "text",
     accessor: (i) => i.final_url,
     cell: (i) =>
       i.final_url && i.final_url !== i.url ? (
@@ -155,6 +160,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "source",
     header: "Source",
+    filterType: "enum",
     accessor: (i) => i.source,
     defaultSortDir: "asc",
     cell: (i) => <Badge variant={SOURCE_META[i.source].variant}>{SOURCE_META[i.source].label}</Badge>,
@@ -163,6 +169,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "last_checked_at",
     header: "Last checked",
+    filterType: "datetime",
     accessor: (i) => i.last_checked_at,
     cell: (i) => (
       <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(i.last_checked_at)}</span>
@@ -172,6 +179,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
     id: "history_count",
     header: "Targets",
+    filterType: "number",
     accessor: (i) => i.history_count,
     cell: (i) => <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
     align: "right",

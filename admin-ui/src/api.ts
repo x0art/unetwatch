@@ -1885,3 +1885,64 @@ export function getClientReportCsvUrl(clientIp: string): string {
   return `/api/client-report/${encodeURIComponent(clientIp)}/export.csv`
 }
 
+/* ── Backup & restore (operator data JSON, no credentials) ─────── */
+
+export interface BackupImportResult {
+  dry_run: boolean
+  added: Record<string, number>
+  skipped: Record<string, number>
+}
+
+/**
+ * Download the full operator-data backup as a JSON attachment
+ * (same blob + anchor pattern as the Analytics CSV export).
+ */
+export async function exportBackup(): Promise<void> {
+  const headers: Record<string, string> = {}
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+  const res = await fetch(`${API}/backup/export`, { headers })
+  if (res.status === 401) {
+    notifySessionExpired()
+    throw new Error("Session expired")
+  }
+  if (!res.ok) throw new Error(`Export failed: HTTP ${res.status}`)
+  const blob = await res.blob()
+  const cd = res.headers.get("Content-Disposition") ?? ""
+  const match = /filename=([^;]+)/.exec(cd)
+  const filename = (match?.[1] ?? `unetwatch-backup-${Date.now()}.json`)
+    .trim()
+    .replace(/^"|"$/g, "")
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  // Safari requires the anchor in the DOM; revoke deferred so large
+  // downloads are never cut off in the same task as the click.
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/**
+ * Restore a backup file. Reads the picked file client-side and POSTs it as
+ * JSON; `dryRun` previews per-section counts without writing anything.
+ */
+export async function importBackup(file: File, dryRun: boolean): Promise<BackupImportResult> {
+  const raw = await file.text()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error("Not a valid JSON backup file")
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Not a valid backup file shape")
+  }
+  return request<BackupImportResult>("/backup/import", {
+    method: "POST",
+    body: JSON.stringify({ ...(parsed as Record<string, unknown>), dry_run: dryRun }),
+  })
+}
+
