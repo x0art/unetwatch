@@ -4,6 +4,7 @@ import {
   CornerUpRight,
   Eraser,
   History,
+  Lock,
   Radar,
   Search,
   SearchX,
@@ -12,12 +13,14 @@ import {
 } from "lucide-react"
 import {
   type Finding,
+  addClientIpToJaillist,
   addTrackedUrl,
   bulkDeleteFindings,
   clearFindings,
   deleteFinding,
   getFindings,
   getBlacklistSet,
+  getJaillistSet,
   listPatterns,
   originOf,
   listTrackedUrls,
@@ -49,22 +52,26 @@ const FINDINGS_UI: {
   whitelistIndex: Record<string, true>
   blacklistIndex: Record<string, true>
   trackedIndex: Record<string, true>
+  jailedIndex: Record<string, true>
   busy: boolean
   onBlacklisted: (host: string) => void
   onCopy: (url: string) => void
   onTrack: (url: string) => void
   onDelete: (f: Finding) => void
+  onJail: (ip: string) => void
   onInspectHost: (ip: string) => void
   onInspectUrl: (url: string) => void
 } = {
   whitelistIndex: {},
   blacklistIndex: {},
   trackedIndex: {},
+  jailedIndex: {},
   busy: false,
   onBlacklisted: () => {},
   onCopy: () => {},
   onTrack: () => {},
   onDelete: () => {},
+  onJail: () => {},
   onInspectHost: () => {},
   onInspectUrl: () => {},
 }
@@ -103,6 +110,9 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
           <Search className="h-3 w-3" />
         </button>
         <CopyUrlButton value={f.client_ip} label="Client IP" />
+        {FINDINGS_UI.jailedIndex[f.client_ip] ? (
+          <Badge variant="destructive">Jailed</Badge>
+        ) : null}
       </span>
     ),
   },
@@ -229,6 +239,14 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
               disabled: FINDINGS_UI.busy || FINDINGS_UI.trackedIndex[originOf(f.url)],
             },
             {
+              key: "jail",
+              label: FINDINGS_UI.jailedIndex[f.client_ip] ? "Jailed" : "Jail client IP",
+              icon: Lock,
+              variant: "destructive",
+              onClick: () => FINDINGS_UI.onJail(f.client_ip),
+              disabled: FINDINGS_UI.busy || FINDINGS_UI.jailedIndex[f.client_ip],
+            },
+            {
               key: "delete",
               label: "Delete finding",
               icon: Trash2,
@@ -264,6 +282,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   const [whitelistIndex, setWhitelistIndex] = useState<Record<string, true>>({})
   const [blacklistIndex, setBlacklistIndex] = useState<Record<string, true>>({})
   const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
+  const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
   const debouncedSearch = useDebounce(search, 300)
 
   // Keep rows visible while an auto-refresh is in flight (no skeleton flicker).
@@ -324,10 +343,11 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
 
   const refetchIndexes = useCallback(async () => {
     setIndexError(false)
-    const [wlRes, trackedRes, blRes] = await Promise.allSettled([
+    const [wlRes, trackedRes, blRes, jailRes] = await Promise.allSettled([
       listPatterns({ pattern_type: "whitelist", limit: 5000 }),
       listTrackedUrls({ limit: 5000 }),
       getBlacklistSet(),
+      getJaillistSet(),
     ])
     let failed = false
     if (wlRes.status === "fulfilled") {
@@ -349,6 +369,13 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
       for (const url of blRes.value.urls) blNext[url] = true
       for (const ip of blRes.value.ips) blNext[ip] = true
       setBlacklistIndex(blNext)
+    } else {
+      failed = true
+    }
+    if (jailRes.status === "fulfilled") {
+      const jailNext: Record<string, true> = {}
+      for (const ip of jailRes.value.ips) jailNext[ip] = true
+      setJailedIndex(jailNext)
     } else {
       failed = true
     }
@@ -422,6 +449,24 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
     }
   }
 
+  const handleJailClient = async (ip: string) => {
+    setBusy(true)
+    try {
+      const res = await addClientIpToJaillist(ip)
+      if (res.added.length > 0) {
+        toast({ title: "Client IP jailed", description: ip, variant: "success" })
+        setJailedIndex((prev) => ({ ...prev, [ip]: true }))
+      } else {
+        setJailedIndex((prev) => ({ ...prev, [ip]: true }))
+        toast({ title: "Already jailed", description: ip, variant: "info" })
+      }
+    } catch (e) {
+      toast({ title: "Jail failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleTrackRedirect = async (url: string) => {
     // Track the origin (protocol://domain), not the full URL path — avoids
     // duplicate entries when the same domain is tracked via different paths.
@@ -469,12 +514,14 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   FINDINGS_UI.whitelistIndex = whitelistIndex
   FINDINGS_UI.blacklistIndex = blacklistIndex
   FINDINGS_UI.trackedIndex = trackedIndex
+  FINDINGS_UI.jailedIndex = jailedIndex
   FINDINGS_UI.busy = busy
   FINDINGS_UI.onBlacklisted = (host) =>
     setBlacklistIndex((prev) => ({ ...prev, [host]: true }))
   FINDINGS_UI.onCopy = handleCopyUrl
   FINDINGS_UI.onTrack = handleTrackRedirect
   FINDINGS_UI.onDelete = (f) => setDeleteTarget(f)
+  FINDINGS_UI.onJail = handleJailClient
   FINDINGS_UI.onInspectHost = (ip: string) => {
     setGlobalFilter(ip)
     try { window.localStorage.setItem("unetwatch_view", "host") } catch { /* ignore */ }

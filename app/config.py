@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # feed disabled.
     upstream_blacklist_urls: str = ""
     upstream_blacklist_ips: str = ""
+    # Upstream jaillist: a single feed of client IPs (one per line,
+    # `#`/`;` comments). Empty = disabled.
+    upstream_jaillist_urls: str = ""
     api_key: str = ""
     admin_user: str = "admin"
     admin_pass: str = "changeme"

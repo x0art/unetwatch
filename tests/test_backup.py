@@ -35,6 +35,10 @@ async def _seed(db_path):
         ),
     )
     await db.execute(
+        "INSERT INTO jaillist_entries (value, source) VALUES (?, ?)",
+        ("10.0.0.77", "manual"),
+    )
+    await db.execute(
         "INSERT INTO monitor_logs (kind, started_at) VALUES (?, ?)",
         ("poll", "2026-01-01T00:00:00Z"),
     )
@@ -58,6 +62,7 @@ async def test_backup_export_shape(client, db_path):
     assert {"kind": "url", "value": "evil.example", "source": "manual"} in body[
         "blacklist"
     ]
+    assert {"value": "10.0.0.77", "source": "manual"} in body["jaillist"]
     assert any(t["url"] == "http://evil.example/x" for t in body["tracked_urls"])
     assert any(
         e["source_url"] == "http://evil.example/x" for e in body["redirect_edges"]
@@ -82,6 +87,7 @@ async def _counts(db_path):
         "url_whitelist",
         "findings",
         "blacklist_entries",
+        "jaillist_entries",
         "tracked_urls",
         "redirect_edges",
     ):
@@ -103,6 +109,7 @@ async def test_backup_import_round_trip(client, db_path):
         "url_whitelist",
         "findings",
         "blacklist_entries",
+        "jaillist_entries",
         "tracked_urls",
         "redirect_edges",
     ):
@@ -138,6 +145,22 @@ async def test_backup_import_dry_run_writes_nothing(client, db_path):
 async def test_backup_import_bad_version_400(client):
     resp = client.post("/api/backup/import", json={"version": 999})
     assert resp.status_code == 400
+
+
+async def test_backup_import_coerces_unknown_jaillist_source(client, db_path):
+    """A crafted backup claiming an unknown jaillist source imports as manual."""
+    await _seed(db_path)
+    backup = client.get("/api/backup/export").json()
+    backup["jaillist"].append({"value": "9.9.9.9", "source": "evil"})
+    resp = client.post("/api/backup/import", json=backup)
+    assert resp.status_code == 200
+    db = await aiosqlite.connect(db_path)
+    cursor = await db.execute(
+        "SELECT source FROM jaillist_entries WHERE value = '9.9.9.9'"
+    )
+    row = await cursor.fetchone()
+    await db.close()
+    assert row[0] == "manual"
 
 
 async def test_backup_import_idempotent(client, db_path):

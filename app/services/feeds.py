@@ -59,3 +59,18 @@ async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip")) -> None:
     """
     for kind in kinds:
         _atomic_write(_feed_path(kind), "\r\n".join(await _values(db, kind)) + "\r\n")
+
+
+def jail_feed_path() -> Path:
+    """Path of the jaillist feed file (same directory as the blacklist feeds)."""
+    return feeds_dir() / "jail-ips.txt"
+
+
+async def sync_regenerate_jail(db) -> None:
+    """Rewrite the ``jail-ips.txt`` feed from ``jaillist_entries``.
+
+    Same CRLF + trailing CRLF + atomic-write guarantees as ``sync_regenerate``.
+    """
+    cursor = await db.execute("SELECT value FROM jaillist_entries ORDER BY value")
+    values = [row[0] for row in await cursor.fetchall()]
+    _atomic_write(jail_feed_path(), "\r\n".join(values) + "\r\n")

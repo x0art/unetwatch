@@ -12,6 +12,7 @@ import { LoginPage } from "./components/LoginPage"
 import { AppShell } from "./components/AppShell"
 import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialog"
 import { AddBlacklistDialog, AddBlacklistButton } from "./components/AddBlacklistDialog"
+import { AddJaillistDialog, AddJaillistButton } from "./components/AddJaillistDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { FilterProvider } from "./contexts/FilterContext"
 import { ToastProvider, Skeleton } from "./components/ui"
@@ -34,6 +35,9 @@ const FindingsPage = lazy(() =>
 )
 const BlacklistPage = lazy(() =>
   import("./components/BlacklistPage").then((m) => ({ default: m.BlacklistPage })),
+)
+const JaillistPage = lazy(() =>
+  import("./components/JaillistPage").then((m) => ({ default: m.JaillistPage })),
 )
 const RedirectsPage = lazy(() =>
   import("./components/RedirectsPage").then((m) => ({ default: m.RedirectsPage })),
@@ -78,7 +82,7 @@ function AppRoutes() {
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as View | null
   const [view, setView] = useState<View>(
-    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "redirects", "logs", "host", "url", "analytics"].includes(storedView)
+    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "jaillist", "redirects", "logs", "host", "url", "analytics"].includes(storedView)
       ? storedView
       : "dashboard",
   )
@@ -93,6 +97,7 @@ function AppRoutes() {
   const [lastUpdated, setLastUpdated] = useState(Date.now())
   const [patternDialogOpen, setPatternDialogOpen] = useState(false)
   const [blacklistDialogOpen, setBlacklistDialogOpen] = useState(false)
+  const [jaillistDialogOpen, setJaillistDialogOpen] = useState(false)
 
   // Countdown timer — computed from the backend's last_poll_at timestamp
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
@@ -221,6 +226,11 @@ function AppRoutes() {
       description="Pattern console"
       actions={
         <>
+          <AddJaillistButton onOpen={() => setJaillistDialogOpen(true)} />
+          <AddJaillistDialog
+            open={jaillistDialogOpen}
+            onClose={() => setJaillistDialogOpen(false)}
+          />
           <AddBlacklistButton onOpen={() => setBlacklistDialogOpen(true)} />
           <AddBlacklistDialog
             open={blacklistDialogOpen}
@@ -268,6 +278,11 @@ function AppRoutes() {
         {visited.has("blacklist") && (
           <div hidden={view !== "blacklist"}>
             <BlacklistPage />
+          </div>
+        )}
+        {visited.has("jaillist") && (
+          <div hidden={view !== "jaillist"}>
+            <JaillistPage />
           </div>
         )}
         {visited.has("redirects") && (

@@ -177,6 +177,20 @@ async def init_db():
         )
     """)
 
+    # Jaillist: client (source) IPs to be jailed at the enforcement layer
+    # (firewall / fail2ban). One flat list — no kinds, single IPs only.
+    # `source` is 'manual' | 'finding' | 'upstream'.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS jaillist_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            value TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            finding_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (value)
+        )
+    """)
+
     # URLs under redirect watch. `source` is 'manual' | 'finding' for user
     # additions and 'auto' for targets discovered while following a chain.
     await db.execute("""

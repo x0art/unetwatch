@@ -21,13 +21,14 @@ from app.routes import (
     blacklist,
     findings,
     hosts,
+    jaillist,
     logs,
     monitor,
     patterns,
     query,
     redirects,
 )
-from app.services.feeds import sync_regenerate
+from app.services.feeds import sync_regenerate, sync_regenerate_jail
 
 scheduler = AsyncIOScheduler()
 
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
     db = await get_db()
     try:
         await sync_regenerate(db)
+        await sync_regenerate_jail(db)
         # Reconciliation: every tracked redirect URL belongs on the blacklist
         # feed (source='redirect'). Idempotent — already-blacklisted hosts are
         # no-ops — so this also backfills rows tracked before auto-blacklist
@@ -96,12 +98,21 @@ async def lifespan(app: FastAPI):
         minutes=settings.redirect_check_interval_minutes,
     )
     from app.services.upstream_blacklist import sync_upstream_blacklist
+    from app.services.upstream_jaillist import sync_upstream_jaillist
 
     scheduler.add_job(
         sync_upstream_blacklist,
         "interval",
         minutes=5,
         id="upstream-blacklist-sync",
+        coalesce=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        sync_upstream_jaillist,
+        "interval",
+        minutes=5,
+        id="upstream-jaillist-sync",
         coalesce=True,
         max_instances=1,
     )
@@ -112,6 +123,11 @@ async def lifespan(app: FastAPI):
         await sync_upstream_blacklist()
     except Exception as e:
         log.warning("initial upstream blacklist sync failed: %s", e)
+
+    try:
+        await sync_upstream_jaillist()
+    except Exception as e:
+        log.warning("initial upstream jaillist sync failed: %s", e)
 
     # Warm ES field inventory (best-effort, never crashes boot)
     from app.services.monitor import warm_field_inventory
@@ -193,6 +209,10 @@ app.include_router(findings.router, dependencies=[Depends(verify_admin)])
 # Blacklist router is mounted without auth: the .txt feed routes are public
 # for external integrations; write/list routes opt back in per-route.
 app.include_router(blacklist.router)
+# Jaillist router is mounted without auth: the jail .txt feed is public for
+# external integrations (firewall, fail2ban); write/list routes opt back in
+# per-route.
+app.include_router(jaillist.router)
 app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
 app.include_router(analytics.router, dependencies=[Depends(verify_admin)])

@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   Link2,
   ListFilter,
+  Lock,
   LogOut,
   Menu,
   Moon,
@@ -104,6 +105,7 @@ export type View =
   | "patterns"
   | "findings"
   | "blacklist"
+  | "jaillist"
   | "redirects"
   | "logs"
   /* ── Deep Dive pages ── */
@@ -145,6 +147,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: "findings", label: "Findings", icon: Radar },
       { view: "redirects", label: "Redirects", icon: GitBranch },
       { view: "blacklist", label: "Blacklist", icon: Ban },
+      { view: "jaillist", label: "Jaillist", icon: Lock },
     ],
   },
   {

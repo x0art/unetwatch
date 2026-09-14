@@ -7,7 +7,7 @@ restored via ``.env``).
 - ``GET /api/backup/export`` → ``application/json`` attachment
   ``unetwatch-backup-YYYYMMDD-HHMMSS.json`` with
   ``{ version, exported_at, patterns, whitelist, findings, blacklist,
-  tracked_urls, redirect_edges }`` (rows minus ``id``).
+  jaillist, tracked_urls, redirect_edges }`` (rows minus ``id``).
 - ``POST /api/backup/import`` → restores with ``INSERT OR IGNORE`` on the
   natural UNIQUEs; returns ``{ dry_run, added, skipped }`` per section.
   Unknown ``version`` → 400. Never deletes; ``dry_run`` writes nothing.
@@ -34,6 +34,7 @@ _NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "whitelist": ("pattern",),
     "findings": ("client_ip", "url", "log_timestamp"),
     "blacklist": ("kind", "value"),
+    "jaillist": ("value",),
     "tracked_urls": ("url",),
     "redirect_edges": ("source_url", "target_url"),
 }
@@ -43,6 +44,7 @@ _TABLES: dict[str, str] = {
     "whitelist": "url_whitelist",
     "findings": "findings",
     "blacklist": "blacklist_entries",
+    "jaillist": "jaillist_entries",
     "tracked_urls": "tracked_urls",
     "redirect_edges": "redirect_edges",
 }
@@ -67,6 +69,9 @@ async def export_backup(db=Depends(get_db_conn)):
     blacklist_cur = await db.execute(
         "SELECT kind, value, source FROM blacklist_entries ORDER BY id"
     )
+    jaillist_cur = await db.execute(
+        "SELECT value, source FROM jaillist_entries ORDER BY id"
+    )
     findings_cur = await db.execute("SELECT * FROM findings ORDER BY id")
     tracked_cur = await db.execute("SELECT * FROM tracked_urls ORDER BY id")
     edges_cur = await db.execute("SELECT * FROM redirect_edges ORDER BY id")
@@ -78,6 +83,7 @@ async def export_backup(db=Depends(get_db_conn)):
         "whitelist": [dict(r) for r in await whitelist_cur.fetchall()],
         "findings": [_row_without_id(r) for r in await findings_cur.fetchall()],
         "blacklist": [dict(r) for r in await blacklist_cur.fetchall()],
+        "jaillist": [dict(r) for r in await jaillist_cur.fetchall()],
         "tracked_urls": [_row_without_id(r) for r in await tracked_cur.fetchall()],
         "redirect_edges": [_row_without_id(r) for r in await edges_cur.fetchall()],
     }
@@ -217,6 +223,30 @@ async def import_backup(request: Request, db=Depends(get_db_conn)):
             added["blacklist"] += 1
         else:
             skipped["blacklist"] += 1
+
+    # ── jaillist_entries (fixed shape, source defaults to manual) ──
+    jaillist_sources = {"manual", "finding", "upstream"}
+    for item in _as_list(payload, "jaillist"):
+        if not isinstance(item, dict) or not item.get("value"):
+            skipped["jaillist"] += 1
+            continue
+        source = item.get("source") or "manual"
+        if source not in jaillist_sources:
+            # Unknown provenance (crafted file) → manual, never 'upstream'.
+            source = "manual"
+        row = {
+            "value": item["value"],
+            "source": source,
+        }
+        if dry_run:
+            if await exists("jaillist", row):
+                skipped["jaillist"] += 1
+            else:
+                added["jaillist"] += 1
+        elif await insert("jaillist", row):
+            added["jaillist"] += 1
+        else:
+            skipped["jaillist"] += 1
 
     # ── findings / tracked_urls / redirect_edges (dynamic row shapes) ──
     for section in ("findings", "tracked_urls", "redirect_edges"):

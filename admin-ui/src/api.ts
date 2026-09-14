@@ -1270,6 +1270,65 @@ export async function bulkDeleteBlacklist(entries: BlacklistEntryRef[]): Promise
   })
 }
 
+/* ── Jaillist (client-IP jail list) ────────────────────────────────── */
+
+export interface JaillistBulkAddResult {
+  added: string[]
+  skipped: string[]
+  errors: { value: string; error: string }[]
+}
+
+export interface JaillistBulkDeleteResult {
+  deleted: number
+}
+
+export async function getJaillistIps(): Promise<string> {
+  const res = await fetch(`${API}/jaillist/ips.txt`, {
+    headers: getToken() ? { "X-API-Key": getToken()! } : {},
+  })
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.text()
+}
+
+export async function addClientIpToJaillist(value: string): Promise<{ added: string[] }> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+  const res = await fetch(`${API}/jaillist/`, { method: "POST", headers, body: JSON.stringify({ value }) })
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.json()
+}
+
+export async function deleteJaillistEntry(value: string): Promise<void> {
+  return request(`/jaillist/${encodeURIComponent(value)}`, { method: "DELETE" })
+}
+
+export async function getJaillistSet(): Promise<{ ips: string[] }> {
+  const headers: Record<string, string> = {}
+  const tok = getToken()
+  if (tok) headers["X-API-Key"] = tok
+  const res = await fetch(`${API}/jaillist/entries`, { headers })
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.json()
+}
+
+export async function bulkAddJaillist(values: string[]): Promise<JaillistBulkAddResult> {
+  return request("/jaillist/bulk", {
+    method: "POST",
+    body: JSON.stringify({ values }),
+  })
+}
+
+export async function bulkDeleteJaillist(values: string[]): Promise<JaillistBulkDeleteResult> {
+  return request("/jaillist/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ values }),
+  })
+}
+
 /* ── Redirect tracker ──────────────────────────────────────────── */
 
 export async function listTrackedUrls(params?: {

@@ -56,7 +56,7 @@ interface FeedCardProps {
   onClearSearch?: () => void
 }
 
-function FeedCard({
+export function FeedCard({
   title,
   path,
   kind,
@@ -240,7 +240,9 @@ export function BlacklistPage() {
   const { toast } = useToast()
 
   const splitLines = useCallback((text: string) => {
-    return text.split("\n").filter((l) => l.trim().length > 0)
+    // Feeds are CRLF files — split on \r?\n so entries carry no \r residue
+    // (residue would break row-delete/copy, which send the value back).
+    return text.split(/\r?\n/).filter((l) => l.trim().length > 0)
   }, [])
 
   const q = search.trim().toLowerCase()

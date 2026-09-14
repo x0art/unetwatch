@@ -17,7 +17,7 @@ uNetWatch (rebranded from "ELK Monitoring") watches **user internet behaviour re
 
 ## Stack & architecture
 
-- **Backend**: Python / FastAPI, single process, SQLite storage (`app/`). Pure-function service modules: `result_processor.py` (filtering, findings, items), `query_builder.py` (ES DSL), `monitor.py` (orchestrator: poll, query, store, webhook), `readout.py` (per-client risk ranking), `blacklist.py`. Routes under `app/routes/` (`findings`, `query`, `analytics`, `patterns`, `blacklist`, `redirects`, `readout`).
+- **Backend**: Python / FastAPI, single process, SQLite storage (`app/`). Pure-function service modules: `result_processor.py` (filtering, findings, items), `query_builder.py` (ES DSL), `monitor.py` (orchestrator: poll, query, store, webhook), `readout.py` (per-client risk ranking), `blacklist.py`, `jaillist.py` (client-IP jail list), `upstream_jaillist.py` (gist sync). Routes under `app/routes/` (`findings`, `query`, `analytics`, `patterns`, `blacklist`, `jaillist`, `redirects`, `readout`).
 - **Frontend**: React + Vite + TypeScript (`admin-ui/`), ECharts for charts. State-driven routing — `App.tsx` view switch over `Sidebar.tsx` `NAV_GROUPS`. Shared workspace state in `FilterContext` (globalFilter, timeRange, actionFilter, viewMode), persisted to localStorage + URL params.
 - **Theme**: Notion-style uNetWatch — white `#FFFFFF`, ink `#37352F`, single blue accent `#2383E2` (+ warm-charcoal dark mode).
 
@@ -25,7 +25,7 @@ uNetWatch (rebranded from "ELK Monitoring") watches **user internet behaviour re
 
 - **Monitor**: Dashboard, **Query** (single live/traffic surface — auto-refresh, 4-column flow Sankey, row inspection)
 - **Deep Dive**: **Host Inspector**, **URL Investigation** (new), Analytics
-- **Management**: Patterns, Findings, Redirects, Blacklist
+- **Management**: Patterns, Findings, Redirects, Blacklist, Jaillist
 - **System**: Logs
 
 Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diagram superseded; its URL drill-down became the URL Investigation page). Client drill-down removed — superseded by Host Inspector. ADR: `docs/adr/0002-page-consolidation.md`.
@@ -40,12 +40,13 @@ Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diag
 | `enforcement` | a DENY — the proxy handled a prohibited request; *not* a risk |
 | `whitelist` | URLs the operator explicitly allows; excluded from Findings + risk counts |
 | `blacklist` | bare hosts (`kind ∈ url, ip`) served at `/api/blacklist/urls.txt` / `ips.txt` for nginx/fail2ban |
+| `jaillist` | client IPs (sources) to jail, served at `/api/jaillist/ips.txt` for firewall/fail2ban; manual + Findings action + gist upstream |
 | `client_ip` | source host; `base_url`/`domain` = destination |
 | `host` | an IP + optional hostname; no dept/user/MAC identity |
 
 ## Storage (SQLite, inline migrations in `app/database.py init_db`)
 
-`findings` (rich flat fields incl. `action`, `duration_seconds`, `matched_patterns`), `url_patterns`, `blacklist_entries`, `tracked_urls` + `redirect_edges`, `monitor_logs`. No settings table (env/pydantic `Settings`); no IP→person/department/host-group table anywhere.
+`findings` (rich flat fields incl. `action`, `duration_seconds`, `matched_patterns`), `url_patterns`, `blacklist_entries`, `jaillist_entries` (flat client IPs, `UNIQUE(value)`), `tracked_urls` + `redirect_edges`, `monitor_logs`. No settings table (env/pydantic `Settings`); no IP→person/department/host-group table anywhere.
 
 ## Conventions
 

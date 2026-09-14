@@ -88,6 +88,35 @@ class BlacklistEntryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JaillistEntryCreate(BaseModel):
+    value: str = Field(..., min_length=1, max_length=500)
+    source: str = Field(default="manual", pattern="^(manual|finding|upstream)$")
+    finding_id: int | None = None
+
+
+class JaillistBulkAdd(BaseModel):
+    """Bulk-add model: raw values are normalized like single adds; each line
+    becomes its own entry (single client IP)."""
+
+    values: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class JaillistBulkDelete(BaseModel):
+    """Bulk-delete model: values to remove (flat list — no kind)."""
+
+    values: list[str] = Field(..., min_length=1, max_length=500)
+
+
+class JaillistEntryResponse(BaseModel):
+    id: int
+    value: str
+    source: str
+    finding_id: int | None = None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class RedirectTrackCreate(BaseModel):
     url: str = Field(..., min_length=1, max_length=500)
     source: str = Field(default="manual", pattern="^(manual|finding)$")

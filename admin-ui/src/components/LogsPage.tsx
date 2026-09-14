@@ -305,7 +305,7 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
 
 /* ── Backup & restore (System area panel) ─────────────────────── */
 
-const BACKUP_SECTIONS = ["patterns", "whitelist", "findings", "blacklist", "tracked_urls", "redirect_edges"] as const
+const BACKUP_SECTIONS = ["patterns", "whitelist", "findings", "blacklist", "jaillist", "tracked_urls", "redirect_edges"] as const
 
 function sectionTotal(r: BackupImportResult): number {
   return BACKUP_SECTIONS.reduce(
