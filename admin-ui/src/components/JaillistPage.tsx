@@ -322,7 +322,7 @@ export function JaillistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
-            upstream={jailUpstream}
+            upstream={upstreamStatus ? jailUpstream : undefined}
             upstreamSyncing={upstreamSyncing}
             onFetchUpstream={handleFetchUpstream}
           />

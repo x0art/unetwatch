@@ -105,6 +105,8 @@ export function FeedCard({
   upstreamSyncing = false,
   onFetchUpstream,
 }: FeedCardProps) {
+  const fetchUpstreamLabel =
+    upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"
   return (
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
@@ -146,16 +148,18 @@ export function FeedCard({
                 Refresh
               </Button>
               {onFetchUpstream ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onFetchUpstream}
-                  disabled={loading || upstreamSyncing || (upstream ? !upstream.configured : false)}
-                  aria-label={upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"}
-                >
-                  {upstreamSyncing ? <LoadingIcon className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
-                  {upstreamSyncing ? "Fetching…" : "Fetch upstream"}
-                </Button>
+                <span title={fetchUpstreamLabel}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onFetchUpstream}
+                    disabled={loading || upstreamSyncing || (upstream ? !upstream.configured : false)}
+                    aria-label={fetchUpstreamLabel}
+                  >
+                    {upstreamSyncing ? <LoadingIcon className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
+                    {upstreamSyncing ? "Fetching…" : "Fetch upstream"}
+                  </Button>
+                </span>
               ) : null}
               <Button variant="outline" size="sm" onClick={onCopy} disabled={loading || entries.length === 0}>
                 <Copy className="h-3.5 w-3.5" />
@@ -585,7 +589,7 @@ export function BlacklistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
-            upstream={urlsUpstream}
+            upstream={upstreamStatus ? urlsUpstream : undefined}
             upstreamSyncing={upstreamSyncing}
             onFetchUpstream={handleFetchUpstream}
           />
@@ -608,7 +612,7 @@ export function BlacklistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
-            upstream={ipsUpstream}
+            upstream={upstreamStatus ? ipsUpstream : undefined}
             upstreamSyncing={upstreamSyncing}
             onFetchUpstream={handleFetchUpstream}
           />
