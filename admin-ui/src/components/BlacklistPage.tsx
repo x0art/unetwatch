@@ -151,7 +151,7 @@ export function FeedCard({
                   size="sm"
                   onClick={onFetchUpstream}
                   disabled={loading || upstreamSyncing || (upstream ? !upstream.configured : false)}
-                  title={upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"}
+                  aria-label={upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"}
                 >
                   {upstreamSyncing ? <LoadingIcon className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
                   {upstreamSyncing ? "Fetching…" : "Fetch upstream"}
