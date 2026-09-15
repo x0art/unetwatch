@@ -6,8 +6,11 @@ import {
   bulkDeleteJaillist,
   deleteJaillistEntry,
   getJaillistIps,
+  getJaillistUpstreamStatus,
+  syncJaillistUpstream,
+  type JaillistUpstreamStatus,
 } from "../api"
-import { FeedCard } from "./BlacklistPage"
+import { FeedCard, type UpstreamFeedState } from "./BlacklistPage"
 import {
   Button,
   ConfirmDialog,
@@ -39,6 +42,10 @@ export function JaillistPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
+  // Upstream sync status for the single jail feed.
+  const [upstreamStatus, setUpstreamStatus] = useState<JaillistUpstreamStatus | null>(null)
+  const [upstreamSyncing, setUpstreamSyncing] = useState(false)
+
   const { toast } = useToast()
 
   const splitLines = useCallback((text: string) => {
@@ -68,9 +75,55 @@ export function JaillistPage() {
     }
   }, [splitLines, toast])
 
+  const loadUpstreamStatus = useCallback(async () => {
+    try {
+      setUpstreamStatus(await getJaillistUpstreamStatus())
+    } catch {
+      // Best-effort: the feed list still renders without upstream status.
+    }
+  }, [])
+
   useEffect(() => {
     load()
-  }, [load])
+    void loadUpstreamStatus()
+  }, [load, loadUpstreamStatus])
+
+  const jailUpstream: UpstreamFeedState = {
+    configured: upstreamStatus?.urls_configured ?? false,
+    lastSync: upstreamStatus?.last_sync ?? null,
+    lastAdded: upstreamStatus?.last_added ?? 0,
+    lastSkipped: upstreamStatus?.last_skipped ?? 0,
+    lastErrors: upstreamStatus?.last_errors ?? 0,
+    lastError: upstreamStatus?.last_error ?? null,
+  }
+
+  const handleFetchUpstream = async () => {
+    setUpstreamSyncing(true)
+    try {
+      const res = await syncJaillistUpstream()
+      if (res.ok) {
+        const parts: string[] = []
+        if (typeof res.fetched === "number") parts.push(`${res.fetched} fetched`)
+        if (typeof res.added === "number") parts.push(`${res.added} added`)
+        if (typeof res.skipped === "number") parts.push(`${res.skipped} skipped`)
+        const errCount = res.errors?.length ?? 0
+        if (errCount) parts.push(`${errCount} invalid`)
+        toast({
+          title: "Upstream fetch complete",
+          description: parts.join(" · ") || "Nothing fetched",
+          variant: errCount ? "error" : "success",
+        })
+      } else {
+        toast({ title: "Upstream fetch failed", description: res.reason ?? "Unknown error", variant: "error" })
+      }
+      await loadUpstreamStatus()
+      await load()
+    } catch (e) {
+      toast({ title: "Upstream fetch failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setUpstreamSyncing(false)
+    }
+  }
 
   const copy = useCallback(
     async (text: string, label: string) => {
@@ -269,6 +322,9 @@ export function JaillistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
+            upstream={jailUpstream}
+            upstreamSyncing={upstreamSyncing}
+            onFetchUpstream={handleFetchUpstream}
           />
         </div>
       )}

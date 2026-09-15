@@ -1270,6 +1270,44 @@ export async function bulkDeleteBlacklist(entries: BlacklistEntryRef[]): Promise
   })
 }
 
+export interface BlacklistUpstreamFeedStatus {
+  last_added: number
+  last_skipped: number
+  last_errors: number
+  last_error: string | null
+}
+
+export interface BlacklistUpstreamStatus {
+  enabled: boolean
+  urls_configured: boolean
+  ips_configured: boolean
+  url_configured: boolean
+  last_sync: string | null
+  last_added: number
+  last_skipped: number
+  last_errors: number
+  last_error: string | null
+  upstream_count: number
+  feeds: Record<"urls" | "ips", BlacklistUpstreamFeedStatus>
+}
+
+export interface UpstreamSyncResult {
+  ok: boolean
+  reason?: string
+  added?: number
+  skipped?: number
+  fetched?: number
+  errors?: { value: string; error: string }[]
+}
+
+export async function getBlacklistUpstreamStatus(): Promise<BlacklistUpstreamStatus> {
+  return request("/blacklist/upstream-status")
+}
+
+export async function syncBlacklistUpstream(): Promise<UpstreamSyncResult> {
+  return request("/blacklist/upstream-sync", { method: "POST" })
+}
+
 /* ── Jaillist (client-IP jail list) ────────────────────────────────── */
 
 export interface JaillistBulkAddResult {
@@ -1327,6 +1365,25 @@ export async function bulkDeleteJaillist(values: string[]): Promise<JaillistBulk
     method: "POST",
     body: JSON.stringify({ values }),
   })
+}
+
+export interface JaillistUpstreamStatus {
+  enabled: boolean
+  urls_configured: boolean
+  last_sync: string | null
+  last_added: number
+  last_skipped: number
+  last_errors: number
+  last_error: string | null
+  upstream_count: number
+}
+
+export async function getJaillistUpstreamStatus(): Promise<JaillistUpstreamStatus> {
+  return request("/jaillist/upstream-status")
+}
+
+export async function syncJaillistUpstream(): Promise<UpstreamSyncResult> {
+  return request("/jaillist/upstream-sync", { method: "POST" })
 }
 
 /* ── Redirect tracker ──────────────────────────────────────────── */

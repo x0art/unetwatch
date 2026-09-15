@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
+  ArrowDownToLine,
   Copy,
   Link2,
   ListPlus,
@@ -14,6 +15,9 @@ import {
   deleteBlacklistEntry,
   getBlacklistIps,
   getBlacklistUrls,
+  getBlacklistUpstreamStatus,
+  syncBlacklistUpstream,
+  type BlacklistUpstreamStatus,
 } from "../api"
 import {
   Button,
@@ -32,6 +36,16 @@ import {
   Skeleton,
   useToast,
 } from "./ui"
+
+export interface UpstreamFeedState {
+  /** False when no upstream URL is configured for this feed. */
+  configured: boolean
+  lastSync: string | null
+  lastAdded: number
+  lastSkipped: number
+  lastErrors: number
+  lastError: string | null
+}
 
 interface FeedCardProps {
   title: string
@@ -54,6 +68,18 @@ interface FeedCardProps {
   onDeleteSelected?: () => void
   disabled?: boolean
   onClearSearch?: () => void
+  /** Upstream feed state for this card; omit to hide the fetch button. */
+  upstream?: UpstreamFeedState
+  upstreamSyncing?: boolean
+  onFetchUpstream?: () => void
+}
+
+function formatUpstreamLine(u: UpstreamFeedState): string {
+  if (!u.configured) return "Upstream: not configured"
+  if (!u.lastSync) return "Upstream: configured — never synced"
+  const when = new Date(u.lastSync)
+  const stamp = Number.isNaN(when.getTime()) ? u.lastSync : when.toLocaleString()
+  return `Upstream · ${stamp} — ${u.lastAdded} added · ${u.lastSkipped} skipped · ${u.lastErrors} errors`
 }
 
 export function FeedCard({
@@ -75,6 +101,9 @@ export function FeedCard({
   onDeleteSelected,
   disabled,
   onClearSearch,
+  upstream,
+  upstreamSyncing = false,
+  onFetchUpstream,
 }: FeedCardProps) {
   return (
     <Card>
@@ -91,6 +120,15 @@ export function FeedCard({
           <code className="mt-1.5 inline-block rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-muted-foreground">
             {path}
           </code>
+          {upstream ? (
+            <p
+              className="mt-1.5 text-xs font-medium text-muted-foreground"
+              title={upstream.lastError ? `Last error: ${upstream.lastError}` : undefined}
+            >
+              {formatUpstreamLine(upstream)}
+              {upstream.lastError ? <span className="text-destructive"> · {upstream.lastError}</span> : null}
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
           {selectMode ? (
@@ -107,6 +145,18 @@ export function FeedCard({
                 <RefreshCcw className="h-3.5 w-3.5" />
                 Refresh
               </Button>
+              {onFetchUpstream ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onFetchUpstream}
+                  disabled={loading || upstreamSyncing || (upstream ? !upstream.configured : false)}
+                  title={upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"}
+                >
+                  {upstreamSyncing ? <LoadingIcon className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
+                  {upstreamSyncing ? "Fetching…" : "Fetch upstream"}
+                </Button>
+              ) : null}
               <Button variant="outline" size="sm" onClick={onCopy} disabled={loading || entries.length === 0}>
                 <Copy className="h-3.5 w-3.5" />
                 Copy
@@ -237,6 +287,10 @@ export function BlacklistPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
 
+  // Upstream sync: per-feed status, one combined sync call.
+  const [upstreamStatus, setUpstreamStatus] = useState<BlacklistUpstreamStatus | null>(null)
+  const [upstreamSyncing, setUpstreamSyncing] = useState(false)
+
   const { toast } = useToast()
 
   const splitLines = useCallback((text: string) => {
@@ -271,9 +325,65 @@ export function BlacklistPage() {
     }
   }, [splitLines, toast])
 
+  const loadUpstreamStatus = useCallback(async () => {
+    try {
+      setUpstreamStatus(await getBlacklistUpstreamStatus())
+    } catch {
+      // Best-effort: the feed lists still render without upstream status.
+    }
+  }, [])
+
   useEffect(() => {
     load()
-  }, [load])
+    void loadUpstreamStatus()
+  }, [load, loadUpstreamStatus])
+
+  const urlsFeed = upstreamStatus?.feeds.urls
+  const ipsFeed = upstreamStatus?.feeds.ips
+  const urlsUpstream: UpstreamFeedState = {
+    configured: upstreamStatus?.urls_configured ?? false,
+    lastSync: upstreamStatus?.last_sync ?? null,
+    lastAdded: urlsFeed?.last_added ?? 0,
+    lastSkipped: urlsFeed?.last_skipped ?? 0,
+    lastErrors: urlsFeed?.last_errors ?? 0,
+    lastError: urlsFeed?.last_error ?? upstreamStatus?.last_error ?? null,
+  }
+  const ipsUpstream: UpstreamFeedState = {
+    configured: upstreamStatus?.ips_configured ?? false,
+    lastSync: upstreamStatus?.last_sync ?? null,
+    lastAdded: ipsFeed?.last_added ?? 0,
+    lastSkipped: ipsFeed?.last_skipped ?? 0,
+    lastErrors: ipsFeed?.last_errors ?? 0,
+    lastError: ipsFeed?.last_error ?? upstreamStatus?.last_error ?? null,
+  }
+
+  const handleFetchUpstream = async () => {
+    setUpstreamSyncing(true)
+    try {
+      const res = await syncBlacklistUpstream()
+      if (res.ok) {
+        const parts: string[] = []
+        if (typeof res.fetched === "number") parts.push(`${res.fetched} fetched`)
+        if (typeof res.added === "number") parts.push(`${res.added} added`)
+        if (typeof res.skipped === "number") parts.push(`${res.skipped} skipped`)
+        const errCount = res.errors?.length ?? 0
+        if (errCount) parts.push(`${errCount} invalid`)
+        toast({
+          title: "Upstream fetch complete",
+          description: parts.join(" · ") || "Nothing fetched",
+          variant: errCount ? "error" : "success",
+        })
+      } else {
+        toast({ title: "Upstream fetch failed", description: res.reason ?? "Unknown error", variant: "error" })
+      }
+      await loadUpstreamStatus()
+      await load()
+    } catch (e) {
+      toast({ title: "Upstream fetch failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setUpstreamSyncing(false)
+    }
+  }
 
   const copy = useCallback(
     async (text: string, label: string) => {
@@ -475,6 +585,9 @@ export function BlacklistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
+            upstream={urlsUpstream}
+            upstreamSyncing={upstreamSyncing}
+            onFetchUpstream={handleFetchUpstream}
           />
           <FeedCard
             title="Destination IP blacklist"
@@ -495,6 +608,9 @@ export function BlacklistPage() {
             onDeleteSelected={() => setConfirmBulkDelete(true)}
             disabled={deleting}
             onClearSearch={() => setSearch("")}
+            upstream={ipsUpstream}
+            upstreamSyncing={upstreamSyncing}
+            onFetchUpstream={handleFetchUpstream}
           />
         </div>
       )}

@@ -24,6 +24,7 @@ import {
   addBaseUrlToBlacklist,
   buildFlowSankey,
   formatBytes,
+  getJaillistSet,
   runQuery,
   timeRangeToMinutesLive,
 } from "../api"
@@ -106,10 +107,12 @@ function formatFull(iso: string) {
  * onBlacklisted callback can still update component state. */
 const queryUI: {
   setResult: (fn: (prev: QueryResult | null) => QueryResult | null) => void
+  jailedIndex: Record<string, true>
   onInspectHost: (ip: string) => void
   onInspectUrl: (url: string) => void
 } = {
   setResult: () => {},
+  jailedIndex: {},
   onInspectHost: () => {},
   onInspectUrl: () => {},
 }
@@ -170,6 +173,9 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <span className="font-mono text-xs">{d.client_ip}</span>
         <QuickNavCell kind="host" value={d.client_ip} label="Open in Host Inspector" />
         <CopyCell value={d.client_ip} label="Client IP" />
+        {queryUI.jailedIndex[d.client_ip] ? (
+          <Badge variant="destructive">Jailed</Badge>
+        ) : null}
       </span>
     ),
   },
@@ -485,10 +491,29 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void } = {}) {
   const { toast } = useToast()
   const { viewMode, setViewMode, setGlobalFilter, timeRange, setTimeRange } = useFilter()
-  const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
-  const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
-  const [actionFilter, setActionFilter] = useState<"all" | "ALLOW" | "DENY">("all")
-  const [uniqueDomainsOnly, setUniqueDomainsOnly] = useState(false)
+  const [result, setResult] = useState<QueryResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
+  const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+
+  // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
+  useEffect(() => {
+    let cancelled = false
+    getJaillistSet()
+      .then((res) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const ip of res.ips) next[ip] = true
+        setJailedIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setJailedIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const [esSearch, setEsSearch] = useState("")
   const debouncedEsSearch = useDebounce(esSearch, 400)
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -501,8 +526,9 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [hideSingletons, setHideSingletons] = useState(true)
   const [flowCollapsed, setFlowCollapsed] = useState(false)
   const [focusedSankeyId, setFocusedSankeyId] = useState<string | null>(null)
-  // Auto-collapse Sankey when entering a long window
-  useEffect(() => {
+  // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
+  queryUI.setResult = setResult
+  queryUI.jailedIndex = jailedIndex
     if (timeRange === "7d" || timeRange === "30d" || timeRange === "90d" || timeRange === "1y") setFlowCollapsed(true)
     else setFlowCollapsed(false)
   }, [timeRange])
