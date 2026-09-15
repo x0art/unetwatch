@@ -432,7 +432,15 @@ export function AnalyticsPage({
         id: "pattern",
         header: "Pattern",
         enableSorting: false,
-        accessor: (r) => r.matched_patterns,
+        filterType: "text",
+        accessor: (r) => {
+          try {
+            const parsed = r.matched_patterns ? JSON.parse(r.matched_patterns) : []
+            return Array.isArray(parsed) ? parsed : []
+          } catch {
+            return []
+          }
+        },
         cell: (r) => {
           let pats: string[] = []
           try {

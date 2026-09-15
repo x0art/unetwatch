@@ -901,7 +901,7 @@ export function HostInspectorPage({
     { id: "log_timestamp", header: "Timestamp", filterType: "datetime", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
     { id: "url", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
     { id: "base_url", header: "Domain", filterType: "text", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
-    { id: "pattern", header: "Pattern", enableSorting: false, accessor: (r) => r.matched_patterns, cell: (r) => {
+    { id: "pattern", header: "Pattern", filterType: "text", enableSorting: false, accessor: (r) => { try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; return Array.isArray(p) ? p : [] } catch { return [] } }, cell: (r) => {
       let pats: string[] = []
       try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch {}
       // Findings-backed report: every finding was stored because it matched a block pattern.

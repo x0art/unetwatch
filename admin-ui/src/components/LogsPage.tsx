@@ -208,7 +208,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     id: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
-    align: "right",
+    enableColumnFilter: false,
     width: "w-16",
     cell: (l) => (
       <Button

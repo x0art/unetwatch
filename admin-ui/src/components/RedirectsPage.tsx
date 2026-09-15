@@ -189,7 +189,7 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     id: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
-    align: "right",
+    enableColumnFilter: false,
     width: "w-32",
     cell: (i) => (
       <div className="flex justify-end">

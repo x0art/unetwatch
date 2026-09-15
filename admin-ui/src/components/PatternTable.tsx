@@ -99,7 +99,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     id: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
-    align: "right",
+    enableColumnFilter: false,
     width: "w-20",
     cell: (p) => (
       <div className="flex justify-end gap-1">

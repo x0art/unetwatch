@@ -45,7 +45,7 @@ import {
   TimestampCell,
   useToast,
 } from "./ui"
-import { DataTable, type DataTableColumn } from "./DataTable"
+import { DataTable, type ColumnFilterValue, type DataTableColumn, isActiveFilter } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram } from "./SankeyDiagram"
 import { EventInspectorSidebar } from "./EventInspectorSidebar"
@@ -283,7 +283,8 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "pattern",
     header: "Pattern",
-    accessor: (d) => d.blocked_by,
+    filterType: "text",
+    accessor: (d) => (d.blocked_by ?? []),
     enableSorting: false,
     cell: (d) => (
       <span className="block max-w-[180px] truncate font-mono text-xs text-muted-foreground" title={(d.blocked_by ?? []).join(", ") || undefined}>
@@ -295,6 +296,15 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "coverage",
     header: "Lists",
+    filterType: "enum",
+    accessor: (d) =>
+      d.blacklisted && d.action === "ALLOW"
+        ? "Blacklist risk"
+        : d.whitelisted
+          ? "Whitelist"
+          : d.blacklisted
+            ? "Blacklist"
+            : "None",
     enableSorting: false,
     cell: (d) => (
       <div className="flex flex-wrap items-center gap-1">
@@ -340,6 +350,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     id: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
+    enableColumnFilter: false,
     cell: (d) => (
       <span onClick={(e) => e.stopPropagation()}>
         <ListActionCell
@@ -642,13 +653,14 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [docSearch, setDocSearch] = useState("")
+  const [columnFilters, setColumnFilters] = useState<Record<string, ColumnFilterValue>>({})
   const debouncedDocSearch = useDebounce(docSearch, 200)
   const q = debouncedDocSearch.trim().toLowerCase()
 
   // Reset to the first page whenever a new query result, search, or action filter arrives.
   useEffect(() => {
     setPage(0)
-  }, [result, debouncedDocSearch, actionFilter, blacklistMode])
+  }, [result, debouncedDocSearch, actionFilter, blacklistMode, columnFilters])
 
   // Client-side substring filter across IPs and URLs.
   const visibleItems = useMemo(() => {
@@ -719,6 +731,10 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     }
     return { risk, whitelisted, blacklisted }
   }, [actionFilteredItems])
+  const activeHeaderFilterCount = useMemo(
+    () => Object.values(columnFilters).filter((v) => isActiveFilter(v)).length,
+    [columnFilters],
+  )
 
   return (
     <div className="space-y-6">
@@ -1050,10 +1066,23 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 </ListBadge>
                 host or destination IP on the blacklist
               </span>
+              {activeHeaderFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setColumnFilters({})}
+                  className="ml-auto inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
+                  aria-label={`Clear ${activeHeaderFilterCount} header filter${activeHeaderFilterCount === 1 ? "" : "s"}`}
+                >
+                  {activeHeaderFilterCount} header filter{activeHeaderFilterCount === 1 ? "" : "s"} active · Clear
+                </button>
+              )}
             </div>
             <DataTable
               columns={columns}
               data={tableItems}
+              columnFilters={columnFilters}
+              onColumnFiltersChange={setColumnFilters}
+              filterSourceData={actionFilteredItems}
               rowId={queryRowId}
               selectable
               busy={loading}
@@ -1075,12 +1104,22 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                   ? viewMode === "all"
                     ? "Nothing matches your filter — the row may be outside the window or blacklisted, try a longer window."
                     : "Nothing matches your filter — try a different IP or URL substring."
-                  : "Try a longer window or trigger a manual run.",
-                action: q ? (
-                  <Button variant="outline" size="sm" onClick={() => setDocSearch("")}>
-                    Clear filter
-                  </Button>
-                ) : undefined,
+                  : activeHeaderFilterCount > 0
+                    ? "Nothing matches the active header filters — clear them or try a longer window."
+                    : "Try a longer window or trigger a manual run.",
+                action:
+                  q || activeHeaderFilterCount > 0 ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setDocSearch("")
+                        setColumnFilters({})
+                      }}
+                    >
+                      {q && activeHeaderFilterCount > 0 ? "Clear filters" : q ? "Clear filter" : "Clear header filters"}
+                    </Button>
+                  ) : undefined,
               }}
               defaultSortBy="timestamp"
               defaultSortDir="desc"

@@ -193,7 +193,15 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     id: "pattern",
     header: "Pattern",
     enableSorting: false,
-    accessor: (f) => f.matched_patterns,
+    filterType: "text",
+    accessor: (f) => {
+      try {
+        const parsed = f.matched_patterns ? JSON.parse(f.matched_patterns) : []
+        return Array.isArray(parsed) ? parsed : []
+      } catch {
+        return []
+      }
+    },
     cell: (f) => {
       let pats: string[] = []
       try {
@@ -223,6 +231,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     id: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
+    enableColumnFilter: false,
     align: "right",
     width: "w-40",
     cell: (f) => (

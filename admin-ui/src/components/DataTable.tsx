@@ -139,6 +139,12 @@ interface DataTableProps<T> {
   onColumnFiltersChange?: (filters: Record<string, ColumnFilterValue>) => void
   /** Hide every per-column header filter across the table. */
   enableFiltering?: boolean
+  /**
+   * Full loaded dataset the enum filter options are derived from. Defaults
+   * to the page `data` — pass the unpaginated rows for server-paginated
+   * tables so the dropdown lists every loaded value, not just the page.
+   */
+  filterSourceData?: T[]
   onRowClick?: (row: T) => void
   /* Optional pagination slot rendered below the table. */
   page?: number
@@ -164,6 +170,33 @@ function compareValues(a: unknown, b: unknown): number {
   if (b === undefined || b === null || b === "") return -1
   if (typeof a === "number" && typeof b === "number") return a - b
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" })
+}
+/**
+ * Normalize an accessor result into comparable string values: nullish and
+ * blank scalars yield no values; arrays flat-map to trimmed non-empty
+ * strings; any other scalar stringifies to a single trimmed value.
+ */
+function accessorValues(v: unknown): string[] {
+  if (v === null || v === undefined) return []
+  if (Array.isArray(v)) {
+    return v.flatMap((item) => {
+      if (item === null || item === undefined) return []
+      const s = String(item).trim()
+      return s ? [s] : []
+    })
+  }
+  const s = String(v).trim()
+  return s ? [s] : []
+}
+
+/**
+ * Static enum fallbacks keyed by column id, unioned after the dynamic values
+ * so server-paginated tables still offer every known value.
+ */
+const ENUM_FALLBACKS: Record<string, string[]> = {
+  action: ["ALLOW", "DENY", "FLAG"],
+  pattern_type: ["block", "whitelist"],
+  coverage: ["Blacklist risk", "Whitelist", "Blacklist", "None"],
 }
 
 /**
@@ -280,7 +313,24 @@ function HeaderFilter<T>({
           style={{ top: panelPos.top, left: panelPos.left }}
           className="fixed z-50 mt-1 w-56 rounded-md border border-border bg-card p-3 text-left shadow-md"
         >
-          {type === "enum" && (
+          {type === "enum" && (options.length === 0 && (ENUM_FALLBACKS[col.id]?.length ?? 0) === 0 ? (
+            <div>
+              <p className="mb-2 text-xs text-muted-foreground">
+                No values in loaded rows — broaden the time window
+              </p>
+              <fieldset disabled className="opacity-50">
+                <Select
+                  value={typeof draft === "string" ? draft : ""}
+                  onChange={() => {}}
+                  options={[{ value: "", label: "All" }]}
+                  placeholder="All"
+                  size="sm"
+                  aria-label={`Filter by ${label}`}
+                  className="w-full"
+                />
+              </fieldset>
+            </div>
+          ) : (
             <Select
               value={typeof draft === "string" ? draft : ""}
               onChange={(v) => setDraft(v)}
@@ -290,7 +340,7 @@ function HeaderFilter<T>({
               aria-label={`Filter by ${label}`}
               className="w-full"
             />
-          )}
+          ))}
           {type === "text" && (
             <input
               type="search"
@@ -425,6 +475,7 @@ export function DataTable<T>({
   columnFilters: controlledFilters,
   onColumnFiltersChange,
   enableFiltering = true,
+  filterSourceData,
   onRowClick,
   page,
   pageSize,
@@ -535,9 +586,9 @@ export function DataTable<T>({
   // ── Per-column filtering (runs before sorting) ─────────────────────
   // The control is picked per column by `filterType` (default `enum`):
   // enum = exact match, text = case-insensitive substring, datetime/number =
-  // open-ended range match. NOTE: filterability is intentionally coupled to
-  // sortability — a column opts out of both with enableSorting={false}
-  // (or enableColumnFilter).
+  // open-ended range match. NOTE: filterability is intentionally decoupled
+  // from sortability — a column opts out of filtering with srOnly or
+  // enableColumnFilter={false} (enableSorting has no effect on filters).
   const filterMatches = (row: T, filters: Record<string, ColumnFilterValue>): boolean => {
     const ids = Object.keys(filters)
     if (ids.length === 0) return true
@@ -547,16 +598,19 @@ export function DataTable<T>({
       const col = columnsRef.current.find((c) => c.id === id)
       if (!col) return true
       const type = col.filterType ?? "enum"
-      const val = col.accessor ? col.accessor(row) : renderCellValue(col, row)
+      const raw = col.accessor ? col.accessor(row) : renderCellValue(col, row)
       if (typeof want === "string") {
         const needle = want.trim().toLowerCase()
         if (!needle) return true
-        const hay = String(val ?? "").toLowerCase()
-        if (type === "text") return hay.includes(needle)
-        return hay === needle
+        const values = accessorValues(raw)
+        if (type === "text") return values.some((hay) => hay.toLowerCase().includes(needle))
+        return values.some((hay) => hay.toLowerCase() === needle)
       }
       if (isDatetimeFilter(want)) {
-        const ts = Date.parse(String(val ?? ""))
+        if (Array.isArray(raw)) return false
+        const values = accessorValues(raw)
+        if (values.length === 0) return false
+        const ts = Date.parse(values[0])
         if (Number.isNaN(ts)) return false
         const fromEmpty = want.from.trim() === ""
         const toEmpty = want.to.trim() === ""
@@ -571,8 +625,11 @@ export function DataTable<T>({
         return true
       }
       if (isNumberFilter(want)) {
-        const n = Number(val)
-        if (val === null || val === undefined || val === "" || Number.isNaN(n)) return false
+        if (Array.isArray(raw)) return false
+        const values = accessorValues(raw)
+        if (values.length === 0) return false
+        const n = Number(values[0])
+        if (Number.isNaN(n)) return false
         const minEmpty = want.min.trim() === ""
         const maxEmpty = want.max.trim() === ""
         if (!minEmpty) {
@@ -596,20 +653,28 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, controlledFilters, internalFilters, filtersControlled, columns])
 
-  // Distinct values per enum-filterable column over the current `data`, for
-  // the dropdown options. Built once per data/filter-column set; values are
-  // de-duplicated string forms of the accessor result.
+  // Distinct values per enum-filterable column over `filterSourceData` (or
+  // the current `data` when absent), for the dropdown options. Built once
+  // per source/filter-column set; normalized accessor values are
+  // de-duplicated case-insensitively, then static ENUM_FALLBACKS are
+  // unioned after the dynamic values (dynamic-first).
   const filterOptions = useMemo(() => {
+    const source = filterSourceData ?? data
     const map = new Map<string, { value: string; label: string }[]>()
     for (const col of columnsRef.current) {
-      if (col.enableSorting === false || col.srOnly || col.enableColumnFilter === false) continue
+      if (col.srOnly || col.enableColumnFilter === false) continue
       if ((col.filterType ?? "enum") !== "enum") continue
       const seen = new Map<string, string>()
-      for (const row of data) {
+      for (const row of source) {
         const v = col.accessor ? col.accessor(row) : renderCellValue(col, row)
-        const key = String(v ?? "").trim().toLowerCase()
-        if (!key) continue
-        if (!seen.has(key)) seen.set(key, String(v))
+        for (const s of accessorValues(v)) {
+          const key = s.toLowerCase()
+          if (!seen.has(key)) seen.set(key, s)
+        }
+      }
+      for (const fb of ENUM_FALLBACKS[col.id] ?? []) {
+        const key = fb.toLowerCase()
+        if (!seen.has(key)) seen.set(key, fb)
       }
       map.set(
         col.id,
@@ -618,7 +683,7 @@ export function DataTable<T>({
     }
     return map
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, columns])
+  }, [data, filterSourceData, columns])
 
   const sortedData = useMemo(() => {
     const base = filteredData
@@ -713,7 +778,7 @@ export function DataTable<T>({
               {columns.map((col) => {
                 const sortable = col.enableSorting !== false && !col.srOnly
                 const active = sortable && sortState.key === col.id
-                const filterable = sortable && enableFiltering && col.enableColumnFilter !== false
+                const filterable = enableFiltering && !col.srOnly && col.enableColumnFilter !== false
                 return (
                   <th
                     key={col.id}
@@ -774,12 +839,27 @@ export function DataTable<T>({
                     ) : (
                       <span
                         className={cn(
-                          "mono-label",
-                          col.align === "right" && "inline-block w-full text-right",
-                          col.align === "center" && "inline-block w-full text-center",
+                          "inline-flex items-center gap-1 mono-label",
+                          col.align === "right" && "w-full justify-end flex-row-reverse",
+                          col.align === "center" && "w-full justify-center",
                         )}
                       >
                         {col.header}
+                        {filterable && (
+                          <HeaderFilter
+                            col={col}
+                            value={filters[col.id]}
+                            onApply={(v) => setFilter(col.id, v)}
+                            options={(() => {
+                              const opts = filterOptions.get(col.id) ?? []
+                              const cur = filters[col.id]
+                              const curStr = typeof cur === "string" ? cur : ""
+                              return curStr && !opts.some((o) => o.value === curStr)
+                                ? [...opts, { value: curStr, label: curStr }]
+                                : opts
+                            })()}
+                          />
+                        )}
                       </span>
                     )}
                   </th>
