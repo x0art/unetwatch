@@ -5,6 +5,8 @@ export interface HostEntityCardProps {
   /** Host is an IP + optional hostname (ADR 0001) — shown in the header only. */
   host: { hostname: string; primaryIp: string }
   risk: HostRisk
+  /** Best-effort jailed flag — fail-closed to no badge when false/undefined. */
+  jailed?: boolean
 }
 
 function riskBadgeVariant(level: HostRisk["riskLevel"]): "destructive" | "warning" | "success" {
@@ -15,7 +17,7 @@ function riskBadgeVariant(level: HostRisk["riskLevel"]): "destructive" | "warnin
 
 /** Risk-only host summary card (ADR 0001: no MAC/dept/user identity; risk =
  * ALLOW pattern-matches, enforcements = DENY handled by the proxy). */
-export function HostEntityCard({ host, risk }: HostEntityCardProps) {
+export function HostEntityCard({ host, risk, jailed }: HostEntityCardProps) {
   const variant = riskBadgeVariant(risk.riskLevel)
   const label = risk.riskLevel === "HIGH" ? "HIGH" : risk.riskLevel === "MEDIUM" ? "MEDIUM" : "LOW"
 
@@ -26,8 +28,11 @@ export function HostEntityCard({ host, risk }: HostEntityCardProps) {
       <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-3">
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
         <h3 className="text-xs font-medium">Risk Summary</h3>
-        <span className="ml-auto hidden truncate text-xs font-medium text-muted-foreground sm:inline" title={`${host.hostname || host.primaryIp} — ${risk.totalRequests.toLocaleString()} requests`}>
-          {host.hostname || host.primaryIp} · {risk.totalRequests.toLocaleString()} req
+        <span className="ml-auto flex items-center gap-1.5">
+          <span className="hidden truncate text-xs font-medium text-muted-foreground sm:inline" title={`${host.hostname || host.primaryIp} — ${risk.totalRequests.toLocaleString()} requests`}>
+            {host.hostname || host.primaryIp} · {risk.totalRequests.toLocaleString()} req
+          </span>
+          {jailed ? <Badge variant="destructive">Jailed</Badge> : null}
         </span>
       </div>
 

@@ -28,6 +28,7 @@ import {
   buildFlowSankey,
   getClientReport,
   getClientReportFindings,
+  getJaillistSet,
   getClientReportCsvUrl,
   getToken,
   notifySessionExpired,
@@ -416,6 +417,26 @@ export function HostInspectorPage({
   const [rawPage, setRawPage] = useState(0)
   const [rawError, setRawError] = useState<string | null>(null)
   const rawPageSize = 50
+
+  // Jailed client IPs for the header badge — best-effort, fail-closed to no
+  // badge (mirrors the Query/Findings per-row pattern).
+  const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+  useEffect(() => {
+    let cancelled = false
+    getJaillistSet()
+      .then((res) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const ip of res.ips) next[ip] = true
+        setJailedIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setJailedIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
   // InspectionDrawer "View Host History" land on the right host. Re-runs on
@@ -986,7 +1007,7 @@ export function HostInspectorPage({
       )}
 
       {!loading && !error && host && hSource === "live" && (
-        <HostEntityCard host={host} risk={host.risk} />
+        <HostEntityCard host={host} risk={host.risk} jailed={!!jailedIndex[host.primaryIp]} />
       )}
 
       {!loading && !error && !host && hasSearched && (
@@ -1142,6 +1163,12 @@ export function HostInspectorPage({
       {/* ── FINDINGS branch — Client Report analytics ── */}
       {showReport && (
         <>
+          {report && jailedIndex[report.client_ip] ? (
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-sm font-semibold">{report.client_ip}</span>
+              <Badge variant="destructive">Jailed</Badge>
+            </div>
+          ) : null}
           {reportLoading && !report ? (
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
               <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />

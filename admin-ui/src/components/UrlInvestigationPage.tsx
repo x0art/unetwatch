@@ -14,11 +14,13 @@ import { hostOfUrl } from "../lib/logRow"
 import {
   addBaseUrlToBlacklist,
   bulkImport,
+  getJaillistSet,
   getUrlBreakdown,
   type UrlBreakdown,
   type UrlClientCount,
 } from "../api"
 import {
+  Badge,
   Button,
   EmptyState,
   LoadingIcon,
@@ -74,6 +76,24 @@ export function UrlInvestigationPage({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
+  const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+  useEffect(() => {
+    let cancelled = false
+    getJaillistSet()
+      .then((res) => {
+        if (cancelled) return
+        const next: Record<string, true> = {}
+        for (const ip of res.ips) next[ip] = true
+        setJailedIndex(next)
+      })
+      .catch(() => {
+        if (!cancelled) setJailedIndex({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   const investigate = useCallback(async (target: string) => {
     const trimmed = target.trim()
     if (!trimmed) {
@@ -167,14 +187,17 @@ export function UrlInvestigationPage({
       filterType: "text",
       accessor: (r) => r.client_ip,
       cell: (r) => (
-        <button
-          type="button"
-          onClick={() => handleViewHost(r.client_ip)}
-          className="group inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-          title="Open Host Inspector"
-        >
-          {r.client_ip}
-        </button>
+        <span className="inline-flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => handleViewHost(r.client_ip)}
+            className="group inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+            title="Open Host Inspector"
+          >
+            {r.client_ip}
+          </button>
+          {jailedIndex[r.client_ip] ? <Badge variant="destructive">Jailed</Badge> : null}
+        </span>
       ),
     },
     {
