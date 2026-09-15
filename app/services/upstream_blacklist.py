@@ -162,6 +162,7 @@ async def _do_sync() -> dict:
                 # One dead feed must not starve the other: record the
                 # per-feed error and continue. Successful feeds commit below.
                 reason = str(e) or type(e).__name__
+                log.warning("upstream blacklist feed %s fetch failed: %s", feed_name, reason)
                 errors.append({"value": f"<{feed_name} feed>", "error": reason})
                 _LAST_SYNC["feeds"][feed_name] = {
                     "last_added": 0,
@@ -205,6 +206,10 @@ async def _do_sync() -> dict:
                 "last_errors": feed_errors,
                 "last_error": None,
             }
+            log.info(
+                "upstream blacklist feed %s sync: added=%d skipped=%d errors=%d fetched=%d",
+                feed_name, feed_added, feed_skipped, feed_errors, len(lines),
+            )
         await db.commit()
         if touched:
             # Regenerate the affected feeds so the public .txt files match.
@@ -220,6 +225,15 @@ async def _do_sync() -> dict:
             "last_errors": len(errors),
         }
     )
+    log.info(
+        "upstream blacklist sync: added=%d skipped=%d errors=%d fetched=%d",
+        added, skipped, len(errors), fetched,
+    )
+    if errors:
+        log.debug(
+            "upstream blacklist sync error samples: %r",
+            [str(e["value"])[:120] for e in errors[:3]],
+        )
     return {
         "ok": True,
         "added": added,

@@ -116,6 +116,15 @@ async def _do_sync() -> dict:
             "last_errors": len(errors),
         }
     )
+    log.info(
+        "upstream jaillist sync: added=%d skipped=%d errors=%d fetched=%d",
+        added, skipped, len(errors), fetched,
+    )
+    if errors:
+        log.debug(
+            "upstream jaillist sync error samples: %r",
+            [str(e["value"])[:120] for e in errors[:3]],
+        )
     return {
         "ok": True,
         "added": added,

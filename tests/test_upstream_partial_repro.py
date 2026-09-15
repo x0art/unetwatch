@@ -1,5 +1,10 @@
 """Repro: partial upstream insert — per-line bucket attribution.
 
+Tolerant parsing (Task 1): hosts-style lines (``0.0.0.0 host``) and
+inline comments (``value # note``) are now parsed, so they land in
+added; only truly-invalid lines (bare ``localhost``, bare IPv6,
+multi-space garbage) stay in errors.
+
 Same seam as tests/test_upstream_blacklist.py::_run_sync: stub
 app.services.upstream_blacklist._fetch_text, env UPSTREAM_BLACKLIST_URLS/IPS,
 db_path fixture + init_db, get_settings.cache_clear before/after.
