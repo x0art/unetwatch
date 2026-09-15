@@ -491,10 +491,10 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void } = {}) {
   const { toast } = useToast()
   const { viewMode, setViewMode, setGlobalFilter, timeRange, setTimeRange } = useFilter()
-  const [result, setResult] = useState<QueryResult | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
+  const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
+  const [blacklistMode, setBlacklistMode] = useState<"include" | "exclude">("exclude")
+  const [actionFilter, setActionFilter] = useState<"all" | "ALLOW" | "DENY">("all")
+  const [uniqueDomainsOnly, setUniqueDomainsOnly] = useState(false)
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
 
   // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
@@ -526,15 +526,15 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [hideSingletons, setHideSingletons] = useState(true)
   const [flowCollapsed, setFlowCollapsed] = useState(false)
   const [focusedSankeyId, setFocusedSankeyId] = useState<string | null>(null)
-  // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
-  queryUI.setResult = setResult
-  queryUI.jailedIndex = jailedIndex
+  // Auto-collapse Sankey when entering a long window
+  useEffect(() => {
     if (timeRange === "7d" || timeRange === "30d" || timeRange === "90d" || timeRange === "1y") setFlowCollapsed(true)
     else setFlowCollapsed(false)
   }, [timeRange])
 
   // Hand the stable setter to the module-scope QUERY_COLUMNS actions cell.
   queryUI.setResult = setResult
+  queryUI.jailedIndex = jailedIndex
   queryUI.onInspectHost = (ip: string) => {
     setGlobalFilter(ip)
     try { window.localStorage.setItem("unetwatch_view", "host") } catch { /* ignore */ }
