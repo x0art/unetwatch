@@ -28,6 +28,24 @@ def test_parse_upstream_body_empty():
     assert parse_upstream_body("# only comments\n; nothing else\n  \n") == []
 
 
+def test_parse_upstream_body_tolerant_lines():
+    # Hosts-style lines yield the second token.
+    assert parse_upstream_body("0.0.0.0 evil.example.com\n") == ["evil.example.com"]
+    assert parse_upstream_body("127.0.0.1  evil.example.com  \n") == ["evil.example.com"]
+    # Inline comments strip on whitespace + # or ; to EOL.
+    assert parse_upstream_body("evil.example.com # inline\n") == ["evil.example.com"]
+    assert parse_upstream_body("evil.example.com ; inline\n") == ["evil.example.com"]
+    assert parse_upstream_body("evil.example.com\t# tab comment\n") == ["evil.example.com"]
+    # Hosts-style line with a trailing comment strips first, then yields host.
+    assert parse_upstream_body("0.0.0.0 evil.example.com # block\n") == ["evil.example.com"]
+    # Full-line comments and blanks still dropped.
+    assert parse_upstream_body("# full\n; full\n") == []
+    assert parse_upstream_body("  \n\n") == []
+    # Non-hosts two-token lines pass through for the normalizer to reject.
+    assert parse_upstream_body("notanip evil.example.com\n") == ["notanip evil.example.com"]
+    assert parse_upstream_body("0.0.0.0 a b\n") == ["0.0.0.0 a b"]
+
+
 async def test_sync_disabled_when_both_feeds_empty(monkeypatch):
     from app.config import get_settings
     from app.services.upstream_blacklist import sync_upstream_blacklist

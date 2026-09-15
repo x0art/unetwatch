@@ -12,7 +12,9 @@ After any insert that touched a feed kind, the static feed files are
 regenerated via ``sync_regenerate`` so the public ``.txt`` feeds match.
 """
 
+import ipaddress
 import logging
+import re
 from datetime import UTC, datetime
 
 import aiohttp
@@ -47,9 +49,19 @@ def parse_upstream_body(text: str) -> list[str]:
     """Split an upstream body into candidate lines.
 
     Lines are stripped; empties and lines starting with ``#`` or ``;``
-    (comments) are dropped. Remaining lines are returned as-is — validity
-    is decided later by ``normalize_blacklist_value`` during sync (invalid
-    lines are counted as per-line errors, not crashes).
+    (comments) are dropped. Trailing inline comments (whitespace + ``#``
+    or ``;`` to EOL) are stripped. Hosts-file lines — exactly 2
+    whitespace-separated tokens with the first a valid IPv4 address
+    (e.g. ``0.0.0.0 host``) — yield the second token. Lines with other
+    spaces are returned as-is so ``normalize_*`` rejects them as
+    per-line errors, never silent.
+
+    Bare ``localhost`` and bare IPv6 (e.g. ``::1``) are NOT special-cased
+    here: they fall through to ``normalize_blacklist_value``, which
+    rejects them for the blacklist (FQDN-or-IPv4 only — ``localhost`` has
+    no dot and is not IPv4, IPv6 host split on ``:`` yields ``''``),
+    while the jaillist's own normalizer accepts IPv6 canonically. The
+    shared parser stays compatible with both.
     """
     out: list[str] = []
     for line in text.splitlines():
@@ -58,7 +70,21 @@ def parse_upstream_body(text: str) -> list[str]:
             continue
         if stripped.startswith("#") or stripped.startswith(";"):
             continue
-        out.append(stripped)
+        # Strip inline comments: whitespace + # or ; to EOL. The
+        # preceding-whitespace requirement keeps URL fragments/queries
+        # (e.g. ?x=1;y=2, #frag without space) intact.
+        cleaned = re.sub(r"\s+[#;].*$", "", stripped).strip()
+        if not cleaned:
+            continue
+        tokens = cleaned.split()
+        if len(tokens) == 2:
+            try:
+                ipaddress.IPv4Address(tokens[0])
+            except ValueError:
+                pass
+            else:
+                cleaned = tokens[1]
+        out.append(cleaned)
     return out
 
 
