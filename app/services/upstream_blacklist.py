@@ -30,9 +30,25 @@ MAX_UPSTREAM_BYTES = 1_048_576
 
 _FEEDS = ("urls", "ips")
 
+# Maps each feed to the `kind` its entries carry. Used only when an
+# empty feed is explicitly wiped via `allow_empty_prune` (otherwise the
+# prune derives the kind from the rows actually seen).
+_FEED_KIND = {"urls": "url", "ips": "ip"}
+
+# Max deleted values included in the `deleted_sample` (sync result) and
+# `last_deleted_sample` (status). Also the chunk size for each prune
+# DELETE, comfortably below SQLite's variable limit even for ~50k feeds.
+_DELETED_SAMPLE_CAP = 100
+
 
 def _empty_feed_stats() -> dict:
-    return {"last_added": 0, "last_skipped": 0, "last_errors": 0, "last_error": None}
+    return {
+        "last_added": 0,
+        "last_skipped": 0,
+        "last_errors": 0,
+        "last_error": None,
+        "last_deleted": 0,
+    }
 
 
 _LAST_SYNC: dict = {
@@ -41,6 +57,8 @@ _LAST_SYNC: dict = {
     "last_skipped": 0,
     "last_errors": 0,
     "last_error": None,
+    "last_deleted": 0,
+    "last_deleted_sample": [],
     "feeds": {"urls": _empty_feed_stats(), "ips": _empty_feed_stats()},
 }
 
@@ -116,15 +134,21 @@ def _configured_feeds() -> list[tuple[str, str]]:
     return feeds
 
 
-async def sync_upstream_blacklist() -> dict:
+async def sync_upstream_blacklist(allow_empty_prune: bool = False) -> dict:
     """Fetch the configured upstream feeds and merge them into
     ``blacklist_entries``.
 
     Never raises — every failure is returned as
     ``{"ok": False, "reason": ...}``. No configured feed means disabled.
+
+    Rows with ``source='upstream'`` that are missing from a feed's fetched
+    set are pruned per-feed (manual/finding rows are never touched). An
+    empty parsed set for a feed skips that feed's prune unless
+    ``allow_empty_prune`` is set — a transient empty/comment-only/all-invalid
+    file must not wipe enforcement.
     """
     try:
-        result = await _do_sync()
+        result = await _do_sync(allow_empty_prune)
         _LAST_SYNC["last_error"] = None
         return result
     except Exception as e:
@@ -134,7 +158,32 @@ async def sync_upstream_blacklist() -> dict:
         return {"ok": False, "reason": reason}
 
 
-async def _do_sync() -> dict:
+async def _prune_kind(db, kind: str, keep: set[str]) -> list[str]:
+    """Delete upstream rows of ``kind`` not in ``keep``; return stale values.
+
+    Chunked DELETEs stay under SQLite's variable limit for very large feeds.
+    Never touches manual/finding rows — the ``source='upstream'`` predicate
+    scopes the deletion.
+    """
+    cursor = await db.execute(
+        "SELECT value FROM blacklist_entries WHERE source='upstream' AND kind=?"
+        " ORDER BY value",
+        (kind,),
+    )
+    existing = [row[0] for row in await cursor.fetchall()]
+    stale = sorted(v for v in existing if v not in keep)
+    for i in range(0, len(stale), _DELETED_SAMPLE_CAP):
+        chunk = stale[i:i + _DELETED_SAMPLE_CAP]
+        placeholders = ",".join("?" for _ in chunk)
+        await db.execute(
+            "DELETE FROM blacklist_entries WHERE source='upstream' AND kind=?"
+            f" AND value IN ({placeholders})",
+            (kind, *chunk),
+        )
+    return stale
+
+
+async def _do_sync(allow_empty_prune: bool = False) -> dict:
     from app.database import get_db
     from app.services.blacklist import normalize_blacklist_value
     from app.services.feeds import sync_regenerate
@@ -149,6 +198,8 @@ async def _do_sync() -> dict:
     fetched = 0
     touched: set[str] = set()
     seen: set[tuple[str, str]] = set()
+    # (kind, value) pairs seen per feed, for the post-insert prune.
+    feed_seen: dict[str, set[tuple[str, str]]] = {}
 
     db = await get_db()
     try:
@@ -156,6 +207,7 @@ async def _do_sync() -> dict:
             feed_added = 0
             feed_skipped = 0
             feed_errors = 0
+            feed_seen_values: set[tuple[str, str]] = set()
             try:
                 text = await _fetch_text(url)
             except Exception as e:
@@ -188,6 +240,7 @@ async def _do_sync() -> dict:
                     feed_skipped += 1
                     continue
                 seen.add(key)
+                feed_seen_values.add(key)
                 cursor = await db.execute(
                     "INSERT OR IGNORE INTO blacklist_entries (kind, value, source)"
                     " VALUES (?, ?, 'upstream')",
@@ -200,6 +253,7 @@ async def _do_sync() -> dict:
                 else:
                     skipped += 1
                     feed_skipped += 1
+            feed_seen[feed_name] = feed_seen_values
             _LAST_SYNC["feeds"][feed_name] = {
                 "last_added": feed_added,
                 "last_skipped": feed_skipped,
@@ -210,10 +264,63 @@ async def _do_sync() -> dict:
                 "upstream blacklist feed %s sync: added=%d skipped=%d errors=%d fetched=%d",
                 feed_name, feed_added, feed_skipped, feed_errors, len(lines),
             )
+
+        # Per-feed prune: delete upstream rows of each kind that are missing
+        # from that feed's fetched set. Manual/finding rows are never touched.
+        feed_deleted = {name: 0 for name in _FEEDS}
+        feed_deleted_sample: dict[str, list[str]] = {name: [] for name in _FEEDS}
+        feed_deleted_truncated = {name: False for name in _FEEDS}
+        feed_prune_skipped = {name: None for name in _FEEDS}
+        deleted_kinds: set[str] = set()
+        for feed_name, url in feeds:
+            s = feed_seen.get(feed_name, set())
+            if not s:
+                if allow_empty_prune:
+                    # Explicit wipe of this feed's declared kind.
+                    stale = await _prune_kind(db, _FEED_KIND[feed_name], set())
+                    feed_deleted[feed_name] = len(stale)
+                    feed_deleted_sample[feed_name] = stale[:_DELETED_SAMPLE_CAP]
+                    if stale:
+                        deleted_kinds.add(_FEED_KIND[feed_name])
+                else:
+                    # Empty parsed set (comments / invalid / blank): pruning
+                    # would wipe all upstream enforcement, so skip the DELETE
+                    # and keep existing rows.
+                    feed_prune_skipped[feed_name] = "empty-feed"
+                    log.warning(
+                        "upstream blacklist sync: feed %s empty parsed set, skipping prune",
+                        feed_name,
+                    )
+                continue
+            # Group seen (kind, value) pairs by kind and prune each kind.
+            by_kind: dict[str, set[str]] = {}
+            for kind, value in s:
+                by_kind.setdefault(kind, set()).add(value)
+            for kind, values in by_kind.items():
+                stale = await _prune_kind(db, kind, values)
+                if stale:
+                    feed_deleted[feed_name] += len(stale)
+                    feed_deleted_sample[feed_name].extend(stale[:_DELETED_SAMPLE_CAP])
+                    deleted_kinds.add(kind)
+
+        deleted = sum(feed_deleted.values())
+        deleted_sample: list[str] = []
+        deleted_truncated = False
+        for name in _FEEDS:
+            sample = feed_deleted_sample[name]
+            if len(sample) > _DELETED_SAMPLE_CAP:
+                sample = sample[:_DELETED_SAMPLE_CAP]
+                feed_deleted_sample[name] = sample
+                feed_deleted_truncated[name] = True
+            deleted_sample.extend(sample)
+        if len(deleted_sample) > _DELETED_SAMPLE_CAP:
+            deleted_sample = deleted_sample[:_DELETED_SAMPLE_CAP]
+            deleted_truncated = True
+
         await db.commit()
-        if touched:
+        if touched or deleted_kinds:
             # Regenerate the affected feeds so the public .txt files match.
-            await sync_regenerate(db, tuple(sorted(touched)))
+            await sync_regenerate(db, tuple(sorted(touched | deleted_kinds)))
     finally:
         await db.close()
 
@@ -223,24 +330,46 @@ async def _do_sync() -> dict:
             "last_added": added,
             "last_skipped": skipped,
             "last_errors": len(errors),
+            "last_deleted": deleted,
+            "last_deleted_sample": deleted_sample,
         }
     )
+    for name in _FEEDS:
+        _LAST_SYNC["feeds"][name]["last_deleted"] = feed_deleted[name]
     log.info(
-        "upstream blacklist sync: added=%d skipped=%d errors=%d fetched=%d",
-        added, skipped, len(errors), fetched,
+        "upstream blacklist sync: added=%d skipped=%d errors=%d fetched=%d"
+        " deleted=%d",
+        added, skipped, len(errors), fetched, deleted,
     )
     if errors:
         log.debug(
             "upstream blacklist sync error samples: %r",
             [str(e["value"])[:120] for e in errors[:3]],
         )
-    return {
+    result: dict = {
         "ok": True,
         "added": added,
         "skipped": skipped,
         "errors": errors,
         "fetched": fetched,
+        "deleted": deleted,
+        "deleted_sample": deleted_sample,
+        "deleted_truncated": deleted_truncated,
+        "feeds": {
+            name: {
+                "deleted": feed_deleted[name],
+                "deleted_sample": feed_deleted_sample[name],
+                "deleted_truncated": feed_deleted_truncated[name],
+                **(
+                    {"prune_skipped": feed_prune_skipped[name]}
+                    if feed_prune_skipped[name] is not None
+                    else {}
+                ),
+            }
+            for name in _FEEDS
+        },
     }
+    return result
 
 
 async def get_upstream_status() -> dict:
@@ -278,6 +407,8 @@ async def get_upstream_status() -> dict:
         "last_added": _LAST_SYNC["last_added"],
         "last_skipped": _LAST_SYNC["last_skipped"],
         "last_errors": _LAST_SYNC["last_errors"],
+        "last_deleted": _LAST_SYNC["last_deleted"],
+        "last_deleted_sample": _LAST_SYNC["last_deleted_sample"],
         "upstream_count": upstream_count,
         "feeds": {
             name: dict(_LAST_SYNC["feeds"][name]) for name in _FEEDS
