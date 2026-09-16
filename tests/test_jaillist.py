@@ -195,6 +195,8 @@ def test_jaillist_upstream_status_shape(client, monkeypatch):
         "last_skipped",
         "last_errors",
         "last_error",
+        "last_deleted",
+        "last_deleted_sample",
         "upstream_count",
     }
     assert body["enabled"] is False
