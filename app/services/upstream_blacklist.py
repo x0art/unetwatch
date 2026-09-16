@@ -15,6 +15,7 @@ regenerated via ``sync_regenerate`` so the public ``.txt`` feeds match.
 import ipaddress
 import logging
 import re
+import asyncio
 from datetime import UTC, datetime
 
 import aiohttp
@@ -61,6 +62,9 @@ _LAST_SYNC: dict = {
     "last_deleted_sample": [],
     "feeds": {"urls": _empty_feed_stats(), "ips": _empty_feed_stats()},
 }
+# Serialises the whole sync critical section (fetch → insert → prune →
+# commit → regenerate) so manual, scheduled, and boot syncs never interleave.
+_SYNC_LOCK = asyncio.Lock()
 
 
 def parse_upstream_body(text: str) -> list[str]:
@@ -148,7 +152,8 @@ async def sync_upstream_blacklist(allow_empty_prune: bool = False) -> dict:
     file must not wipe enforcement.
     """
     try:
-        result = await _do_sync(allow_empty_prune)
+        async with _SYNC_LOCK:
+            result = await _do_sync(allow_empty_prune)
         _LAST_SYNC["last_error"] = None
         return result
     except Exception as e:

@@ -12,6 +12,7 @@ After any insert, the static jail feed is regenerated via
 """
 
 import logging
+import asyncio
 from datetime import UTC, datetime
 
 log = logging.getLogger("unetwatch")
@@ -40,6 +41,9 @@ _LAST_SYNC: dict = {
     "last_deleted": 0,
     "last_deleted_sample": [],
 }
+# Serialises the whole sync critical section (fetch → insert → prune →
+# commit → regenerate) so manual, scheduled, and boot syncs never interleave.
+_SYNC_LOCK = asyncio.Lock()
 
 # Max deleted values included in the `deleted_sample` (sync result) and
 # `last_deleted_sample` (status). Also the chunk size for the prune
@@ -61,7 +65,8 @@ async def sync_upstream_jaillist(allow_empty_prune: bool = False) -> dict:
     enforcement.
     """
     try:
-        result = await _do_sync(allow_empty_prune)
+        async with _SYNC_LOCK:
+            result = await _do_sync(allow_empty_prune)
         _LAST_SYNC["last_error"] = None
         return result
     except Exception as e:

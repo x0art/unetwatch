@@ -1,4 +1,6 @@
 """Tests for the upstream blacklist sync (two feeds: domains + IPs, every 5 min)."""
+import asyncio
+import itertools
 
 from app.services.upstream_blacklist import parse_upstream_body
 
@@ -648,3 +650,63 @@ async def test_upstream_status_reflects_prune(monkeypatch, db_path):
         "upstream_count",
         "feeds",
     }
+async def _run_sync_cycling_ips(monkeypatch, ips_bodies, db_path, allow_empty_prune=False):
+    """Two concurrent syncs via ``asyncio.gather`` with a ``_fetch_text`` stub
+    that cycles through ``ips_bodies`` on each invocation. The urls feed is
+    disabled so the assertion focuses purely on ip-entries. Returns the final
+    set of upstream ip values.
+    """
+    from app.config import get_settings
+    from app.database import get_db, init_db
+    import app.services.upstream_blacklist as ub
+
+    monkeypatch.setenv("UPSTREAM_BLACKLIST_URLS", "")
+    monkeypatch.setenv("UPSTREAM_BLACKLIST_IPS", IPS_FEED)
+    get_settings.cache_clear()
+    import os
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    it = itertools.cycle(list(ips_bodies))
+
+    async def fake_fetch(url):
+        if url == IPS_FEED:
+            return next(it)
+        raise AssertionError(f"unexpected fetch url: {url}")
+
+    monkeypatch.setattr(ub, "_fetch_text", fake_fetch)
+    try:
+        await init_db()
+        await asyncio.gather(
+            ub.sync_upstream_blacklist(allow_empty_prune=allow_empty_prune),
+            ub.sync_upstream_blacklist(allow_empty_prune=allow_empty_prune),
+        )
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT value FROM blacklist_entries"
+                " WHERE source='upstream' AND kind='ip'"
+            )
+            return {row[0] for row in await cursor.fetchall()}
+        finally:
+            await db.close()
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_sync_concurrent_serialized(monkeypatch, db_path):
+    """Two manual syncs fired together must not interleave.
+
+    The final ip set must be EXACTLY one of the two upstream bodies' sets and,
+    crucially, the SAME set across repeats: the lock makes the last-writer
+    deterministic, whereas without it the winner varies run-to-run.
+    """
+    bodies = ["10.0.0.1\n10.0.0.2\n10.0.0.3", "10.0.0.2\n10.0.0.3\n10.0.0.4"]
+    expected = [set(b.split()) for b in bodies]
+    finals = []
+    for _ in range(3):
+        final = await _run_sync_cycling_ips(monkeypatch, bodies, db_path)
+        assert final in expected, f"unexpected interleaved ip set: {final}"
+        finals.append(frozenset(final))
+    # Determinism: every repeat must converge to the same final set.
+    assert len(set(finals)) == 1, f"non-deterministic final sets across repeats: {finals}"

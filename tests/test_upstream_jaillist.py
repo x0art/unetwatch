@@ -1,4 +1,6 @@
 """Tests for the upstream jaillist sync (single feed, every 5 min)."""
+import asyncio
+import itertools
 
 JAIL_FEED = "https://example.com/jail.txt"
 
@@ -434,3 +436,60 @@ async def test_sync_prune_status_reflects_deleted(monkeypatch, db_path):
         "last_deleted_sample",
         "upstream_count",
     }
+async def _run_sync_cycling(monkeypatch, bodies, db_path, allow_empty_prune=False):
+    """Two concurrent syncs via ``asyncio.gather`` with a ``_fetch_text`` stub
+    that cycles through ``bodies`` on each invocation. Returns the final set of
+    upstream jaillist values.
+    """
+    from app.config import get_settings
+    from app.database import get_db, init_db
+    import app.services.upstream_jaillist as uj
+
+    _reset_last_sync()
+    monkeypatch.setenv("UPSTREAM_JAILLIST_URLS", JAIL_FEED)
+    get_settings.cache_clear()
+    import os
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    it = itertools.cycle(list(bodies))
+
+    async def fake_fetch(url):
+        assert url == JAIL_FEED
+        return next(it)
+
+    monkeypatch.setattr(uj, "_fetch_text", fake_fetch)
+    try:
+        await init_db()
+        await asyncio.gather(
+            uj.sync_upstream_jaillist(allow_empty_prune=allow_empty_prune),
+            uj.sync_upstream_jaillist(allow_empty_prune=allow_empty_prune),
+        )
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT value FROM jaillist_entries WHERE source='upstream'"
+            )
+            return {row[0] for row in await cursor.fetchall()}
+        finally:
+            await db.close()
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_sync_concurrent_serialized(monkeypatch, db_path):
+    """Two manual syncs fired together must not interleave.
+
+    The final set must be EXACTLY one of the two upstream bodies' sets and,
+    crucially, the SAME set across repeats: the lock makes the last-writer
+    deterministic, whereas without it the winner varies run-to-run.
+    """
+    bodies = ["1.2.3.4\n2.3.4.5\n3.4.5.6", "2.3.4.5\n3.4.5.6\n4.5.6.7"]
+    expected = [set(b.split()) for b in bodies]
+    finals = []
+    for _ in range(3):
+        final = await _run_sync_cycling(monkeypatch, bodies, db_path)
+        assert final in expected, f"unexpected interleaved set: {final}"
+        finals.append(frozenset(final))
+    # Determinism: every repeat must converge to the same final set.
+    assert len(set(finals)) == 1, f"non-deterministic final sets across repeats: {finals}"
