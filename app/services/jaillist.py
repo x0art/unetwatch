@@ -1,7 +1,8 @@
-"""Jaillist value normalization: inputs are reduced to a canonical IP string.
+"""Jaillist value normalization: inputs are reduced to single-host CIDR.
 
-A jaillist entry stores a single client (source) IP — no kinds, no CIDR
-ranges, no hostnames. Shared by the API route and the upstream sync.
+A jaillist entry stores a single client (source) IP as a canonical host
+CIDR — IPv4 ``ip/32``, IPv6 ``ip/128``. No kinds, no CIDR ranges, no
+hostnames. Shared by the API route and the upstream sync.
 """
 
 import ipaddress
