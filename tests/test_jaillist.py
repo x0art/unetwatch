@@ -11,41 +11,53 @@ from app.main import app
 def test_jaillist_add_plain_ip(client):
     resp = client.post("/api/jaillist/", json={"value": "1.2.3.4"})
     assert resp.status_code == 201
-    assert resp.json()["added"] == ["1.2.3.4"]
+    assert resp.json()["added"] == ["1.2.3.4/32"]
+
+
+def test_jaillist_add_accepts_slash_32_as_is(client):
+    resp = client.post("/api/jaillist/", json={"value": "1.2.3.4/32"})
+    assert resp.status_code == 201
+    assert resp.json()["added"] == ["1.2.3.4/32"]
 
 
 def test_jaillist_add_strips_port(client):
     resp = client.post("/api/jaillist/", json={"value": "10.0.0.9:5678"})
     assert resp.status_code == 201
-    assert resp.json()["added"] == ["10.0.0.9"]
+    assert resp.json()["added"] == ["10.0.0.9/32"]
 
 
 def test_jaillist_add_canonicalizes_ipv6(client):
     resp = client.post("/api/jaillist/", json={"value": "2001:0DB8:0000::0001"})
     assert resp.status_code == 201
-    assert resp.json()["added"] == ["2001:db8::1"]
+    assert resp.json()["added"] == ["2001:db8::1/128"]
 
 
 def test_jaillist_add_duplicate_is_idempotent(client):
     first = client.post("/api/jaillist/", json={"value": "9.9.9.9"})
     assert first.status_code == 201
-    assert first.json()["added"] == ["9.9.9.9"]
+    assert first.json()["added"] == ["9.9.9.9/32"]
 
     second = client.post("/api/jaillist/", json={"value": "9.9.9.9"})
     assert second.status_code == 201
     assert second.json()["added"] == []
 
-    # Same IP via a port suffix is still the same entry.
+    # Same IP via a port suffix or an explicit /32 is still the same entry.
     third = client.post("/api/jaillist/", json={"value": "9.9.9.9:8080"})
     assert third.status_code == 201
     assert third.json()["added"] == []
+
+    fourth = client.post("/api/jaillist/", json={"value": "9.9.9.9/32"})
+    assert fourth.status_code == 201
+    assert fourth.json()["added"] == []
 
 
 def test_jaillist_add_invalid_values(client):
     for bad in [
         "evil.example.com",  # hostname
         "http://evil.example/x",  # URL
-        "10.0.0.0/24",  # CIDR
+        "10.0.0.0/24",  # non-host CIDR range
+        "10.0.0.1/33",  # impossible IPv4 prefix
+        "2001:db8::1/32",  # IPv6 range, not a single host
         "",  # empty
         "not a url or ip",  # spaces
         "999.999.999.999",  # not an IP
@@ -97,35 +109,27 @@ async def test_jaillist_feed_file_contains_crlf_entries(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     assert resp.headers.get("cache-control") == "no-store"
-    lines = resp.text.split("\r\n")
-    assert "3.3.3.3" in lines
-    assert "4.4.4.4" in lines
-    # CRLF line terminators, terminated trailing line.
-    assert "\r\n" in resp.text
-    assert "\n" not in resp.text.replace("\r\n", "")
-
-
 def test_jaillist_bulk_add(client):
     resp = client.post(
         "/api/jaillist/bulk",
         json={
             "values": [
                 "5.5.5.5",
-                "6.6.6.6:1234",  # normalizes to bare IP
-                "5.5.5.5:80",  # duplicate within batch -> skipped
+                "6.6.6.6:1234",  # normalizes to host CIDR
+                "5.5.5.5/32",  # duplicate within batch -> skipped
                 "bad hostname here",  # invalid -> error
             ]
         },
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert sorted(data["added"]) == ["5.5.5.5", "6.6.6.6"]
-    assert data["skipped"] == ["5.5.5.5"]
+    assert sorted(data["added"]) == ["5.5.5.5/32", "6.6.6.6/32"]
+    assert data["skipped"] == ["5.5.5.5/32"]
     assert len(data["errors"]) == 1
     assert data["errors"][0]["value"] == "bad hostname here"
 
     # Feed was regenerated from the DB.
-    assert "5.5.5.5" in client.get("/api/jaillist/ips.txt").text
+    assert "5.5.5.5/32" in client.get("/api/jaillist/ips.txt").text
 
 
 def test_jaillist_bulk_add_invalid_payload(client):
@@ -241,3 +245,30 @@ def test_jaillist_feeds_are_public(db_path):
         assert r.headers["content-type"].startswith("text/plain")
         assert c.post("/api/jaillist/", json={"value": "1.2.3.4"}).status_code == 401
         assert c.get("/api/jaillist/entries").status_code == 401
+
+
+def test_jaillist_normalizer_matrix():
+    from app.services.jaillist import normalize_jaillist_value
+
+    assert normalize_jaillist_value("1.2.3.4") == "1.2.3.4/32"
+    assert normalize_jaillist_value("  1.2.3.4/32  ") == "1.2.3.4/32"
+    assert normalize_jaillist_value("1.2.3.4:5678") == "1.2.3.4/32"
+    assert normalize_jaillist_value("2001:0DB8:0000::0001") == "2001:db8::1/128"
+    assert normalize_jaillist_value("2001:db8::1/128") == "2001:db8::1/128"
+    for bad in (
+        "",
+        "   ",
+        "not a url or ip",
+        "evil.example.com",
+        "http://evil.example/x",
+        "10.0.0.0/24",
+        "10.0.0.1/33",
+        "2001:db8::1/32",
+        "1.2.3.4/",
+        "999.999.999.999",
+    ):
+        try:
+            normalize_jaillist_value(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad!r}")

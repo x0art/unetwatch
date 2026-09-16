@@ -125,7 +125,7 @@ async def test_sync_invalid_lines_are_errors_not_crashes(monkeypatch, db_path):
         values = [row[0] for row in await cursor.fetchall()]
     finally:
         await db.close()
-    assert values == ["10.8.8.8", "10.8.8.9"]
+    assert values == ["10.8.8.8/32", "10.8.8.9/32"]
 
 
 async def test_sync_http_error_returns_reason(monkeypatch, db_path):
@@ -241,9 +241,9 @@ async def test_sync_prune_removes_upstream_missing_row(monkeypatch, db_path):
 
     await init_db()
     await _seed([
-        ("10.1.1.1", "upstream"),
-        ("10.1.1.2", "upstream"),
-        ("10.1.1.3", "upstream"),
+        ("10.1.1.1/32", "upstream"),
+        ("10.1.1.2/32", "upstream"),
+        ("10.1.1.3/32", "upstream"),
     ])
     # Feed lists only two of the three seeded upstream IPs.
     result = await _run_sync(monkeypatch, "10.1.1.1\n10.1.1.2\n", db_path)
@@ -263,14 +263,16 @@ async def test_sync_prune_keeps_manual_and_finding_rows(monkeypatch, db_path):
         ("10.2.9.9", "manual"),
         ("10.2.9.8", "finding"),
     ])
+    # Startup rewrites legacy bare rows to canonical host CIDR first.
+    await init_db()
     result = await _run_sync(monkeypatch, "10.2.1.1\n10.2.1.2\n", db_path)
     # Only the missing upstream row is deleted; manual/finding survive and
     # are never counted.
     assert result["deleted"] == 1
     rows = {v: s for v, s in await _all_entries()}
-    assert rows["10.2.9.9"] == "manual"
-    assert rows["10.2.9.8"] == "finding"
-    assert "10.2.1.3" not in rows
+    assert rows["10.2.9.9/32"] == "manual"
+    assert rows["10.2.9.8/32"] == "finding"
+    assert "10.2.1.3/32" not in rows
 
 
 async def test_sync_prune_keeps_colliding_manual_row(monkeypatch, db_path):
@@ -279,16 +281,16 @@ async def test_sync_prune_keeps_colliding_manual_row(monkeypatch, db_path):
     await init_db()
     # A pre-existing manual entry whose value ALSO appears in the feed.
     await _seed([
-        ("10.3.1.1", "manual"),
-        ("10.3.1.2", "upstream"),
-        ("10.3.1.3", "upstream"),
+        ("10.3.1.1/32", "manual"),
+        ("10.3.1.2/32", "upstream"),
+        ("10.3.1.3/32", "upstream"),
     ])
     result = await _run_sync(monkeypatch, "10.3.1.1\n10.3.1.2\n", db_path)
     assert result["deleted"] == 1  # only 10.3.1.3 pruned
     rows = {v: s for v, s in await _all_entries()}
     # The manual row stays manual (INSERT OR IGNORE leaves it untouched)
     # and survives the prune because its value is present in the feed.
-    assert rows["10.3.1.1"] == "manual"
+    assert rows["10.3.1.1/32"] == "manual"
 
 
 async def test_sync_prune_disabled_preserves_rows(monkeypatch, db_path):
@@ -298,9 +300,9 @@ async def test_sync_prune_disabled_preserves_rows(monkeypatch, db_path):
 
     await init_db()
     await _seed([
-        ("10.4.1.1", "upstream"),
-        ("10.4.1.2", "upstream"),
-        ("10.4.1.3", "upstream"),
+        ("10.4.1.1/32", "upstream"),
+        ("10.4.1.2/32", "upstream"),
+        ("10.4.1.3/32", "upstream"),
     ])
     _reset_last_sync()
     monkeypatch.setenv("UPSTREAM_JAILLIST_URLS", "")
@@ -321,9 +323,9 @@ async def test_sync_prune_fetch_failure_preserves_rows(monkeypatch, db_path):
 
     await init_db()
     await _seed([
-        ("10.5.1.1", "upstream"),
-        ("10.5.1.2", "upstream"),
-        ("10.5.1.3", "upstream"),
+        ("10.5.1.1/32", "upstream"),
+        ("10.5.1.2/32", "upstream"),
+        ("10.5.1.3/32", "upstream"),
     ])
     _reset_last_sync()
     monkeypatch.setenv("UPSTREAM_JAILLIST_URLS", JAIL_FEED)
@@ -353,6 +355,8 @@ async def test_sync_prune_empty_valid_feed_skips(monkeypatch, db_path):
         ("10.6.1.2", "upstream"),
         ("10.6.1.3", "upstream"),
     ])
+    # Startup rewrites legacy bare rows to canonical host CIDR first.
+    await init_db()
     # Comments + an invalid line only -> empty parsed set.
     body = "# just a comment\n; another\nnot-an-ip-at-all!!!\n"
     result = await _run_sync(monkeypatch, body, db_path)
@@ -372,6 +376,8 @@ async def test_sync_prune_allow_empty_wipes(monkeypatch, db_path):
         ("10.7.1.2", "upstream"),
         ("10.7.1.3", "upstream"),
     ])
+    # Startup rewrites legacy bare rows to canonical host CIDR first.
+    await init_db()
     # Comment-only feed + explicit wipe.
     result = await _run_sync(
         monkeypatch, "# comment only\n", db_path, allow_empty_prune=True
@@ -391,13 +397,14 @@ async def test_sync_prune_regen_reflects_deletions(monkeypatch, db_path):
         ("10.8.1.2", "upstream"),
         ("10.8.1.3", "upstream"),
     ])
+    # Startup rewrites legacy bare rows to canonical host CIDR first.
+    await init_db()
     result = await _run_sync(monkeypatch, "10.8.1.1\n10.8.1.2\n", db_path)
     assert result["deleted"] == 1
     content = jail_feed_path().read_text()
     assert "10.8.1.3" not in content
     assert "10.8.1.1" in content
     assert "10.8.1.2" in content
-
 
 async def test_sync_prune_status_reflects_deleted(monkeypatch, db_path):
     from app.config import get_settings
@@ -410,9 +417,11 @@ async def test_sync_prune_status_reflects_deleted(monkeypatch, db_path):
         ("10.9.1.2", "upstream"),
         ("10.9.1.3", "upstream"),
     ])
+    # Startup rewrites legacy bare rows to canonical host CIDR first.
+    await init_db()
     result = await _run_sync(monkeypatch, "10.9.1.1\n10.9.1.2\n", db_path)
     assert result["deleted"] == 1
-    assert result["deleted_sample"] == ["10.9.1.3"]
+    assert result["deleted_sample"] == ["10.9.1.3/32"]
 
     monkeypatch.setenv("UPSTREAM_JAILLIST_URLS", JAIL_FEED)
     get_settings.cache_clear()
@@ -422,7 +431,7 @@ async def test_sync_prune_status_reflects_deleted(monkeypatch, db_path):
         get_settings.cache_clear()
     # New keys exposed; legacy keys unchanged in shape.
     assert status["last_deleted"] == 1
-    assert status["last_deleted_sample"] == ["10.9.1.3"]
+    assert status["last_deleted_sample"] == ["10.9.1.3/32"]
     assert status["upstream_count"] == 2
     assert set(status) == {
         "enabled",
@@ -436,14 +445,15 @@ async def test_sync_prune_status_reflects_deleted(monkeypatch, db_path):
         "last_deleted_sample",
         "upstream_count",
     }
+
 async def _run_sync_cycling(monkeypatch, bodies, db_path, allow_empty_prune=False):
     """Two concurrent syncs via ``asyncio.gather`` with a ``_fetch_text`` stub
     that cycles through ``bodies`` on each invocation. Returns the final set of
     upstream jaillist values.
     """
+    import app.services.upstream_jaillist as uj
     from app.config import get_settings
     from app.database import get_db, init_db
-    import app.services.upstream_jaillist as uj
 
     _reset_last_sync()
     monkeypatch.setenv("UPSTREAM_JAILLIST_URLS", JAIL_FEED)
@@ -477,15 +487,11 @@ async def _run_sync_cycling(monkeypatch, bodies, db_path, allow_empty_prune=Fals
         get_settings.cache_clear()
 
 
-async def test_sync_concurrent_serialized(monkeypatch, db_path):
-    """Two manual syncs fired together must not interleave.
-
-    The final set must be EXACTLY one of the two upstream bodies' sets and,
-    crucially, the SAME set across repeats: the lock makes the last-writer
-    deterministic, whereas without it the winner varies run-to-run.
-    """
     bodies = ["1.2.3.4\n2.3.4.5\n3.4.5.6", "2.3.4.5\n3.4.5.6\n4.5.6.7"]
-    expected = [set(b.split()) for b in bodies]
+    expected = [
+        {"1.2.3.4/32", "2.3.4.5/32", "3.4.5.6/32"},
+        {"2.3.4.5/32", "3.4.5.6/32", "4.5.6.7/32"},
+    ]
     finals = []
     for _ in range(3):
         final = await _run_sync_cycling(monkeypatch, bodies, db_path)

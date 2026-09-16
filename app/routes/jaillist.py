@@ -109,14 +109,27 @@ async def bulk_delete_jaillist(payload: JaillistBulkDelete, db=Depends(get_db_co
         return {"deleted": 0}
     deleted = 0
     touched = False
-    for value in payload.values:
+    for raw in payload.values:
+        v = raw.strip()
+        if not v:
+            continue
+        # Normalize like an insert so a stored `ip/32` is matched when the
+        # caller passes a bare `ip`. Also match the passed-in value as-is so
+        # pre-/32 legacy rows (still bare) stay deletable.
+        try:
+            lookup = normalize_jaillist_value(v)
+        except ValueError:
+            lookup = v
+        candidates = (lookup, v) if lookup != v else (lookup,)
+        placeholders = ",".join("?" for _ in candidates)
         cursor = await db.execute(
-            "DELETE FROM jaillist_entries WHERE value = ?", (value,)
+            "DELETE FROM jaillist_entries WHERE value IN"
+            f" ({placeholders})",
+            candidates,
         )
         deleted += cursor.rowcount
         if cursor.rowcount:
             touched = True
-    await db.commit()
     if touched:
         # Regenerate the feed so the public .txt file matches the DB.
         await sync_regenerate_jail(db)
@@ -148,8 +161,19 @@ async def delete_jaillist_entry(
     value: str = Path(min_length=1, max_length=500),
     db=Depends(get_db_conn),
 ):
+    # Normalize like an insert so a stored `ip/32` is matched when the caller
+    # passes a bare `ip`. Also match the passed-in value as-is so pre-/32
+    # legacy rows (still bare) stay deletable.
+    try:
+        lookup = normalize_jaillist_value(value)
+    except ValueError:
+        lookup = value
+    candidates = (lookup, value) if lookup != value else (lookup,)
+    placeholders = ",".join("?" for _ in candidates)
     cursor = await db.execute(
-        "DELETE FROM jaillist_entries WHERE value = ?", (value,)
+        "DELETE FROM jaillist_entries WHERE value IN"
+        f" ({placeholders})",
+        candidates,
     )
     await db.commit()
     if cursor.rowcount == 0:

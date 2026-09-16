@@ -83,7 +83,8 @@ async def init_db():
                 )
                 _targets = await _tgt_cur.fetchall()
                 if _targets:
-                    import json as _json, re as _re
+                    import json as _json
+                    import re as _re
                     for _row in _targets:
                         _url = _row[1] or ""
                         _hits: list[str] = []
@@ -298,6 +299,49 @@ async def init_db():
                 "DELETE FROM blacklist_entries WHERE id = ?", (row["id"],)
             )
 
+    # Migration: rewrite jaillist entries to canonical single-host CIDR
+    # (IPv4 ``ip/32``, IPv6 ``ip/128``). Idempotent and startup-safe. Rows
+    # that cannot be parsed are dropped; rows that collapse onto an existing
+    # canonical value keep the canonical row (source is recomputed from the
+    # surviving rows below).
+    from app.services.jaillist import normalize_jaillist_value
+
+    cursor = await db.execute("SELECT id, value, source FROM jaillist_entries")
+    jaillist_rows = await cursor.fetchall()
+    for row in jaillist_rows:
+        try:
+            canonical = normalize_jaillist_value(row["value"])
+        except ValueError:
+            await db.execute(
+                "DELETE FROM jaillist_entries WHERE id = ?", (row["id"],)
+            )
+            continue
+        if canonical == row["value"]:
+            continue
+        keep_source = row["source"]
+        await db.execute(
+            "DELETE FROM jaillist_entries WHERE id = ?", (row["id"],)
+        )
+        try:
+            await db.execute(
+                "INSERT INTO jaillist_entries (value, source) VALUES (?, ?)",
+                (canonical, keep_source),
+            )
+        except sqlite3.IntegrityError:
+            # A canonical duplicate already exists; promote its source when
+            # the surviving row is merely manual but another source claimed it.
+            await db.execute(
+                """
+                UPDATE jaillist_entries
+                SET source = CASE
+                    WHEN source = 'manual' AND ? != 'manual' THEN ?
+                    ELSE source
+                END
+                WHERE value = ?
+                """,
+                (keep_source, keep_source, canonical),
+            )
+
     # One-time purge of any demo seed rows left over from a prior version.
     # These are the documentation-only IPs used by the old sample seed
     # (RFC 5737 ranges 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24). They
@@ -310,7 +354,6 @@ async def init_db():
         "'10.0.0.4', '10.0.0.5', '10.0.0.6', '10.0.0.7', '10.0.0.8'"
         ")"
     )
-
     await db.commit()
     await db.close()
 
