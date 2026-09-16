@@ -12,10 +12,10 @@ After any insert that touched a feed kind, the static feed files are
 regenerated via ``sync_regenerate`` so the public ``.txt`` feeds match.
 """
 
+import asyncio
 import ipaddress
 import logging
 import re
-import asyncio
 from datetime import UTC, datetime
 
 import aiohttp
@@ -119,10 +119,21 @@ async def _fetch_text(url: str) -> str:
         async with session.get(url, headers=headers, timeout=timeout) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"http_{resp.status}")
-            body = await resp.content.read(MAX_UPSTREAM_BYTES + 1)
-            if len(body) > MAX_UPSTREAM_BYTES:
-                raise RuntimeError("body_too_large")
-            return body.decode("utf-8", errors="replace")
+            # aiohttp's StreamReader caps a single `read(n)` at its internal
+            # `limit` (64 KiB by default). A one-shot `read(MAX+1)` therefore
+            # silently returns a truncated body for any feed larger than 64 KiB
+            # instead of flagging it — entries past the cap are then never
+            # inserted and no error is raised. Read in bounded chunks and reject
+            # only once the cap is exceeded.
+            body = bytearray()
+            while True:
+                chunk = await resp.content.read(65536)
+                if not chunk:
+                    break
+                body.extend(chunk)
+                if len(body) > MAX_UPSTREAM_BYTES:
+                    raise RuntimeError("body_too_large")
+            return bytes(body).decode("utf-8", errors="replace")
 
 
 def _configured_feeds() -> list[tuple[str, str]]:
@@ -270,43 +281,68 @@ async def _do_sync(allow_empty_prune: bool = False) -> dict:
                 feed_name, feed_added, feed_skipped, feed_errors, len(lines),
             )
 
-        # Per-feed prune: delete upstream rows of each kind that are missing
-        # from that feed's fetched set. Manual/finding rows are never touched.
+        # Prune: delete upstream rows of each kind that are missing from the
+        # *union* of every successfully-fetched feed's set for that kind.
+        #
+        # A single feed must NOT prune a kind using only its own subset: when a
+        # feed's content carries the *other* feed's kind (e.g. the URLs feed
+        # lists IP literals, or both feeds list overlapping kinds), per-feed
+        # pruning would delete the sibling feed's freshly-inserted rows — a
+        # silent cross-feed data loss. We therefore compute one keep-set per
+        # kind across all content feeds and prune each kind exactly once.
+        # Manual/finding rows are never touched (source='upstream' predicate).
         feed_deleted = {name: 0 for name in _FEEDS}
         feed_deleted_sample: dict[str, list[str]] = {name: [] for name in _FEEDS}
         feed_deleted_truncated = {name: False for name in _FEEDS}
         feed_prune_skipped = {name: None for name in _FEEDS}
         deleted_kinds: set[str] = set()
-        for feed_name, url in feeds:
+
+        # Union of (kind, value) seen across every successfully-fetched feed,
+        # plus the set of kinds whose only feed came back empty and must be
+        # explicitly wiped (allow_empty_prune).
+        keep_by_kind: dict[str, set[str]] = {}
+        wipe_kinds: set[str] = set()
+        kind_owner = {kind: feed for feed, kind in _FEED_KIND.items()}
+
+        for feed_name, _url in feeds:
             s = feed_seen.get(feed_name, set())
             if not s:
                 if allow_empty_prune:
                     # Explicit wipe of this feed's declared kind.
-                    stale = await _prune_kind(db, _FEED_KIND[feed_name], set())
-                    feed_deleted[feed_name] = len(stale)
-                    feed_deleted_sample[feed_name] = stale[:_DELETED_SAMPLE_CAP]
-                    if stale:
-                        deleted_kinds.add(_FEED_KIND[feed_name])
+                    wipe_kinds.add(_FEED_KIND[feed_name])
                 else:
-                    # Empty parsed set (comments / invalid / blank): pruning
-                    # would wipe all upstream enforcement, so skip the DELETE
-                    # and keep existing rows.
+                    # Empty parsed set (comments / invalid / blank, or a failed
+                    # fetch): pruning would wipe all upstream enforcement for
+                    # this kind, so skip the DELETE and keep existing rows.
                     feed_prune_skipped[feed_name] = "empty-feed"
                     log.warning(
                         "upstream blacklist sync: feed %s empty parsed set, skipping prune",
                         feed_name,
                     )
                 continue
-            # Group seen (kind, value) pairs by kind and prune each kind.
-            by_kind: dict[str, set[str]] = {}
             for kind, value in s:
-                by_kind.setdefault(kind, set()).add(value)
-            for kind, values in by_kind.items():
-                stale = await _prune_kind(db, kind, values)
-                if stale:
-                    feed_deleted[feed_name] += len(stale)
-                    feed_deleted_sample[feed_name].extend(stale[:_DELETED_SAMPLE_CAP])
-                    deleted_kinds.add(kind)
+                keep_by_kind.setdefault(kind, set()).add(value)
+
+        # One prune per kind, using the global keep-set (idempotent regardless
+        # of how many feeds supplied that kind).
+        for kind, keep in keep_by_kind.items():
+            stale = await _prune_kind(db, kind, keep)
+            if stale:
+                owner = kind_owner.get(kind)
+                if owner is not None:
+                    feed_deleted[owner] += len(stale)
+                    feed_deleted_sample[owner].extend(stale[:_DELETED_SAMPLE_CAP])
+                deleted_kinds.add(kind)
+
+        # Explicit wipe (allow_empty_prune) for feeds that came back empty.
+        for kind in wipe_kinds:
+            stale = await _prune_kind(db, kind, set())
+            if stale:
+                owner = kind_owner.get(kind)
+                if owner is not None:
+                    feed_deleted[owner] += len(stale)
+                    feed_deleted_sample[owner].extend(stale[:_DELETED_SAMPLE_CAP])
+                deleted_kinds.add(kind)
 
         deleted = sum(feed_deleted.values())
         deleted_sample: list[str] = []

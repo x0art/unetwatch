@@ -385,6 +385,40 @@ async def test_fetch_text_rejects_oversize_body(monkeypatch, db_path):
     assert out["ok"] is True
     assert out["added"] == 0
     assert ub._LAST_SYNC["feeds"]["urls"]["last_error"] == "body_too_large"
+async def test_fetch_text_reads_full_body_past_streamreader_limit(monkeypatch, db_path):
+    """``_fetch_text`` must return the entire body even when it exceeds aiohttp's
+    StreamReader 64 KiB cap. Regression for silent truncation that dropped every
+    entry past 64 KiB in any feed larger than that (no error raised)."""
+    import http.server
+    import os
+    import socketserver
+    import tempfile
+    import threading
+
+    from app.services import upstream_blacklist as ub
+
+    d = tempfile.mkdtemp()
+    # ~200 KiB body: well above the 64 KiB StreamReader limit, well below the
+    # 1 MiB cap, so it must be read in full (not truncated to 64 KiB).
+    payload = "".join(f"host{i:05d}.example.com\n" for i in range(5000))
+    with open(os.path.join(d, "feed.txt"), "w") as fh:
+        fh.write(payload)
+
+    class _Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=d, **kw)
+
+        def log_message(self, *a):  # silence server logs
+            pass
+
+    httpd = socketserver.TCPServer(("127.0.0.1", 0), _Handler)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        body = await ub._fetch_text(f"http://127.0.0.1:{port}/feed.txt")
+        assert body == payload, f"truncated: got {len(body)} chars, expected {len(payload)}"
+    finally:
+        httpd.shutdown()
 
 
 async def test_upstream_routes(client, monkeypatch):
@@ -496,6 +530,37 @@ async def test_sync_prune_keeps_colliding_manual_row(monkeypatch, db_path):
     # 'upstream') does not touch it, and its value is present in the feed.
     assert rows["collide.example.com"] == "manual"
 
+async def test_sync_cross_feed_kind_collision_keeps_all_rows(monkeypatch, db_path):
+    """A URLs feed that lists IP literals (-> ip kind) must not prune the IPs
+    feed's own IPs. Regression for the cross-feed prune collision that silently
+    deleted sibling-feed rows: each feed previously pruned a kind using only
+    its own subset, wiping the other feed's freshly-inserted entries."""
+    urls_body = (
+        "dom1.example.com\n"
+        "dom2.example.com\n"
+        "dom3.example.com\n"
+        "203.0.113.1\n"
+        "203.0.113.2\n"
+    )
+    ips_body = (
+        "198.51.100.1\n"
+        "198.51.100.2\n"
+        "198.51.100.3\n"
+    )
+    result = await _run_sync(monkeypatch, urls_body, db_path, ips_body=ips_body)
+    assert result["ok"] is True
+    # Nothing should be pruned; every fetched value is retained.
+    assert result["deleted"] == 0
+    assert await _upstream_kind_count("url") == 3
+    assert await _upstream_kind_count("ip") == 5
+    rows = {v for k, v, s in await _all_entries() if k == "ip"}
+    assert rows == {
+        "203.0.113.1",
+        "203.0.113.2",
+        "198.51.100.1",
+        "198.51.100.2",
+        "198.51.100.3",
+    }
 
 async def test_sync_prune_disabled_feed_preserves_other_feed(monkeypatch, db_path):
     # urls feed disabled -> no prune; ips feed still works.
@@ -656,9 +721,9 @@ async def _run_sync_cycling_ips(monkeypatch, ips_bodies, db_path, allow_empty_pr
     disabled so the assertion focuses purely on ip-entries. Returns the final
     set of upstream ip values.
     """
+    import app.services.upstream_blacklist as ub
     from app.config import get_settings
     from app.database import get_db, init_db
-    import app.services.upstream_blacklist as ub
 
     monkeypatch.setenv("UPSTREAM_BLACKLIST_URLS", "")
     monkeypatch.setenv("UPSTREAM_BLACKLIST_IPS", IPS_FEED)
