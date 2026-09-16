@@ -37,18 +37,31 @@ _LAST_SYNC: dict = {
     "last_skipped": 0,
     "last_errors": 0,
     "last_error": None,
+    "last_deleted": 0,
+    "last_deleted_sample": [],
 }
 
+# Max deleted values included in the `deleted_sample` (sync result) and
+# `last_deleted_sample` (status). Also the chunk size for the prune
+# DELETE, comfortably below SQLite's variable limit even for ~50k feeds.
+_DELETED_SAMPLE_CAP = 100
 
-async def sync_upstream_jaillist() -> dict:
+
+async def sync_upstream_jaillist(allow_empty_prune: bool = False) -> dict:
     """Fetch the configured upstream jaillist and merge it into
     ``jaillist_entries``.
 
     Never raises — every failure is returned as
     ``{"ok": False, "reason": ...}``. No configured feed means disabled.
+
+    Rows with ``source='upstream'`` that are missing from the fetched
+    set are pruned (manual/finding rows are never touched). An empty
+    parsed set skips the prune unless ``allow_empty_prune`` is set —
+    a transient empty/comment-only/all-invalid file must not wipe
+    enforcement.
     """
     try:
-        result = await _do_sync()
+        result = await _do_sync(allow_empty_prune)
         _LAST_SYNC["last_error"] = None
         return result
     except Exception as e:
@@ -58,7 +71,7 @@ async def sync_upstream_jaillist() -> dict:
         return {"ok": False, "reason": reason}
 
 
-async def _do_sync() -> dict:
+async def _do_sync(allow_empty_prune: bool = False) -> dict:
     from app.config import get_settings
     from app.database import get_db
     from app.services.feeds import sync_regenerate_jail
@@ -101,8 +114,41 @@ async def _do_sync() -> dict:
                 touched = True
             else:
                 skipped += 1
+        deleted = 0
+        deleted_sample: list[str] = []
+        deleted_truncated = False
+        prune_skipped: str | None = None
+        if not seen and not allow_empty_prune:
+            # Empty parsed set (comments / invalid / blank file): pruning
+            # would wipe all upstream enforcement, so skip the DELETE and
+            # keep existing rows.
+            prune_skipped = "empty-feed"
+            log.warning("upstream jaillist sync: empty parsed set, skipping prune")
+        else:
+            # Collect existing upstream values and diff against `seen`.
+            cursor = await db.execute(
+                "SELECT value FROM jaillist_entries WHERE source = 'upstream'"
+                " ORDER BY value"
+            )
+            existing = [row[0] for row in await cursor.fetchall()]
+            stale = sorted(v for v in existing if v not in seen)
+            if stale:
+                deleted = len(stale)
+                deleted_sample = stale[:_DELETED_SAMPLE_CAP]
+                deleted_truncated = deleted > _DELETED_SAMPLE_CAP
+                # Chunked DELETE stays under SQLite's variable limit
+                # (~50k-line feeds).
+                for i in range(0, deleted, _DELETED_SAMPLE_CAP):
+                    chunk = stale[i:i + _DELETED_SAMPLE_CAP]
+                    placeholders = ",".join("?" for _ in chunk)
+                    await db.execute(
+                        "DELETE FROM jaillist_entries"
+                        f" WHERE source = 'upstream' AND value IN"
+                        f" ({placeholders})",
+                        tuple(chunk),
+                    )
         await db.commit()
-        if touched:
+        if touched or deleted:
             # Regenerate the jail feed so the public .txt matches.
             await sync_regenerate_jail(db)
     finally:
@@ -114,24 +160,33 @@ async def _do_sync() -> dict:
             "last_added": added,
             "last_skipped": skipped,
             "last_errors": len(errors),
+            "last_deleted": deleted,
+            "last_deleted_sample": deleted_sample,
         }
     )
     log.info(
-        "upstream jaillist sync: added=%d skipped=%d errors=%d fetched=%d",
-        added, skipped, len(errors), fetched,
+        "upstream jaillist sync: added=%d skipped=%d errors=%d fetched=%d"
+        " deleted=%d",
+        added, skipped, len(errors), fetched, deleted,
     )
     if errors:
         log.debug(
             "upstream jaillist sync error samples: %r",
             [str(e["value"])[:120] for e in errors[:3]],
         )
-    return {
+    result: dict = {
         "ok": True,
         "added": added,
         "skipped": skipped,
         "errors": errors,
         "fetched": fetched,
+        "deleted": deleted,
+        "deleted_sample": deleted_sample,
+        "deleted_truncated": deleted_truncated,
     }
+    if prune_skipped is not None:
+        result["prune_skipped"] = prune_skipped
+    return result
 
 
 async def get_upstream_status() -> dict:
@@ -164,5 +219,7 @@ async def get_upstream_status() -> dict:
         "last_skipped": _LAST_SYNC["last_skipped"],
         "last_errors": _LAST_SYNC["last_errors"],
         "last_error": _LAST_SYNC["last_error"],
+        "last_deleted": _LAST_SYNC["last_deleted"],
+        "last_deleted_sample": _LAST_SYNC["last_deleted_sample"],
         "upstream_count": upstream_count,
     }
