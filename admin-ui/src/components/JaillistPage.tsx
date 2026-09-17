@@ -11,6 +11,7 @@ import {
   type JaillistUpstreamStatus,
 } from "../api"
 import { FeedCard, type UpstreamFeedState } from "./BlacklistPage"
+import { copyText } from "../lib/utils"
 import {
   Button,
   ConfirmDialog,
@@ -127,12 +128,9 @@ export function JaillistPage() {
 
   const copy = useCallback(
     async (text: string, label: string) => {
-      try {
-        await navigator.clipboard.writeText(text)
-        toast({ title: `${label} copied`, variant: "success" })
-      } catch {
-        toast({ title: "Copy failed", variant: "error" })
-      }
+      const ok = await copyText(text)
+      if (ok) toast({ title: `${label} copied`, variant: "success" })
+      else toast({ title: "Copy failed", variant: "error" })
     },
     [toast],
   )

@@ -19,6 +19,7 @@ import {
   syncBlacklistUpstream,
   type BlacklistUpstreamStatus,
 } from "../api"
+import { copyText } from "../lib/utils"
 import {
   Button,
   Card,
@@ -391,12 +392,9 @@ export function BlacklistPage() {
 
   const copy = useCallback(
     async (text: string, label: string) => {
-      try {
-        await navigator.clipboard.writeText(text)
-        toast({ title: `${label} copied`, variant: "success" })
-      } catch {
-        toast({ title: "Copy failed", variant: "error" })
-      }
+      const ok = await copyText(text)
+      if (ok) toast({ title: `${label} copied`, variant: "success" })
+      else toast({ title: "Copy failed", variant: "error" })
     },
     [toast],
   )
