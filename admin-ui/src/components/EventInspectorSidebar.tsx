@@ -97,7 +97,7 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
   const durationMs = getDurationMs(row)
   const matchedRule = getMatchedRule(row)
   const rowId = getRowId(row)
-  const domainVal = row.domain ?? row.base_url ?? hostOfUrl(row.url ?? "")
+  const domainVal = row.domain || row.category || row.base_url || hostOfUrl(row.url ?? "")
   const isRisky = row.action === "ALLOW" && (row as unknown as { blacklisted?: boolean }).blacklisted === true
 
   const handleAddToAllowList = () => {
@@ -216,11 +216,6 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
                     <p className="text-foreground">{row.country_code}</p>
                   </CopyField>
                 )}
-                {row.user_id && (
-                  <CopyField label="User ID" copyValue={row.user_id}>
-                    <p className="text-foreground">{row.user_id}</p>
-                  </CopyField>
-                )}
               </Section>
 
               {/* ── Destination ── */}
@@ -234,6 +229,13 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
                 {row.category && (
                   <CopyField label="Category" copyValue={row.category}>
                     <p className="text-foreground">{row.category}</p>
+                  </CopyField>
+                )}
+                {row.user_id && (
+                  <CopyField label="User ID (proxy)" copyValue={row.user_id}>
+                    <p className="text-foreground" title="The proxy's user slot — carries the client IP when there is no authenticated user.">
+                      {row.user_id}
+                    </p>
                   </CopyField>
                 )}
               </Section>

@@ -139,6 +139,35 @@ async def test_top_enforced_endpoint(client, db_path):
     ]
 
 
+async def test_top_enforced_primary_rule_empty_when_patterns_absent(client, db_path):
+    """A doc with no ``matched_patterns`` must never serve the literal
+    ``"matched"`` as ``primaryRule`` — that reads like a rule name.
+
+    The operator's logstash-proxy docs carry no ``matched_patterns`` field
+    (the backend default-fills it with ``""``), so the honest served value is
+    empty and the UI renders an em-dash.
+    """
+    await _seed(
+        client,
+        db_path,
+        [
+            ("1.1.1.1", "", "http://evil.example/a", "evil.example", _now(), "", "DENY"),
+        ],
+        add_action_col=True,
+    )
+
+    res = client.get("/api/analytics/top-enforced?range=7d")
+    assert res.status_code == 200
+    items = res.json()["items"]
+    assert len(items) == 1
+    assert items[0]["primaryRule"] != "matched"
+    assert items[0]["primaryRule"] == ""
+
+    # The legacy alias serves the same honest value.
+    ldata = client.get("/api/analytics/top-denied?range=7d").json()
+    assert ldata["items"][0]["primaryRule"] == ""
+
+
 async def test_summary_blacklisted_allow_is_additive_risk(client, db_path):
     """A blacklisted destination whose request was ALLOWed is the highest-risk
     signal: it counts in ``totalRisk`` AND as the distinct additive

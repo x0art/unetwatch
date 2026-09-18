@@ -212,15 +212,15 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     id: "base_url",
     header: "Base URL",
     filterType: "text",
-    accessor: (d) => d.base_url,
+    accessor: (d) => d.base_url || d.category,
     defaultSortDir: "asc",
     cell: (d) => (
       <span className="flex items-center gap-1.5">
-        <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url}>
-          {d.base_url}
+        <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url || d.category}>
+          {d.base_url || d.category}
         </span>
-        <QuickNavCell kind="url" value={d.base_url} label="Open in URL Investigation" />
-        <CopyCell value={d.base_url} label="Base URL" />
+        <QuickNavCell kind="url" value={d.base_url || d.category || ""} label="Open in URL Investigation" />
+        <CopyCell value={d.base_url || d.category || ""} label="Base URL" />
       </span>
     ),
   },

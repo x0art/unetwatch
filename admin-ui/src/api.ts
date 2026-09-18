@@ -1778,7 +1778,8 @@ export interface AnalyticsTopDomains {
 export interface TopDeniedRow {
   domain: string
   blocks: number
-  primaryRule: string
+  /** First matched pattern, or empty when the doc carries no rule info. */
+  primaryRule?: string | null
 }
 
 export interface AnalyticsTopDenied {
@@ -1794,7 +1795,8 @@ export interface TopEnforcedRow {
   domain: string
   count: number // requests
   enforcements: number
-  primaryRule: string
+  /** First matched pattern, or empty when the doc carries no rule info. */
+  primaryRule?: string | null
 }
 
 export interface AnalyticsTopEnforced {

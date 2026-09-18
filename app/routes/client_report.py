@@ -58,10 +58,16 @@ def _parse_matched_patterns(raw) -> list:
 
 
 def _primary_rule(matched_patterns: str | None) -> str:
+    """First matched pattern, or ``""`` when there is no rule information.
+
+    The proxy's documents carry no ``matched_patterns`` field at all (the
+    backend default-fills it with ``""``), so an empty result is the norm —
+    never a literal like ``"matched"``, which reads as a rule name downstream.
+    """
     pats = _parse_matched_patterns(matched_patterns)
     if isinstance(pats, list) and pats:
         return str(pats[0])
-    return "matched"
+    return ""
 
 
 def _row_is_enforced(row: dict, has_action: bool) -> bool:
@@ -217,7 +223,7 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
             # fallback to primary rule scan
             for r in rows:
                 pr = _primary_rule(r.get("matched_patterns"))
-                if pr != "matched":
+                if pr:
                     pat_counts[pr] = pat_counts.get(pr, 0) + 1
         top_pattern = max(pat_counts, key=pat_counts.get) if pat_counts else None
 
@@ -337,7 +343,7 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
                 pr = _primary_rule(r.get("matched_patterns"))
                 pr_counter[pr] += 1
             if pr_counter:
-                top_patterns = [{"pattern": p, "hits": c} for p, c in pr_counter.most_common(10) if p != "matched"]
+                top_patterns = [{"pattern": p, "hits": c} for p, c in pr_counter.most_common(10) if p]
 
     return {
         "client_ip": client_ip,

@@ -116,11 +116,16 @@ def _parse_matched_patterns(raw) -> list:
 
 
 def _primary_rule(matched_patterns: str | None) -> str:
-    """First matched pattern, or a stable fallback label when unavailable."""
+    """First matched pattern, or ``""`` when there is no rule information.
+
+    The proxy's documents have no ``matched_patterns`` field at all (the
+    backend default-fills it with ``""``), so an empty result is the norm —
+    never a literal like ``"matched"``, which reads as a rule name downstream.
+    """
     pats = _parse_matched_patterns(matched_patterns)
     if isinstance(pats, list) and pats:
         return str(pats[0])
-    return "matched"
+    return ""
 
 
 def _row_is_enforced(row: dict, has_action: bool) -> bool:
@@ -765,13 +770,14 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
         if enforced.empty:
             return []
 
-        # matched_patterns may be absent from the projection — degrade per row.
+        # matched_patterns may be absent from the projection — degrade per row
+        # to "" (no rule information) rather than a literal that reads as a name.
         def _first_rule(raw) -> str:
             try:
                 pats = json.loads(raw) if raw else []
             except (json.JSONDecodeError, TypeError):
-                return "matched"
-            return str(pats[0]) if pats else "matched"
+                return ""
+            return str(pats[0]) if pats else ""
 
         by_domain: dict[str, dict] = {}
         for r in enforced.to_dict("records"):

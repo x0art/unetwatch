@@ -123,7 +123,7 @@ function formatHour(iso: string): string {
 function buildTopDomains(items: QueryDoc[]): TopDomain[] {
   const counts = new Map<string, number>()
   for (const it of items) {
-    const domain = it.base_url || hostOfUrl(it.url) || "unknown"
+    const domain = it.base_url || it.category || hostOfUrl(it.url) || "unknown"
     counts.set(domain, (counts.get(domain) ?? 0) + 1)
   }
   const total = Math.max(1, items.length)

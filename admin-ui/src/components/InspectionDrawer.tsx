@@ -150,8 +150,8 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
                 <CopyField label="Dest IP" copyValue={destIp}>
                   <p className="text-foreground">{destIp || "—"}</p>
                 </CopyField>
-                <CopyField label="Domain" copyValue={row.domain ?? row.base_url ?? hostOfUrl(row.url ?? "")}>
-                  <p className="text-foreground">{row.domain || row.base_url || hostOfUrl(row.url ?? "") || "—"}</p>
+                <CopyField label="Domain" copyValue={row.domain || row.category || row.base_url || hostOfUrl(row.url ?? "")}>
+                  <p className="text-foreground">{row.domain || row.category || row.base_url || hostOfUrl(row.url ?? "") || "—"}</p>
                 </CopyField>
                 <CopyField label="Action" copyValue={row.action ?? ""}>
                   <p>
@@ -208,8 +208,10 @@ export function InspectionDrawer({ row, onClose, onNavigate }: InspectionDrawerP
                     {row.rule_name && row.rule_name !== "-" ? row.rule_name : row.rule_info || "—"}
                   </p>
                 </CopyField>
-                <CopyField label="User ID" copyValue={row.user_id ?? ""}>
-                  <p className="text-foreground">{row.user_id || "—"}</p>
+                <CopyField label="User ID (proxy)" copyValue={row.user_id ?? ""}>
+                  <p className="text-foreground" title="The proxy's user slot — carries the client IP when there is no authenticated user.">
+                    {row.user_id || "—"}
+                  </p>
                 </CopyField>
               </div>
 
