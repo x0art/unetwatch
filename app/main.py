@@ -17,8 +17,10 @@ from app.database import init_db, seed_defaults
 from app.routes import auth as auth_routes
 from app.routes import (
     analytics,
+    attck,
     backup,
     blacklist,
+    enrich,
     findings,
     hosts,
     jaillist,
@@ -217,7 +219,8 @@ app.include_router(redirects.router, dependencies=[Depends(verify_admin)])
 app.include_router(query.router, dependencies=[Depends(verify_admin)])
 app.include_router(analytics.router, dependencies=[Depends(verify_admin)])
 app.include_router(backup.router, dependencies=[Depends(verify_admin)])
-app.include_router(hosts.router, dependencies=[Depends(verify_admin)])
+app.include_router(attck.router, dependencies=[Depends(verify_admin)])
+app.include_router(enrich.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 

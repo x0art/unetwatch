@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   CheckCircle2,
+  FileText,
   Globe,
   Link2,
   Search,
@@ -18,6 +19,8 @@ import {
   getUrlBreakdown,
   type UrlBreakdown,
   type UrlClientCount,
+  getUrlAttckMapping,
+  type AttckMapping,
 } from "../api"
 import {
   Badge,
@@ -32,6 +35,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
+import { AttckPanel } from "./AttckPanel"
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -61,11 +65,10 @@ function looksLikeUrl(s: string): boolean {
 /* ── Page ───────────────────────────────────────────────────────────── */
 
 type UrlSource = "live" | "findings"
-
 export function UrlInvestigationPage({
   onNavigate,
 }: {
-  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void
+  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url" | "report-url") => void
 } = {}) {
   const { toast } = useToast()
   const { globalFilter, setGlobalFilter } = useFilter()
@@ -78,6 +81,9 @@ export function UrlInvestigationPage({
 
   // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+  const [attckMapping, setAttckMapping] = useState<AttckMapping | null>(null)
+  const [attckLoading, setAttckLoading] = useState(false)
+  const [attckError, setAttckError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     getJaillistSet()
@@ -103,6 +109,8 @@ export function UrlInvestigationPage({
     setLoading(true)
     setError(null)
     setSearched(trimmed)
+    setAttckMapping(null)
+    setAttckError(null)
     try {
       const res = await getUrlBreakdown(trimmed, { limit: 100, source: uSource })
       setResult(res)
@@ -126,11 +134,26 @@ export function UrlInvestigationPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalFilter])
 
-  useEffect(() => {
-    if (searched && !loading) void investigate(searched)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uSource])
 
+  // ── ATT&CK mapping ──
+  const fetchAttck = useCallback(() => {
+    if (!searched) return
+    setAttckLoading(true)
+    setAttckError(null)
+    void getUrlAttckMapping(searched, { source: uSource, limit: 100 })
+      .then((data) => setAttckMapping(data))
+      .catch((e) => {
+        setAttckMapping(null)
+        setAttckError((e as Error).message)
+      })
+      .finally(() => setAttckLoading(false))
+  }, [searched, uSource])
+
+  useEffect(() => {
+    if (!result || !searched) return
+    fetchAttck()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, searched, uSource])
   const handleViewHost = (ip: string) => {
     setGlobalFilter(ip)
     try {
@@ -139,6 +162,17 @@ export function UrlInvestigationPage({
       /* ignore */
     }
     onNavigate?.("host")
+  }
+
+  const handleViewReport = () => {
+    if (!result || !searched) return
+    setGlobalFilter(searched)
+    try {
+      window.localStorage.setItem("unetwatch_view", "report-url")
+    } catch {
+      /* ignore */
+    }
+    onNavigate?.("report-url")
   }
 
   const handleWhitelist = async () => {
@@ -227,7 +261,12 @@ export function UrlInvestigationPage({
       <PageHeader
         title="URL Investigation"
         description="Investigate who reached a URL - clients, risk status, and enforcement actions."
-      />
+      >
+        <Button variant="outline" onClick={handleViewReport} disabled={!result} aria-label="View Report">
+          <FileText className="h-4 w-4" aria-hidden="true" />
+          View Report
+        </Button>
+      </PageHeader>
 
       {/* Standardized search toolbar - matches Host Investigation's card form. */}
       <form
@@ -309,6 +348,15 @@ export function UrlInvestigationPage({
               hint="Where the breakdown comes from"
             />
           </div>
+
+          {/* MITRE ATT&CK Mapping panel */}
+          <AttckPanel
+            mapping={attckMapping}
+            loading={attckLoading}
+            error={attckError}
+            entityLabel="URL"
+            onRetry={fetchAttck}
+          />
 
           {/* Actions — target the investigated URL, not just its host. */}
           <div className="flex flex-wrap gap-2">

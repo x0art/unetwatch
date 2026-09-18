@@ -14,7 +14,7 @@ import { AddPatternDialog, AddPatternButton } from "./components/AddPatternDialo
 import { AddBlacklistDialog, AddBlacklistButton } from "./components/AddBlacklistDialog"
 import { AddJaillistDialog, AddJaillistButton } from "./components/AddJaillistDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
-import { FilterProvider } from "./contexts/FilterContext"
+import { FilterProvider, useFilter } from "./contexts/FilterContext"
 import { ToastProvider, Skeleton } from "./components/ui"
 import { MotionGate } from "./components/motion"
 import { GlobalSearchPalette } from "./components/GlobalSearchPalette"
@@ -61,6 +61,14 @@ const AnalyticsPage = lazy(() =>
   import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
 )
 
+const ReportPage = lazy(() =>
+  import("./components/ReportPage").then((m) => ({ default: m.ReportPage })),
+)
+
+/** Report views render ReportPage; hidden from the sidebar by design. */
+export type ReportView = "report-host" | "report-url"
+export type AppView = View | ReportView
+
 function PageFallback() {
   return (
     <div className="space-y-4" aria-busy="true">
@@ -80,9 +88,9 @@ function AppRoutes() {
   const pageVisible = usePageVisible()
   const [standalonePath] = useState(isStandalonePath)
   const VIEW_KEY = "unetwatch_view"
-  const storedView = localStorage.getItem(VIEW_KEY) as View | null
-  const [view, setView] = useState<View>(
-    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "jaillist", "redirects", "logs", "host", "url", "analytics"].includes(storedView)
+  const storedView = localStorage.getItem(VIEW_KEY) as AppView | null
+  const [view, setView] = useState<AppView>(
+    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "jaillist", "redirects", "logs", "host", "url", "analytics", "report-host", "report-url"].includes(storedView)
       ? storedView
       : "dashboard",
   )
@@ -98,6 +106,10 @@ function AppRoutes() {
   const [patternDialogOpen, setPatternDialogOpen] = useState(false)
   const [blacklistDialogOpen, setBlacklistDialogOpen] = useState(false)
   const [jaillistDialogOpen, setJaillistDialogOpen] = useState(false)
+
+  // Report views read their target from the global filter (same pattern as
+  // HostInspectorPage picking up its target); reports stay hidden from nav.
+  const { globalFilter } = useFilter()
 
   // Countdown timer — computed from the backend's last_poll_at timestamp
   const intervalSec = (status?.poll_interval_minutes ?? 10) * 60
@@ -184,9 +196,9 @@ function AppRoutes() {
   }, [pageVisible])
 
   // Navigation — keeps pages mounted so their content persists across switches
-  // (no reset on every tab change). The Ctrl+K palette applies its search via
-  // the dedicated external-search state AFTER navigation.
-  const handleNavigate = useCallback((next: View, _search?: string) => {
+  // (no reset on every tab change). Accepts report views too; the sidebar and
+  // palette keep passing plain View values which remain assignable.
+  const handleNavigate = useCallback((next: AppView, _search?: string) => {
     setView(next)
     setVisited((prev) => new Set(prev).add(next))
   }, [])
@@ -219,7 +231,7 @@ function AppRoutes() {
 
   return (
     <AppShell
-      currentView={view}
+      currentView={view === "report-host" ? "host" : view === "report-url" ? "url" : view}
       onNavigate={handleNavigate}
       onLogout={handleLogout}
       title="uNetWatch"
@@ -308,6 +320,16 @@ function AppRoutes() {
         {visited.has("analytics") && (
           <div hidden={view !== "analytics"}>
             <AnalyticsPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("report-host") && (
+          <div hidden={view !== "report-host"}>
+            <ReportPage kind="host" value={globalFilter} onBack={() => handleNavigate("host")} />
+          </div>
+        )}
+        {visited.has("report-url") && (
+          <div hidden={view !== "report-url"}>
+            <ReportPage kind="url" value={globalFilter} onBack={() => handleNavigate("url")} />
           </div>
         )}
       </Suspense>

@@ -12,10 +12,12 @@ import {
   ShieldAlert,
   ShieldCheck,
   Download,
+  FileText,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
 import { Button, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
+import { AttckPanel } from "./AttckPanel"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
 import { TopDestinations, type TopDomain, type TriggeredPattern } from "./TopDestinations"
@@ -36,6 +38,8 @@ import {
   type HostProfile,
   type ClientReport,
   type Finding,
+  getHostAttckMapping,
+  type AttckMapping,
 } from "../api"
 import { SankeyDiagram } from "./SankeyDiagram"
 import {
@@ -386,7 +390,7 @@ function buildDemoRowsFiltered(
 export function HostInspectorPage({
   onNavigate,
 }: {
-  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void
+  onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url" | "report-host") => void
 } = {}) {
   const { globalFilter, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const { toast } = useToast()
@@ -399,6 +403,9 @@ export function HostInspectorPage({
 
   const [sections, setSections] = useState<HostSectionData | null>(null)
   const [sectionsLoading, setSectionsLoading] = useState(false)
+  const [attckMapping, setAttckMapping] = useState<AttckMapping | null>(null)
+  const [attckLoading, setAttckLoading] = useState(false)
+  const [attckError, setAttckError] = useState<string | null>(null)
   const [sectionsError, setSectionsError] = useState<string | null>(null)
   const [actionFilter, setActionFilter] = useState("All")
   const [hSource, setHSource] = useState<HostSource>("live")
@@ -489,6 +496,26 @@ export function HostInspectorPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hSource])
+  // ── ATT&CK mapping ──
+  const fetchAttck = useCallback(() => {
+    const ip = (host as unknown as { primaryIp: string } | null)?.primaryIp || target
+    if (!ip) return
+    setAttckLoading(true)
+    setAttckError(null)
+    void getHostAttckMapping(ip, { timeRange })
+      .then((data) => setAttckMapping(data))
+      .catch((e) => {
+        setAttckMapping(null)
+        setAttckError((e as Error).message)
+      })
+      .finally(() => setAttckLoading(false))
+  }, [host, target, timeRange])
+
+  useEffect(() => {
+    if (!host || loading) return
+    fetchAttck()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, timeRange])
 
   // Shared sections loader: uses the cleaned host string, falls back to
   // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
@@ -519,7 +546,8 @@ export function HostInspectorPage({
     setHasSearched(true)
     setHost(null)
     setSections(null)
-    setReport(null)
+    setAttckMapping(null)
+    setAttckError(null)
     setSectionsLoading(false)
     setReportLoading(false)
     try {
@@ -620,6 +648,21 @@ export function HostInspectorPage({
     }
     onNavigate?.("host")
   }, [setGlobalFilter, onNavigate])
+
+  const handleViewReport = useCallback(() => {
+    const current = (host?.primaryIp || target).trim()
+    if (!current) {
+      toast({ title: "No host selected", description: "Run a lookup first.", variant: "info" })
+      return
+    }
+    setGlobalFilter(current)
+    try {
+      window.localStorage.setItem("unetwatch_view", "report-host")
+    } catch {
+      /* ignore */
+    }
+    onNavigate?.("report-host")
+  }, [host, onNavigate, setGlobalFilter, target, toast])
 
   const openUrlInInvestigation = useCallback((url: string) => {
     if (!url) return
@@ -952,6 +995,7 @@ export function HostInspectorPage({
           <>
             <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF"><Printer className="h-4 w-4" aria-hidden="true" />Print / PDF</Button>
             <Button variant="outline" onClick={handleExportCsv} aria-label="Export CSV" disabled={!report?.has_data}><Database className="h-4 w-4" aria-hidden="true" />CSV</Button>
+            <Button variant="outline" onClick={handleViewReport} aria-label="View Report"><FileText className="h-4 w-4" aria-hidden="true" />View Report</Button>
           </>
         ) : (
           <>
@@ -959,6 +1003,7 @@ export function HostInspectorPage({
               <Download className="h-4 w-4" aria-hidden="true" />
               Export Report
             </Button>
+            <Button variant="outline" onClick={handleViewReport} aria-label="View Report"><FileText className="h-4 w-4" aria-hidden="true" />View Report</Button>
           </>
         )}
       </PageHeader>
@@ -1010,6 +1055,14 @@ export function HostInspectorPage({
         <HostEntityCard host={host} risk={host.risk} jailed={!!jailedIndex[host.primaryIp]} />
       )}
 
+      {/* MITRE ATT&CK Mapping panel */}
+      <AttckPanel
+        mapping={attckMapping}
+        loading={attckLoading}
+        error={attckError}
+        entityLabel="Host"
+        onRetry={fetchAttck}
+      />
       {!loading && !error && !host && hasSearched && (
         <EmptyState icon={SearchX} title="No host found" description={`No data for "${target}" in the selected window.`} action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Search again</Button>} />
       )}
@@ -1184,6 +1237,15 @@ export function HostInspectorPage({
                 <StatCard icon={Server} label="Total Volume" value={volumeValue} tone="default" hint={`bytes + 8 KiB fallback · ${report.distinct_domains} domains`} />
                 <StatCard icon={Activity} label="Peak Hour" value={report.peak_hour || "—"} tone="default" hint={`${report.distinct_urls} distinct URLs`} />
               </div>
+
+              {/* MITRE ATT&CK Mapping panel */}
+              <AttckPanel
+                mapping={attckMapping}
+                loading={attckLoading}
+                error={attckError}
+                entityLabel="Host"
+                onRetry={fetchAttck}
+              />
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <Panel title="Daily Bandwidth (GB)" icon={Activity} description="inbound vs outbound">

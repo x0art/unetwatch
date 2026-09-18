@@ -463,6 +463,38 @@ async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   return res.json()
 }
 
+/* ── Dependency probe (report provenance) ────────────────────────── */
+
+export interface HealthResponse {
+  status: "ok" | "degraded"
+  version: string
+  dependencies: Record<string, string>
+}
+
+/** Explicit Elasticsearch reachability probe for report provenance.
+ *
+ * NOTE: /health is mounted at the app ROOT, not under /api (app/main.py:257)
+ * — the SPA catch-all would otherwise answer /api/health with index.html and
+ * a 200, silently yielding garbage. It always answers and reports
+ * `dependencies.elasticsearch` as "ok" | "unreachable". Returns `null`
+ * when the probe could not be interpreted (non-JSON, missing key, network
+ * error) — callers must render that as unknown, never as a boolean. */
+export async function probeEsHealth(): Promise<boolean | null> {
+  try {
+    const res = await fetch("/health", { headers: { Accept: "application/json" } })
+    if (!res.ok) return null
+    const ct = res.headers.get("content-type") ?? ""
+    if (!ct.includes("application/json")) return null
+    const data = (await res.json()) as HealthResponse
+    const es = data?.dependencies?.elasticsearch
+    if (es === "ok") return true
+    if (es === "unreachable") return false
+    return null
+  } catch {
+    return null
+  }
+}
+
 /* ── Pattern CRUD ────────────────────────────────────────────────── */
 
 export async function listPatterns(params?: {
@@ -1479,6 +1511,9 @@ export interface HostRisk {
 export interface HostProfile extends HostIdentity {
   ip: string
   risk: HostRisk
+  /** True when this profile is a hardcoded wireframe placeholder (no real
+   * data existed for the entity). MUST NOT be treated as evidence. */
+  placeholder?: boolean
 }
 
 function hostRiskFromShares(totalRequests: number, riskRequests: number): { level: HostRisk["riskLevel"]; score: number } {
@@ -1637,6 +1672,7 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   const isWireframeIp = cleanIp === "192.168.1.45"
   if (isWireframeIp) {
     return {
+      placeholder: true,
       hostname: "Dev-Workstation-04",
       primaryIp: "192.168.1.45",
       ip: cleanIp,
@@ -2062,3 +2098,81 @@ export async function importBackup(file: File, dryRun: boolean): Promise<BackupI
   })
 }
 
+
+/* ── MITRE ATT&CK Mapping ─────────────────────────────────── */
+
+export interface AttckSignal {
+  // Host signals
+  total_requests?: number
+  risk_requests?: number
+  enforcements?: number
+  blacklisted_requests?: number
+  distinct_domains?: number
+  distinct_dest_ips?: number
+  distinct_http_methods?: number
+  total_bytes?: number
+  risk_share?: number
+  periodicity_score?: number
+  cdn_domain_count?: number
+  time_span_hours?: number
+  // URL signals
+  total_accesses?: number
+  distinct_clients?: number
+  last_seen?: string | null
+  first_seen?: string | null
+  host_is_cdn?: boolean
+  host_is_proxy?: boolean
+}
+
+export interface AttckTechnique {
+  technique_id: string
+  name: string
+  severity: "HIGH" | "MEDIUM" | "LOW"
+  description: string
+  evidence: Record<string, unknown>
+}
+
+export interface AttckMapping {
+  entity: { kind: "host" | "url"; value: string }
+  generated_at: string
+  data_sources: string[]
+  es_online: boolean
+  signals: AttckSignal
+  techniques: AttckTechnique[]
+  summary: string
+}
+
+export async function getHostAttckMapping(
+  ip: string,
+  params?: { minutes?: number; timeRange?: string },
+): Promise<AttckMapping> {
+  const qs = new URLSearchParams()
+  if (params?.minutes) qs.set("minutes", String(params.minutes))
+  if (params?.timeRange) qs.set("timeRange", params.timeRange)
+  const q = qs.toString() ? `?${qs}` : ""
+  return request(`/attck/host/${encodeURIComponent(ip)}${q}`)
+}
+
+export async function getUrlAttckMapping(
+  url: string,
+  params?: { source?: "findings" | "live"; limit?: number },
+): Promise<AttckMapping> {
+  const qs = new URLSearchParams()
+  if (params?.source) qs.set("source", params.source)
+  if (params?.limit) qs.set("limit", String(params.limit))
+  const q = qs.toString() ? `?${qs}` : ""
+  return request(`/attck/url/${encodeURIComponent(url)}${q}`)
+}
+/* ── Network Enrichment ─────────────────────────────────── */
+export interface EnrichLookup { status: string; hostname?: string | null; addresses?: string[]; error?: string | null }
+export interface EnrichRdap { status: string; handle: string | null; org: string | null; country: string | null; abuse_contact: string | null; raw_url: string | null; error: string | null }
+export interface EnrichHost { entity: { kind: "host"; value: string }; checked_at: string; ip_version: string; reverse_dns: EnrichLookup; forward_dns: EnrichLookup; rdap: EnrichRdap; notes: string[] }
+export interface EnrichTls { status: string; subject: string | null; issuer: string | null; not_after: string | null; san: string[]; error: string | null }
+export interface EnrichHttp { status: string; status_code: number | null; server: string | null; final_url: string | null; redirects: number; error: string | null }
+export interface EnrichUrl { entity: { kind: "url"; value: string }; checked_at: string; host: string; is_ip_literal: boolean; resolved_ips: string[]; reverse_dns: EnrichLookup; tls: EnrichTls; http: EnrichHttp; rdap: EnrichRdap; notes: string[] }
+export async function getHostEnrichment(ip: string, timeoutS = 3): Promise<EnrichHost> {
+  return request(`/enrich/host/${encodeURIComponent(ip)}?timeout_s=${timeoutS}`)
+}
+export async function getUrlEnrichment(url: string, timeoutS = 3): Promise<EnrichUrl> {
+  return request(`/enrich/url/${encodeURIComponent(url)}?timeout_s=${timeoutS}`)
+}
