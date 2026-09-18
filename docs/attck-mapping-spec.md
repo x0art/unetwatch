@@ -64,8 +64,8 @@ treated as **not present** by the gate while still being reported distinctly in
 | `server_ip` | `BASELINE` | T1583.003, T1583.001, T1029.001 | LOW / MEDIUM | T1029.001: `distinct_dest_ips ≥ 10 ∧ enforcements ≤ risk_requests·0.5 ∧ total_bytes ≥ 1e6`. T1583.003: `1 ≤ distinct_dest_ips ≤ 5 ∧ time_span_hours ≥ 12 ∧ risk_share ≥ 0.5 ∧ no CDN domain`. T1583.001: `distinct_dest_ips ≥ 20 ∧ distinct_domains ≥ 20 ∧ total_requests ≤ 3·distinct_dest_ips` — **and, additionally to the table's `required`, `domain` PRESENT**. `dest_asn_entropy` is **NOT IMPLEMENTED**: it needs an ASN enrichment field that does not exist yet (see §c.2) |
 | `@timestamp` | `BASELINE` | T1053.005, T1029.001, T1071.001 (interval regularity) | MEDIUM | `interval_cv = σ(Δt_between_bursts)/μ(Δt) ≤ 0.35 ∧ n_intervals ≥ 10`; `slot_concentration ≥ 0.5`; both `None` (→ UNKNOWN) below 10 samples |
 | `action` | `BASELINE` | T1204.002, T1078, T1567, T1114.002, T1041 | MEDIUM / LOW | `risk_requests = #{action ∈ (ALLOW, "")}`, `enforcements = #{action ∈ (DENY, FLAG)}`. T1204.002 uses a plain `enforcements ≥ 3` burst floor; the finer `burst_gate` bucketing in §c.2 is **NOT IMPLEMENTED** (it needs the `state` field) |
-| `duration_seconds` | `BASELINE` | *(none as a detector)* | — | Volumetric **proxy only**: `bytes_proxy = Σ max(1, floor(duration_seconds)) × 8192`. Used as a byte fallback; never evidence on its own |
-| `domain` | `INV_MODE` | T1090.003, T1583.003, T1041, T1583.001 | LOW / MEDIUM | T1090.003: `cdn_domain_count ≥ 1 ∧ risk_share ≥ 0.2`. T1583.003: `cdn_domain_count == 0` (absence of CDN is part of its predicate). T1041: `distinct_domains ≥ 3 ∧ total_bytes ≥ 1e8 ∧ risk_share ≥ 0.5`. T1583.001: `distinct_domains ≥ 20`. `duration_cv` and `burst_gate` are **NOT IMPLEMENTED** (see §c.2) |
+| `duration_seconds` | `BASELINE` | *(none as a detector)* | — | Volumetric **proxy only**: `bytes_proxy = Σ max(1, floor(duration_seconds)) × 8192`. Used as a byte fallback; never evidence on its own. **⚠ SUPERSEDED 2026-09-18 (evidence: §j.6, fix §j.9.2):** "never evidence on its own" was **not enforced by the gate** — T1041 has no `required` leg, so `duration_seconds` alone unlocked it. On the real traffic (`duration_seconds: 0.01`) the proxy invents ~8 KiB/row (**38×** the real 215 B) and reaches T1105's `1e6` floor at **122** ordinary denied requests. The proxy may now only *supplement* a measured byte field; it can no longer be the sole basis for crossing a byte threshold. |
+| `domain` | `INV_MODE` | T1090.003, T1583.003, T1041, T1583.001 | LOW / MEDIUM | **⚠ SUPERSEDED 2026-09-18 (evidence: §j.2):** `domain` **does not exist** in the operator's documents and is **fabricated as `""` by `apply_filters`** (`result_processor.py:98-110`), so every predicate here is dead in this deployment — `category` (`"facebook.com"`) is the real domain carrier. The rows below remain the design target for a deployment that *does* publish `domain`. T1090.003: `cdn_domain_count ≥ 1 ∧ risk_share ≥ 0.2`. T1583.003: `cdn_domain_count == 0` (absence of CDN is part of its predicate). T1041: `distinct_domains ≥ 3 ∧ total_bytes ≥ 1e8 ∧ risk_share ≥ 0.5`. T1583.001: `distinct_domains ≥ 20`. `duration_cv` and `burst_gate` are **NOT IMPLEMENTED** (see §c.2) |
 | `base_url` | `INV_MODE` *(derived)* | T1071.001, T1105, T1090.003 | MEDIUM | **Never read raw** — `apply_filters` always recomputes it from `url`, so `base_url` is *derived*, not a resolved field. Blacklist subtraction uses it |
 | `category` | `INV_MODE` | T1204.002, T1071.001 (URL), T1105 | MEDIUM / LOW (downgrade-only) | `risk_category_share = #{category ∈ RISK_TAGS} / total`; only ever **downgrades** the confidence of a predicate established from `url`/`domain` |
 | `http_method` | `INV_MODE` | T1567, T1114 | LOW | `method_upload_share = #{http_method ∈ (POST,PUT,PATCH)} / total ≥ 0.4` |
@@ -73,9 +73,9 @@ treated as **not present** by the gate while still being reported distinctly in
 | `country_code` | `INV_MODE` | T1583.003 (concentration) | LOW | `country_entropy = H(country_code); ≤ 1.0 ⇒ NOT evidence` (concentration is the *opposite* of bulletproof hosting) |
 | `bytes_downloaded` | `INV_MODE` | T1105, T1041 | MEDIUM / LOW | T1105: `download_bytes ≥ 1e6 ∧ download_bytes/total_bytes ≥ 0.9` **and** `content-addressed download` (`archive_ext(url) ∨ hash-named(filename)`); T1041 byte leg only |
 | `bytes_uploaded` | `INV_MODE` | T1041, T1567, T1114 | LOW / MEDIUM | `upload_bytes ≥ 5e7 ∧ upload_share ≥ 0.6` |
-| `rule_info` | `INV_MODE` | *(policy context)* | — | **Hard ABSENT**: every row already matched a block pattern, so a `rule_info` label is a superset fact and can never evidence a technique |
+| `rule_info` | `INV_MODE` | *(policy context — **SUPERSEDED, see §j.3**)* | — | **Hard ABSENT**: every row already matched a block pattern, so a `rule_info` label is a superset fact and can never evidence a technique. **⚠ SUPERSEDED 2026-09-18 (evidence: §j.3):** `rule_info` **is present** (`"RN190,SNI,BS"`), so "Hard ABSENT" misstates its availability. It still cannot evidence a technique — but because the code set is **undocumented**, not because it is missing. Correct disposition: **PRESENT but UNINTERPRETABLE**. If the operator supplies the code table it becomes the strongest signal in the document (new §j.11 handover item 1). |
 | `rule_name` | `INV_MODE` | `T1567.002` (class name) | LOW | `T1567.002 ⇐` when `{category, rule_name, rule_info}` ∩ `{upload, box, dropbox, s3, oos, exfil}` — **name-mapped only for techniques in the taxonomy**; `oos` is a uNetWatch *class*, not a technique, so it contributes nothing on its own |
-| `user_id` | `INV_MODE` | *(identity lens)* | — | **Hard ABSENT.** A non-empty `user_id` is an *authenticated* principal — the opposite of T1078 (valid accounts being abused anonymously). Never emits T1078; may only *raise* the confidence of a T1071.001 beacon to HIGH when stable across the window |
+| `user_id` | `INV_MODE` | *(identity lens — **SUPERSEDED, see §j.1**)* | — | **Hard ABSENT.** A non-empty `user_id` is an *authenticated* principal — the opposite of T1078 (valid accounts being abused anonymously). Never emits T1078; may only *raise* the confidence of a T1071.001 beacon to HIGH when stable across the window. **⚠ SUPERSEDED 2026-09-18 (evidence: §j.0–j.1):** in the operator's real documents `user_id` is an **IP address**, identical to `client_ip` (`user_id: "172.21.122.6"`; corroborated by `tests/test_patterns.py:802` `user_id: "172.21.26.84"`). It is **not** a principal, carries no identity, and must be treated as an **alias of `client_ip`** — context only. The "raise T1071.001 to HIGH" clause is **withdrawn**. The reasoning above stays valid only for a deployment that actually has principals. |
 | `matched_patterns` | `INV_MODE` | *(block classes)* | — | Consumed by the app's own `risk_weight_*` scoring (`readout.py:_normalize_class_name`). A block-pattern class name is **not** a technique id; not used in mapping |
 | `user_agent` | `INV_MODE` | T1071.001 (HTTP *client* tooling) | LOW | `distinct_user_agents ≤ 3 ∧ distinct_domains:clients ≈ 1:1` — a *tool*, not a human browser. **`ua ≉ C2`:** custom UA ⇒ LOW · a *known browser UA* ⇒ **suppress** (the textbook attack beats mimicry; a socket-based tool wears the default UA of its library) |
 
@@ -138,26 +138,48 @@ correction of the old code, which emitted T1090.003 on the classifier alone.
 resolve_availability() → {"action": PRESENT|ABSENT|UNKNOWN, "domain": …, "user_agent": …}
 
 baseline = {@timestamp, url, client_ip, server_ip, duration_seconds, action}
+inventory = sample.keys() ∪ field_caps        # the real, observed field set
 resolved_mode = get_mode()
 
 mode == UNKNOWN or resolved_mode == UNKNOWN → every field = UNKNOWN
-mode ∈ (UC-A, UC-B):
+
+otherwise, for every field:
     field ∈ baseline                          → PRESENT
-    field ∈ inventory(mode)                   → PRESENT
-    else                                      → ABSENT
-mode == COLLAPSED:
-    field ∈ baseline                          → PRESENT
-    else                                      → ABSENT          # inventory ⊆ baseline in this mode
+    field ∈ inventory                         → PRESENT   # inventory-driven, all modes
+    field ∈ mode_rejected                     → ABSENT    # see below
+    else                                      → UNKNOWN   # not sampled — never ABSENT
+
+mode_rejected = {user_agent, username, session}  if mode == COLLAPSED
+              = {}                               otherwise
 ```
 
-The **COLLAPSED hard-ABSENT rule is the load-bearing clause.** In `COLLAPSED`
-the inventory is, by definition, exactly the six baseline fields
-(`_resolve_mode` reaches COLLAPSED only *after* the 3-field UC set fails), so
-there is nothing to sample a `domain` from. Treating those fields as
-`ABSENT` — rather than merely `UNKNOWN` — is what lets the engine say *"this
-deployment's documents do not carry `domain`"* instead of silently accepting an
-empty `domain` column. A one-request health-check that happens to be the single
-sampled document is overridden by the mode's own guarantee.
+> **⚠ SUPERSEDED 2026-09-18 (evidence: §j.8/§j.9.1).** The block above used to
+> read:
+>
+> ```
+> mode ∈ (UC-A, UC-B):
+>     field ∈ baseline → PRESENT ; field ∈ inventory(mode) → PRESENT ; else → ABSENT
+> mode == COLLAPSED:
+>     field ∈ baseline → PRESENT ; else → ABSENT   # inventory ⊆ baseline here
+> ```
+>
+> with the prose *"The COLLAPSED hard-ABSENT rule is the load-bearing clause.
+> In COLLAPSED the inventory is, by definition, exactly the six baseline
+> fields."* **That premise is false against real Elasticsearch.** The inventory
+> is the union of the sampled document's keys and `field_caps`, so real
+> documents carry non-baseline fields, and forcing them to `ABSENT` **hid
+> readable data** — the bug fixed in §j.9.1.
+>
+> The corrected rule keeps the original concern ("one sampled document must not
+> be read as the whole schema") but expresses it as `UNKNOWN`, not `ABSENT`.
+> `ABSENT` is now reserved for the closed set of names `_resolve_mode`
+> **explicitly tested and rejected** — in COLLAPSED that is exactly
+> `{user_agent, username, session}`, because the function evaluates
+> `issubset(sample)` and `all(f in caps)` for those and returns COLLAPSED only
+> after both fail. For every other name the mode asserts nothing, so
+> `UNKNOWN` is the honest state and the gate treats it as closed. The
+> "one-request health check" worry is fully addressed: a field absent from both
+> the sample *and* `field_caps` is `UNKNOWN` (closed), never presumed present.
 
 **`base_url` is exempt from the gate**: it is always `PRESENT` as *derived*,
 because `apply_filters` recomputes it from `url` on every call. Its underlying
@@ -188,17 +210,27 @@ withheld).
 | `T1071.001` App-Layer Protocol (URL) | **on** · MED | **on** · MED | **on** · MED→LOW | O — `mode=UNKNOWN` |
 | `T1090.003` Proxy: Multi-hop (host) | **on** · MED | **on** · MED | **on** · LOW | O — `mode=UNKNOWN` |
 | `T1090.003` Proxy: Multi-hop (URL) | **on** · LOW | **on** · LOW | **on** · LOW | O — `mode=UNKNOWN` |
-| `T1029.001` Scheduled Transfer | **on** · MED | **on** · MED | **on** · LOW (byte leg via `duration-proxy`) | O — `mode=UNKNOWN` |
+| `T1029.001` Scheduled Transfer | **on** · MED | **on** · MED | **on** if a byte counter is in the inventory, else **O** (measured bytes required — §j.9.2) | O — `mode=UNKNOWN` |
 | `T1053.005` Scheduled Task/Job | **on** · LOW | **on** · LOW | **on** · LOW | O — `mode=UNKNOWN` |
-| `T1041` Exfil Over C2 Channel | **on** · LOW | **on** · LOW | **on** · LOW (`mode=COLLAPSED,duration-proxy`) | O — `mode=UNKNOWN` |
+| `T1041` Exfil Over C2 Channel | **on** · LOW | **on** · LOW | **on** if a byte counter is in the inventory, else **O** (measured bytes required — §j.9.2) | O — `mode=UNKNOWN` |
 | `T1078` Valid Accounts | **on** · MED | **on** · MED | **on** · LOW | O — `mode=UNKNOWN` |
 | `T1583.003` Acquire Infrastructure: VPS | **on** · LOW | **on** · LOW | **on** · LOW | O — `mode=UNKNOWN` |
 | `T1583.001` Acquire Infrastructure: Domains | **on** · LOW *(requires `domain` — see guard)* | **on** · LOW | O (no `domain`) | O — `mode=UNKNOWN` |
-| `T1105` Ingress Tool Transfer (URL) | **on** · MED | **on** · MED | **withheld** (byte-gated) | O — `mode=UNKNOWN` |
-| `T1567` Exfil Over Web Service | **on** · MED | **on** · MED | **withheld** (byte-gated) | O — `mode=UNKNOWN` |
-| `T1567.002` Exfil To Cloud Storage | **on** · LOW | **on** · LOW | **withheld** (needs `rule_name`/`category`) | O — `mode=UNKNOWN` |
+| `T1105` Ingress Tool Transfer (URL) | **on** · MED | **on** · MED | **on** if a byte/response field is in the inventory, else **O** | O — `mode=UNKNOWN` |
+| `T1567` Exfil Over Web Service | **on** · MED | **on** · MED | **on** if a byte counter is in the inventory, else **O** | O — `mode=UNKNOWN` |
+| `T1567.002` Exfil To Cloud Storage | **on** · LOW | **on** · LOW | **on** if `rule_name`/`category` is in the inventory, else **O** | O — `mode=UNKNOWN` |
 | `T1204.002` User Execution: Malicious File | **on** · MED | **on** · LOW | **on** · LOW *(needs `action` + `url`)* | O — `mode=UNKNOWN` |
-| `T1114.002` Email Collection: Remote | **on** · LOW | **on** · LOW | **withheld** (byte-gated) | O — `mode=UNKNOWN` |
+| `T1114.002` Email Collection: Remote | **on** · LOW | **on** · LOW | **on** if a byte counter is in the inventory, else **O** | O — `mode=UNKNOWN` |
+
+> **⚠ The COLLAPSED column was rewritten 2026-09-18 (evidence: §j.8/§j.9.1).**
+> It previously read **"withheld"** for T1105/T1567/T1567.002/T1114.002 on the
+> theory that COLLAPSED's inventory equals the baseline six. Real ES disproves
+> that, so the *gate* is open for any technique whose fields the inventory
+> actually shows; whether it fires then depends on its predicate, not the mode.
+> "O" now means one thing only: the required field is genuinely not in the
+> inventory. On the operator's real documents (which carry `bytes_*`,
+> `category`, `rule_name`) these are therefore **eligible and decline on
+> threshold**, not withheld — see §j.8's worked outcome.
 
 `T1190` Exploit Public-Facing Application is **not implemented and not
 listed**: a proxy log carries the *result* of an exploit, not the request
@@ -222,12 +254,21 @@ Notes on three rows that are easy to misread:
   *downgrade* T1071.001, never upgrade it, and its absence in UC-B is not
   charged a confidence step (the mode itself proves the lens field's
   availability — see `_MODE_PROVEN_FIELDS`).
-- **`COLLAPSED`** — baseline-only detectors stay eligible: T1071.001,
-  T1090.003, T1078, T1041, T1029.001, T1053.005, T1583.003, T1204.002.
-  Everything `domain` / `bytes_*` / `rule_name`-gated is **withheld with an
-  explicit reason** (T1583.001, T1105, T1567, T1567.002, T1114.002), never
-  guessed. T1041 and T1029.001 may use the `duration_seconds × 8192` proxy and
-  say so: `bytes_source = "duration-proxy"`.
+- **`COLLAPSED`** — **⚠ SUPERSEDED 2026-09-18 (evidence: §j.8):** the paragraph
+  below assumed `COLLAPSED ⇒ inventory == baseline six`. That invariant is
+  **false against real ES** (`inventory_field_names()` unions `_source` keys with
+  `field_caps`, so a real document's `category`/`bytes_*`/`rule_name` resolve
+  **PRESENT** even in COLLAPSED — executed, §j.8). **This is the operator's
+  permanent mode** (no `username`/`session` in the schema), and its realistic
+  output is **≤ 2 LOW techniques** (T1053.005, T1204.002) plus predicate
+  declines — *not* the withhold list below. `T1583.001` is the one technique
+  genuinely withheld, by its own predicate-level `domain` guard. The original
+  claim is retained for reference: baseline-only detectors stay eligible
+  (T1071.001, T1090.003, T1078, T1041, T1029.001, T1053.005, T1583.003,
+  T1204.002); everything `domain`/`bytes_*`/`rule_name`-gated was believed
+  withheld with a reason. T1041 and T1029.001 may use the
+  `duration_seconds × 8192` proxy — **but no longer as sole evidence** (§j.9.2),
+  and they say so via `bytes_source = "duration-proxy"`.
 - **`UNKNOWN`** — zero techniques, `es_online` faithful to the real error, and
   an explicit reason string. Preserved verbatim from the pre-existing
   behaviour.
@@ -707,3 +748,423 @@ its frozen key set.
 | Date | Change | By |
 | 2026-09-18 | Field-driven availability gate, technique-availability resolver, mode-adaptive suppression, fixed-slot periodicity, confidence downgrade | backend |
 | 2026-09-18 | Field-inventory cache no longer poisoned by a failed boot fetch (success-only caching + 30 s negative-TTL retry throttle) and refreshed hourly; suppression reasons moved to `signals.suppressed` (§g corrected); periodicity reworked onto raw-arrival interval CV with the slot aliasing limitation stated (§c.3) | backend |
+
+| 2026-09-18 | **Reconciliation with the operator's verbatim documents (§j).** Eight claims corrected: `user_id` is a `client_ip` alias not a principal; `domain` is absent & fabricated (`category` carries the domain); `rule_info` is present but undocumented; `http_status_code: 0` = no upstream response; byte thresholds inert on DENY traffic; the `duration-proxy` inflated ~38× and **was reachable as sole evidence for T1041** — now fixed so it may only supplement a measured byte field; `host.ip`/`message` recorded as unused provenance/recovery fields. **Deployment is permanently COLLAPSED** (no `username`/`session`), so the realistic panel is ≤ 2 LOW techniques. The `COLLAPSED ⇒ inventory == baseline` invariant is **false against real ES**. §b.2/§b.3 COLLAPSED column superseded. | backend |
+
+| 2026-09-18 | **Two code fixes from the §j traces.** (1) `resolve_availability` no longer marks every non-baseline field `ABSENT` in COLLAPSED — presence is now inventory-driven (`field_caps` ∪ sampled `_source`) in every mode, with `ABSENT` reserved for the closed set `_resolve_mode` explicitly tested and rejected, and `UNKNOWN` for fields no source mentions (§j.9.1). (2) `duration_seconds` removed from the `required_any` legs of T1041/T1029.001 and a `bytes_source == "bytes"` check added to both predicates, so the duration proxy can no longer be sole evidence for crossing a byte floor (§j.9.2); T1567/T1114.002/T1567.002 audited and unchanged (§j.12). | backend |
+
+---
+
+## j) Reconciliation with the Operator's Real Documents (2026-09-18)
+
+> **Status:** a verbatim `logstash-proxy-*` document was supplied and read against
+> this spec. Eight claims above are **contradicted by the data**. This section is
+> the corrected record; the affected rows above are marked *superseded* rather
+> than deleted, so the reasoning that produced them stays visible.
+>
+> **The headline is §j.8, not the field-level corrections.** The operator's
+> deployment resolves to `COLLAPSED` **permanently** — not because of a
+> transient sampling gap, but because the two fields `_resolve_mode` requires
+> for UC-A/UC-B (`username`, `session`) do not exist in the schema and are
+> listed in `docs/field-sample-report.md §4.2` as *fields to request*. The
+> engine therefore withholds most of the enriched catalogue on every real
+> query. §j.8 traces this line by line; §j.9 records the two implementation
+> bugs the trace exposed.
+
+### j.0 The document under review (verbatim, `logstash-proxy-*`)
+
+```json
+{
+  "_index": "logstash-proxy-2026.08.31",
+  "_id": "kjVDWqABEYGXh41EPOrt",
+  "_source": {
+    "@version": "1", "category": "facebook.com", "rule_info": "RN190,SNI,BS",
+    "rule_name": "facebook.com", "action": "DENY",
+    "@timestamp": "2026-08-31T23:59:11.000Z", "user_id": "172.21.122.6",
+    "server_ip": "57.144.192.3", "url": "https://z-m-gateway.facebook.com/",
+    "duration_seconds": 0.01, "host": {"ip": "172.21.73.13"},
+    "event": {"original": "[01/Sep/2026:06:59:11 +0700] 172.21.122.6 … DENY RN190,SNI,BS BE \"facebook.com\""},
+    "bytes_downloaded": 0, "bytes_uploaded": 215,
+    "client_ip": "172.21.122.6", "country_code": "BE",
+    "message": "[01/Sep/2026:06:59:11 +0700] 172.21.122.6 172.21.122.6 57.144.192.3 \"facebook.com\" 0.01 - https://z-m-gateway.facebook.com/ - 0 215 DENY RN190,SNI,BS BE \"facebook.com\"",
+    "http_status_code": 0
+  }
+}
+```
+
+### j.1 `user_id` is an IP alias, not an authenticated principal — **CONFIRMED contra §a.1**
+
+§a.1's `user_id` row asserted: *"A non-empty `user_id` is an **authenticated**
+principal — the opposite of T1078 … Never emits T1078; may only *raise* the
+confidence of a T1071.001 beacon to HIGH when stable across the window."*
+
+**That assertion is false for this deployment.** In the sample,
+`user_id == client_ip == "172.21.122.6"`, character-for-character. This is not
+a one-document coincidence: the app's own test fixture carries the same shape
+in a different client —
+`tests/test_patterns.py:802` has `"user_id": "172.21.26.84"`, an IP, on an
+`"action": "ALLOW"` row. No `username`/`session` field exists anywhere in the
+repo outside `_resolve_mode` itself and the *proposed*-fields table in
+`docs/field-sample-report.md:80-81`.
+
+**Corrected claim.** In this deployment `user_id` is a **second spelling of
+`client_ip`**, not an identity lens:
+
+* It carries **no authenticated-principal information**; treating it as such
+  was the source of the "may raise T1071.001 to HIGH" clause, which must not
+  stand on an IP.
+* It **must not** be read as identity continuity / `stable_identity`. Two rows
+  with the same `user_id` are two rows from the same **source IP** — which
+  `client_ip` already says.
+* It is therefore **demoted to an alias of `client_ip`**: context only,
+  confirming provenance, contributing **no** independent technique evidence.
+  §e.8's "ABSENT-contextual" treatment was right for the wrong reason — the
+  field is not absent-contextual because a principal is absent; it is
+  context-only because it is a duplicate of a baseline field.
+* The "may only *raise* T1071.001 to HIGH" clause is **withdrawn**: a stable
+  IP alias adds nothing `client_ip` did not already provide.
+
+> The row is **superseded**, not deleted, at §a.1 — the reasoning ("T1078 is
+> anonymous abuse; a real principal is its opposite") remains correct *for a
+> deployment that has principals*. This one does not.
+
+### j.2 There is no `domain` and no `base_url`; `category` carries the domain — **CONFIRMED contra §a.1, §c.1**
+
+The document has **no `domain` key and no `base_url` key**. The destination is
+carried by **`category`** (`"facebook.com"`) and `url`
+(`"https://z-m-gateway.facebook.com/"`), with `rule_name` also
+`"facebook.com"`.
+
+**Is `domain` "projected and therefore fabricated by `apply_filters`"?**
+Verified: **yes, exactly.** `domain` is named in `QUERY_SOURCE_FIELDS`
+(`app/services/query_builder.py:22`) but is absent from every real document;
+`apply_filters` then default-fills it —
+`for col in (… "domain", "category", …): if col not in df.columns: df[col] = ""`
+(`app/services/result_processor.py:98-110`). So a heuristic that reads `df["domain"]`
+reads a column of **empty strings synthesized by the app**, never data from ES.
+§0 of this spec names this fabrication; §j.9 confirms the gate had a hole that
+let it through in one mode.
+
+**`category` is the real domain carrier.** It holds `facebook.com` — a
+registrable domain. §a.1 currently classes `category` as
+`T1204.002/T1071.001/T1105`, **downgrade-only**, and §c.1's `distinct_domains`
+reads `domain`. Both under-read the deployment:
+
+* `distinct_domains`, `cdn_domain_count`, and every `domain`-gated predicate
+  (T1041, T1567, T1114, T1583.001, T1090.003's CDN leg) are **dead** here —
+  `domain` is `ABSENT`, so the gate withholds them, even though a perfectly
+  usable domain set sits in `category`.
+* This is a **precision gap, not a safety one** (withholding is the safe
+  direction), and it is the honest correction to record: `category` *could*
+  carry the domain leg. Promoting it is a **calibration change** that needs the
+  labelled pair from `docs/field-sample-report.md` item 7; it is recorded here
+  as the next increment, not silently enabled.
+
+### j.3 `action="DENY"`, `rule_info="RN190,SNI,BS"`, `country_code="BE"` — **CONFIRMED, with a decode question §a.1 does not answer**
+
+The doc carries `action: "DENY"` (so §c.2's claim that `FLAG` and enforcement
+codes are unavailable is **only partly** true — `DENY` is present and is an
+enforcement code, and `_aggregate_host_signals` reads it,
+`attck_mapping.py:1458`), plus `rule_info: "RN190,SNI,BS"` and
+`country_code: "BE"`.
+
+**What the `rule_info` codes are — verified, and the answer is "not decodable
+from this repository".** `RN190`, `SNI`, `BS` are a **comma-separated
+rule/condition code set** emitted by the classifying proxy. Grepping the whole
+repo finds them **only** in this sample and in the sample the operator
+pasted — there is **no decoder table, no enum, and no documentation** of what
+`RN190`/`SNI`/`BS` mean. The one structural read the data supports: three
+independent tokens, and `BS` matches the trailing `BE` country code loosely,
+suggesting `BS`/`BE` are *country* or *category* codes while `RN190` looks like
+a **rule number** and `SNI` a **match surface** (Server Name Indication — i.e.
+the classifier matched on TLS SNI, which fits `rule_name: "facebook.com"`).
+
+§a.1's `rule_info` row declares it **"Hard ABSENT … can never evidence a
+technique."** That conflates two different things and must be corrected:
+
+* `rule_info` **is present** in this deployment (it is not absent), so
+  "Hard ABSENT" is wrong as a statement of availability.
+* It **still cannot evidence a technique**, but for the right reason: **the
+  code scheme is undocumented**, so no predicate can be written against it
+  (§e.7 — "no speculative predicates"). The correct disposition is
+  **PRESENT but UNINTERPRETABLE**, reported as context and as a
+  data-quality note, not silently dropped.
+* **It is a far stronger signal than the current engine exploits** *if* the
+  operator supplies the code table — a documented severity/category scheme
+  would be the single highest-value addition in this document, well above any
+  byte heuristic. That is a **handover item**, added to §f.
+
+### j.4 `http_status_code: 0` is not a status — **CONFIRMED contra §a.1**
+
+§a.1: `not_found_rate = #{http_status_code == 404} / total ≥ 0.5` as a
+beaconing qualifier. On this traffic the field is **`0`** on every denied row,
+because a DENY is answered by the proxy and **never reaches an upstream**, so
+no HTTP status exists. `#{… == 404}` is therefore **0 on the entire denied
+mix**, and the qualifier can only ever read `0.0` — *vacuous, not merely
+weak*. The predicate is correctly marked **NOT IMPLEMENTED**; this is the
+evidence for why it must stay that way until an ingest field carries a real
+status (`0` must be treated as *"no upstream response"*, **not** as a status
+code).
+
+### j.5 `bytes_downloaded: 0` / `bytes_uploaded: 215` — **CONFIRMED; the byte predicates are near-vacuous here**
+
+On a DENY, `bytes_downloaded` is `0` and only the request side carries bytes.
+Verified against the §a.1 thresholds:
+
+| Predicate | Threshold | This traffic | Verdict |
+|---|---|---|---|
+| T1105 `download_bytes` | `≥ 1e6 ∧ download/total ≥ 0.9` | download `= 0` | **structurally unreachable** |
+| T1041 byte leg | `total_bytes ≥ 1e8` | ≈ `215`/row | unreachable at any realistic window |
+| T1567 `upload_bytes` | `≥ 5e7 ∧ upload_share ≥ 0.6` | share `= 1.0` passes, bytes fail | **share gate passes on a vacuous denominator** |
+
+The last row is the one to flag: **`upload_share = upload/(upload+download)`
+is `1.0` by construction on an all-DENY stream** (download is always 0), so
+the *share* leg is satisfied by arithmetic, not by upload behaviour. It is
+saved only by the absolute byte floor. Any relaxation of that floor would
+make T1567 fire on ordinary blocked traffic. **The byte-threshold predicates
+are not wrong, but they are inert here** — and a share computed over a
+zero-download mix must never be read as evidence of upload.
+
+### j.6 `duration_seconds: 0.01` → the `duration-proxy` invents ~8 KiB/row — **CONFIRMED fabrication risk, contra §a.1/§c.1**
+
+§a.1: `bytes_proxy = Σ max(1, floor(duration_seconds)) × 8192`, declared
+"used as a byte fallback; never evidence on its own."
+
+Verified arithmetic on this data (`max(1, floor(0.01)) = 1`):
+
+| Quantity | Value |
+|---|---|
+| real bytes / row (download+upload) | `215` |
+| proxy bytes / row | `8192` |
+| **invented per row** | **`7977`** — a **38×** overstatement |
+| rows to reach T1105's `1e6` | **122** |
+| rows to reach T1567's `5e7` | 6103 |
+| rows to reach T1041's `1e8` | 12207 |
+
+So **122 ordinary denied requests** manufacture a "1 MB tool transfer" from
+nothing. §a.1 says the proxy is "never evidence on its own", but T1041's
+catalogue entry has **no `required` leg at all** — only
+`required_any: (bytes_uploaded, bytes_downloaded, duration_seconds)`
+(`attck_mapping.py:316`) — so `duration_seconds` **alone** unlocks the gate,
+and the predicate then compares the *invented* total against a real threshold.
+The "never evidence on its own" claim is **not enforced by the gate**; it is
+enforced only inside T1041's `≥ 1e8` floor, which the proxy reaches at ~12k
+rows. **This is a genuine fabrication path on this traffic mix** and the
+correction is recorded in §j.9.
+
+### j.7 `host.ip`, `event.original`, `message`, `@version` — **CONFIRMED: the app never reads them, and the raw line is the richest field present**
+
+* **`host.ip` = `172.21.73.13`** — an internal address, distinct from the
+  client (`172.21.122.6`) and the destination (`57.144.192.3`). It is the
+  **proxy/gateway node itself**, i.e. *which sensor produced the log*. The app
+  does not read it. It buys **provenance and multi-node correlation**: on a
+  fleet of proxy nodes it is the dimension that turns "the organisation saw
+  this" into "node `172.21.73.13` saw this", which is what a NOC triages on.
+  It is **not** a technique field and must never be treated as one.
+* **`message` / `event.original`** — the **full raw log line**, which is a
+  strict superset of the flat fields:
+  `… 172.21.122.6 172.21.122.6 57.144.192.3 "facebook.com" 0.01 - https://z-m-gateway.facebook.com/ - 0 215 DENY RN190,SNI,BS BE "facebook.com"`.
+  It carries the timestamp (in `+0700`), client, server, the category in
+  quotes, **duration (`0.01`)**, the response size (`0`), the request size
+  (`215`), the action, the rule code set, and the country (`BE`). Everything
+  the flat fields carry, plus a **parseable positional structure**.
+
+  **What a `message`-parsing path could buy:** the two things the flat schema
+  loses — (a) the **positional role** of each number (the flat schema gives
+  `bytes_downloaded`/`bytes_uploaded` but not which field is request vs
+  response size in the line), and (b) any **field the projection drops**.
+  It is a *recovery* path, not a new detector: it re-derives signals the flat
+  fields already flatten, so it belongs behind a parser with tests, **not**
+  as a regex in a predicate. Recorded as a handover item (§f), not enabled.
+* **`@version`** — Logstash pipeline metadata, constant `"1"`. No analytic
+  value.
+
+### j.8 Mode resolution: this deployment is **permanently COLLAPSED** — traced line by line
+
+`_resolve_mode` requires, in order (`app/services/es_fields.py:164-196`):
+
+```
+baseline = {@timestamp, url, client_ip, server_ip, duration_seconds, action}
+uc_a_extra = {user_agent, username, session}
+uc_b_extra = {username, session}
+```
+
+Traced against the real document (executed, not reasoned):
+
+| Test | Result |
+|---|---|
+| `baseline ⊆ sample.keys()` | **True** — all six present |
+| `{user_agent, username, session} ⊆ …` | **False** — all three missing |
+| `{username, session} ⊆ …` | **False** — both missing |
+| **`_resolve_mode(...)`** | **`"COLLAPSED"`** |
+
+**This is not a sampling artifact — it is the schema.** `username` and
+`session` appear nowhere in the deployment: `docs/field-sample-report.md:80-81`
+lists them under *"4.2 Upgrade to UC-A (Identity Lens)"* as fields to **ask the
+proxy team for**, with the note *"Requires `user_agent` also present for full
+UC-A."* Until that ingest change lands, **every** query resolves to COLLAPSED.
+
+**What that withholds.** Executing the real gate
+(`_gate`, `attck_mapping.py:716`) under this document's resolved availability:
+
+| Technique | Gate state | Why |
+|---|---|---|
+| `T1071.001` host | **eligible** | `@timestamp` only |
+| `T1090.003` host | **eligible** | `url` only |
+| `T1029.001` host | **eligible** | `server_ip` + a byte leg |
+| `T1053.005` host | **eligible** | `@timestamp` only |
+| `T1041` host | **eligible** | `required_any` includes `duration_seconds` |
+| `T1078` host | **eligible** | `client_ip` + `action` |
+| `T1583.003` host | **eligible** | `server_ip` only |
+| `T1567` host | **eligible** | byte leg present in inventory |
+| `T1114.002` host | **eligible** | `url` + byte leg |
+| `T1204.002` host | **eligible** | `action` + `url` |
+| `T1583.001` host | **eligible at the gate**, **declines in the predicate** | predicate-level `domain` guard refuses (`:1019`) |
+| `T1567.002` host | **eligible** | `rule_name`/`category` present in inventory |
+| `T1071.001` / `T1105` / `T1090.003` URL | **eligible** | `url` (+ byte leg for T1105) |
+
+**The important correction to the table above — and to §b.2.** §b.1 asserts
+that *"in `COLLAPSED` the inventory is, by definition, exactly the six baseline
+fields"* and that every non-baseline field is therefore `ABSENT`. **That is
+false for real ES data.** The inventory is the *union of the sampled document's
+keys and `field_caps`* (`es_fields.inventory_field_names()`,
+`es_fields.py:220-243`), and real documents carry `category`,
+`bytes_downloaded`, `bytes_uploaded`, `rule_name`, `http_status_code`,
+`country_code`, `user_id`. The original resolver nevertheless forced those to
+`ABSENT` in COLLAPSED, hiding fields the engine can read; **this was the first
+implementation bug (§j.9.1) and is now fixed** — `resolve_availability` is
+inventory-driven in every mode, so it resolves those to **PRESENT** (executed:
+`bytes_downloaded → present`, `category → present`), and the byte-gated
+techniques are **eligible** rather than withheld.
+
+**Net effect on the operator's real data.** With the deployment's actual
+document shape and a representative window, the host catalogue emits:
+
+```
+T1053.005 (LOW)   — only if the interval CV / slot statistic passes
+T1204.002 (LOW)   — only on a ≥100-request, ≥3-enforcement burst
+(everything else declines in its predicate — correct behaviour)
+```
+
+and the URL catalogue emits **nothing** (a single client on a `facebook.com`
+gateway URL fails T1071.001's `distinct_clients ≥ 3` and T1105's byte floor).
+So the operator's realistic panel is **at most two LOW techniques**, and the
+withheld rows are **not** the ones §b.3 lists — `T1567`/`T1567.002`/`T1114.002`
+are *eligible* and decline on threshold, while `T1583.001` is the one genuinely
+withheld by its own `domain` guard. **§b.2/§b.3's COLLAPSED column is
+superseded by this table.**
+
+### j.9 The two implementation bugs this review exposed — both now fixed
+
+Both were found by executing the real document against the real resolver, and
+both are fixed in code (`app/services/attck_mapping.py`) and pinned by tests.
+The original (wrong) behaviour is described so a reader can see what changed
+and why.
+
+1. **The COLLAPSED hard-ABSENT rule was wrong.**
+   `resolve_availability` treated *any* non-baseline field as `ABSENT` in
+   COLLAPSED, on the theory that "the inventory is exactly the baseline six".
+   Real Elasticsearch disproves it: `inventory_field_names()` is the **union**
+   of the sampled document's keys and `field_caps`, and real `logstash-proxy`
+   documents carry `category`, `bytes_downloaded`, `bytes_uploaded`,
+   `rule_name`, `http_status_code`, `country_code` and `user_id` — none of
+   which `_resolve_mode` ever inspects. Declaring those `ABSENT` **hid fields
+   the engine can genuinely read**, starving every byte- and category-reading
+   heuristic on the operator's real data.
+
+   **The fix resolves the original motivation honestly rather than flipping the
+   branch.** The old code had a real concern — a single sampled document that
+   happens to omit a field must not be read as "the field exists". But that
+   concern points at *UNKNOWN*, not at `ABSENT`. The corrected rule has three
+   tiers of authority:
+
+   | Source | Verdict | Why |
+   |---|---|---|
+   | Seen in `field_caps` **or** in the sampled document | `PRESENT` | `field_caps` is the index-wide mapping (authoritative); a `_source` key a real document carries is readable, which is all a heuristic needs |
+   | A name `_resolve_mode` **explicitly tested and rejected** — in COLLAPSED that is exactly `user_agent`, `username`, `session` | `ABSENT` | The mode ran a real presence test on that closed set and it failed both `issubset(sample)` and `all(f in caps)`; that is proof of absence |
+   | Mentioned by **neither** source | `UNKNOWN` | The inventory is one document + a mapping, not a per-document census; silence is not proof of absence |
+
+   So **presence is inventory-driven in every mode**, and the mode's only job is
+   to mark the small closed set of names it actually tested as proven `ABSENT`.
+   Before, the mode overrode the evidence; after, it contributes one narrow,
+   defensible fact. `UNKNOWN` still gates closed, so the change cannot open a
+   technique on a field nobody observed.
+
+2. **The `duration-proxy` was reachable as *sole* evidence for T1041.**
+   T1041's catalogue entry had no `required` leg — only
+   `required_any: (bytes_uploaded, bytes_downloaded, duration_seconds)`. So
+   `duration_seconds` **alone** opened the gate, and the predicate then
+   compared an *invented* byte total against a real threshold. This is the bug
+   §j.6's arithmetic exposed: at `duration_seconds: 0.01` the proxy invents
+   8192 B/row against a real 215 B (**38×**), reaching T1105's 1 MiB floor on
+   **122 ordinary denied requests**.
+
+   **The fix enforces §a.1's own claim, at the gate.** Two layers:
+
+   * the `required_any` legs of **T1041 and T1029.001** no longer list
+     `duration_seconds` — a *measured* byte counter is now genuinely required;
+   * each predicate additionally checks `bytes_source == "bytes"`, so even a
+     caller that bypasses the catalogue (the findings path) cannot emit on the
+     proxy alone.
+
+   The proxy stays on the wire for **provenance** (`bytes_source =
+   "duration-proxy"` is still reported); it just can no longer be the only
+   basis for crossing a byte floor. T1029.001's 1 MB volume leg had the
+   identical hole and took the same guard.
+
+   **T1567 / T1114.002 do *not* share the hole** (§j.12): their `required_any`
+   never listed `duration_seconds`, and both floors are on `upload_bytes`,
+   which the proxy path sets to `0` (`_aggregate_host_signals`). They decline
+   naturally on an upload floor, so no change was needed there.
+
+### j.10 Corrections applied
+
+| # | Spec claim (superseded) | Corrected claim |
+|---|---|---|
+| 1 | §a.1 `user_id` = authenticated principal; may raise T1071.001 to HIGH | `user_id` is a **`client_ip` alias** here; context-only; the raise clause is withdrawn |
+| 2 | §a.1/§c.1 `domain` is `INV_MODE` and carries the domain leg | `domain` is **absent & fabricated by `apply_filters`**; `category` is the real domain carrier (promotion = next increment) |
+| 3 | §a.1 `rule_info` = "Hard ABSENT" | `rule_info` is **PRESENT but UNINTERPRETABLE** (undocumented code set); context + data-quality note; highest-value handover item |
+| 4 | §a.1 `not_found_rate` on `http_status_code` | `http_status_code == 0` means **no upstream response**; the predicate is vacuous on DENY traffic |
+| 5 | §a.1 byte thresholds | Inert here; `upload_share = 1.0` on all-DENY is **arithmetic, not evidence** |
+| 6 | §a.1 `duration-proxy` "never evidence on its own" | **Not enforced by the gate**; 38× inflation, T1105 reachable at 122 rows; now fixed (§j.9.2) |
+| 7 | (silent) `host.ip`, `message`, `event.original`, `@version` | Recorded: `host.ip` = proxy-node provenance; `message` = superset raw line (recovery path); `@version` = no value |
+| 8 | §b.1/§b.2/§b.3 COLLAPSED column | Deployment is **permanently COLLAPSED**; the hard-ABSENT invariant is **false**; realistic panel = ≤ 2 LOW techniques |
+
+### j.11 Handover items this review adds to §f
+
+1. **The `rule_info` code table** (`RN190`, `SNI`, `BS`, …) — the single
+   highest-value artifact. A documented severity/category scheme would
+   out-evidence every byte heuristic in §a.
+2. **The `username`/`session` ingest** — the only path out of permanent
+   COLLAPSED (`docs/field-sample-report.md §4.2`).
+3. **A `message`-line format spec** — to build a tested parser for the
+   positional fields the flat projection loses.
+4. **Confirmation that `user_id` is an IP** on the operator's side, so the
+   alias treatment (§j.1) can be promoted from *observed* to *documented*.
+
+### j.12 The same-proxy-hole audit: T1567 / T1114.002 do not share it
+
+§j.6 raised the question of whether the *other* byte-gated techniques carry
+T1041's hole. They do not — verified against the catalogue and the aggregation
+path:
+
+| Technique | `required_any` | Byte leg | Proxy hole? |
+|---|---|---|---|
+| `T1041` | `(bytes_uploaded, bytes_downloaded, duration_seconds)` → **now `(bytes_uploaded, bytes_downloaded)`** | `total_bytes ≥ 1e8` | **yes — fixed** |
+| `T1029.001` | same → **now `(bytes_uploaded, bytes_downloaded)`** | `total_bytes ≥ 1e6` | **yes — fixed** |
+| `T1567` | `(bytes_uploaded, bytes_downloaded)` | `upload_bytes ≥ 5e7 ∧ share ≥ 0.6` | **no** |
+| `T1114.002` | `(bytes_uploaded, bytes_downloaded)` | `upload_bytes ≥ 1e7` | **no** |
+| `T1567.002` | `(rule_name, category)` | `upload_bytes ≥ 1e7` | **no** |
+
+Two independent reasons neither of the latter three is affected:
+
+1. **`duration_seconds` is not in their `required_any`**, so the gate never
+   admits a duration-only stream in the first place.
+2. **Their floors are on `upload_bytes`**, and the proxy branch of
+   `_aggregate_host_signals` sets `upload_bytes = 0` while putting the invented
+   total in `download_bytes` — so even a proxy-fed Signal fails the upload
+   floor.
+
+Only `T1041` and `T1029.001` listed `duration_seconds` as an alternative byte
+leg, and those are exactly the two fixed in §j.9.2. **No change was needed for
+T1567 / T1114.002 / T1567.002**, and none was made.

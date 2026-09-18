@@ -190,6 +190,11 @@ def resolve_availability(
 ) -> FieldAvailability:
     """Resolve every field to PRESENT/ABSENT/UNKNOWN from the ES mode + inventory.
 
+    Presence is driven by the **actual inventory** (the sampled document's keys
+    ∪ ``field_caps``), in every mode. The mode's only role is to mark a small
+    closed set of names — the ones ``es_fields._resolve_mode`` explicitly
+    tested and rejected — as proven-ABSENT when it returns COLLAPSED.
+
     Args:
         mode: Resolved mode. Read from the es_fields cache when omitted.
         inventory_names: Observed field names (sample keys ∪ field_caps). Read
@@ -217,36 +222,59 @@ def resolve_availability(
         return avail
 
     inventory_names = inventory_names or set()
-    # In COLLAPSED the inventory is, by construction, a subset of the baseline
-    # six (es_fields._resolve_mode reaches COLLAPSED only after the username/
-    # session test fails). So anything not baseline is genuinely ABSENT there,
-    # not "unobserved". In UC-A/UC-B we can still only say UNKNOWN when the
-    # inventory has not sampled a name.
-    collapsed = mode == "COLLAPSED"
+
+    # ── Which fields does the MODE itself say something about? ──
+    #
+    # `es_fields._resolve_mode()` does not merely *label* a deployment; it
+    # runs an explicit presence test for a small, closed set of names and
+    # returns COLLAPSED only after every one of them failed BOTH
+    # `issubset(sample.keys())` AND `all(f in caps)`. That failure is real
+    # evidence of ABSENCE for exactly those names — and for nothing else.
+    #
+    # The historical bug was treating that narrow proof as a blanket rule
+    # ("COLLAPSED => inventory == baseline six, so every non-baseline field is
+    # ABSENT"). Real Elasticsearch disproves it: the inventory is the union of
+    # the sampled document's keys and `field_caps`, and real logstash-proxy
+    # documents carry `category`, `bytes_downloaded`, `bytes_uploaded`,
+    # `rule_name`, `http_status_code`, `country_code` and `user_id` — none of
+    # which `_resolve_mode` ever inspects. Declaring them ABSENT hid fields the
+    # engine can genuinely read (spec §j.8).
+    #
+    # The correct split:
+    #   * a name the mode explicitly tested and rejected -> ABSENT (proven);
+    #   * otherwise presence comes from the inventory, whatever the mode:
+    #       - seen in `field_caps` -> PRESENT (index-wide, authoritative);
+    #       - absent from `field_caps` but present in the sampled document
+    #         -> PRESENT (a `_source` key that a real document carries is
+    #         readable, which is all the heuristics need);
+    #       - seen in neither -> UNKNOWN ("not sampled"), NEVER ABSENT.
+    #
+    # UNKNOWN is the honest state for "our sample did not mention it": the
+    # inventory is one document plus an index mapping, not a per-document
+    # census, so silence is not proof of absence.
+    mode_rejected: frozenset[str] = (
+        frozenset({"user_agent", "username", "session"})
+        if mode == "COLLAPSED"
+        else frozenset()
+    )
 
     resolved: dict[str, str] = {}
     for name, resolver in _FIELD_RESOLVERS.items():
         if resolver == "baseline":
             resolved[name] = PRESENT
-        elif resolver == "inventory":
+        else:
+            # "inventory" and "mode" now resolve identically: a field is
+            # present iff the inventory observed it. The "mode" resolver's
+            # original meaning ("present iff a UC-mode exists") is subsumed —
+            # UC-A/UC-B are only ever awarded *because* the inventory showed
+            # their lens fields, so the inventory is the single source of
+            # truth either way.
             if name in inventory_names:
                 resolved[name] = PRESENT
-            elif collapsed:
-                # COLLAPSED guarantees the inventory is exactly the baseline
-                # six, so a non-baseline name is genuinely ABSENT — the
-                # deployment's documents do not carry it.
+            elif name in mode_rejected:
                 resolved[name] = ABSENT
             else:
-                # UC-A/UC-B: the inventory is a *sample*, so a name it never
-                # observed is UNKNOWN ("not sampled"), not ABSENT. Both gate
-                # the same way (closed), but only COLLAPSED justifies the
-                # stronger claim.
                 resolved[name] = UNKNOWN
-        else:
-            # "mode": present only when a UC-mode (or a sampled doc) shows it.
-            # The mode alone cannot prove a *lens* field like user_agent, so
-            # absence of evidence must not read as presence.
-            resolved[name] = PRESENT if name in inventory_names else UNKNOWN
     return FieldAvailability(mode=mode, es_online=es_online, fields=resolved)
 
 
@@ -293,7 +321,10 @@ _HOST_HEURISTICS: dict[str, dict[str, object]] = {
             "exfiltration."
         ),
         "required": ("server_ip",),  # the distinct_dest_ips leg is the base signal
-        "required_any": ("bytes_uploaded", "bytes_downloaded", "duration_seconds"),
+        # A *measured* byte counter is genuinely required: the duration proxy
+        # must never be the sole basis for this technique's volume leg (see
+        # `_heuristic_t1029_001_host` and spec §j.9.2).
+        "required_any": ("bytes_uploaded", "bytes_downloaded"),
         "optional": ("action", "domain"),
     },
     "T1053.005": {
@@ -313,8 +344,11 @@ _HOST_HEURISTICS: dict[str, dict[str, object]] = {
             "Large byte transfers to multiple risk domains may indicate data staged over "
             "C2."
         ),
-        "required_any": ("bytes_uploaded", "bytes_downloaded", "duration_seconds"),
-        "optional": ("domain", "action", "url", "content_type", "request_size"),
+        # Same rule as T1029.001: `duration_seconds` is deliberately NOT a
+        # byte leg here. Its presence in `required_any` is what let a
+        # duration-only stream open the gate and then compare an *invented*
+        # total against the real floor (spec §j.6/§j.9.2).
+        "required_any": ("bytes_uploaded", "bytes_downloaded"),
     },
     "T1078": {
         "name": "Valid Accounts",
@@ -852,12 +886,22 @@ def _heuristic_t1029_001_host(sig: Signal) -> AttckTechnique | None:
     Many distinct destinations, few enforcements, and a measurable transfer
     volume. Enforcements exceed risk here only when the proxy was actually
     resisting; ALLOW-heavy diversity is the staging shape.
+
+    The volume leg must be a **measured** byte count. The
+    ``duration_seconds × 8192`` proxy reaches this 1 MB floor on ~122 ordinary
+    rows while inventing 38× the real byte total, so a proxy-only stream is
+    treated as "volume not measured" and declines here rather than passing on
+    an invented figure.
     """
     if sig.distinct_dest_ips < 10:
         return None
     if sig.risk_requests > 0 and sig.enforcements > sig.risk_requests * 0.5:
         return None
-    if sig.total_bytes is not None and sig.total_bytes < 1_000_000:
+    if sig.bytes_source == "bytes":
+        if sig.total_bytes is not None and sig.total_bytes < 1_000_000:
+            return None
+    else:
+        # No measured byte field — the volume leg cannot be evaluated.
         return None
     return AttckTechnique(
         technique_id="T1029.001",
@@ -923,10 +967,17 @@ def _heuristic_t1041_host(sig: Signal) -> AttckTechnique | None:
     """T1041 — Exfiltration Over C2 Channel.
 
     Large outbound volume on a mostly-ALLOWed, multi-destination session.
-    Requires a byte source (real counters, or the duration proxy); when no
-    byte field is readable the technique is gated away upstream, never
-    emitted on ``total_bytes == 0``.
+    Requires a **measured** byte source (real counters). The
+    ``duration_seconds × 8192`` proxy may not be the sole basis for crossing a
+    byte floor: on real proxy traffic (``duration_seconds: 0.01``) it invents
+    ~8 KiB per row — 38× the real 215 B — and would reach this predicate's
+    threshold on ~12k ordinary denied requests. When no byte counter resolves,
+    the technique is gated away upstream, never emitted on ``total_bytes == 0``
+    and never emitted on an invented total.
     """
+    if sig.bytes_source != "bytes":
+        # No measured byte field: a duration proxy is not byte evidence.
+        return None
     if sig.total_bytes is None or sig.total_bytes < 100_000_000:
         return None
     if sig.risk_share < 0.5:

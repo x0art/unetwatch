@@ -79,13 +79,27 @@ def test_baseline_fields_present_in_every_resolvable_mode():
             assert avail.has(field), f"{field} missing in {mode}"
 
 
-def test_collapsed_mode_marks_non_baseline_fields_absent():
-    """COLLAPSED's inventory IS the baseline set — not merely unsampled."""
+def test_collapsed_marks_only_mode_rejected_fields_absent():
+    """COLLAPSED proves absence only for the names `_resolve_mode` tested.
+
+    The historical assertion here was "COLLAPSED's inventory IS the baseline
+    set, so every non-baseline field is ABSENT". That was false against real
+    Elasticsearch (spec §j.8): the inventory unions the sampled document's
+    keys with `field_caps`, and real documents carry `category`/`bytes_*`/
+    `rule_name`, none of which `_resolve_mode` inspects. The corrected rule:
+
+    * the lens fields the mode explicitly rejected (`user_agent`, `username`,
+      `session`) are proven ABSENT;
+    * a field neither source mentions is UNKNOWN ("not sampled"), never ABSENT
+      — a one-document + mapping inventory is not a per-document census.
+    """
+    # The narrow proof: the mode tested these and found them missing.
     avail = _avail("COLLAPSED", _COLLAPSED_FIELDS)
-    for field in ("domain", "bytes_downloaded", "category", "rule_name"):
+    for field in ("user_agent", "username", "session"):
         assert avail.fields[field] == ABSENT
-    # user_agent is a lens field: neither the sample nor the mode proves it.
-    assert avail.fields["user_agent"] == UNKNOWN
+    # Silence about a field the mode never tested is not proof of absence.
+    for field in ("domain", "bytes_downloaded", "category", "rule_name"):
+        assert avail.fields[field] == UNKNOWN
 
 
 def test_user_agent_present_only_when_observed():
@@ -189,20 +203,16 @@ def test_gate_blocks_technique_when_required_field_absent():
 
 
 def test_gate_blocks_byte_technique_when_no_byte_field_present():
-    """T1041/T1105 bottom out in bytes; with none readable they are withheld."""
-    avail = _avail("COLLAPSED", _COLLAPSED_FIELDS)
-    # COLLAPSED does carry duration_seconds (a byte proxy), so T1041 is allowed.
-    assert _gate(avail, "T1041", am._HOST_HEURISTICS) is None
+    """T1041 bottoms out in bytes; a duration proxy is not a byte field.
 
-    no_bytes = FieldAvailability(
-        mode="COLLAPSED",
-        es_online=True,
-        fields={
-            name: (PRESENT if name in {"url", "@timestamp"} else ABSENT)
-            for name in am._FIELD_RESOLVERS
-        },
-    )
-    reason = _gate(no_bytes, "T1041", am._HOST_HEURISTICS)
+    `duration_seconds` used to satisfy this gate's `required_any`, which let a
+    duration-only stream emit T1041 on an *invented* byte total (spec
+    §j.6/§j.9.2). It is now deliberately excluded, so the gate itself encodes
+    "a measured byte counter is required".
+    """
+    avail = _avail("COLLAPSED", _COLLAPSED_FIELDS)
+    # COLLAPSED carries duration_seconds, but that is NOT a byte leg any more.
+    reason = _gate(avail, "T1041", am._HOST_HEURISTICS)
     assert reason is not None
     assert "bytes_uploaded" in reason or "bytes_downloaded" in reason
 
@@ -299,14 +309,22 @@ def test_mode_proven_field_does_not_cost_a_downgrade():
 
 
 def test_emitted_technique_carries_field_provenance():
+    """An emitted technique carries the mode, byte source, and field map.
+
+    ``bytes_source="bytes"`` is load-bearing, not decoration: T1041's predicate
+    refuses to cross its byte floor on a duration proxy (see
+    ``test_t1041_declines_on_duration_proxy_as_sole_byte_source``), so a Signal
+    with a ``total_bytes`` and no measured source is not a emitting shape.
+    """
     avail = _avail("UC-A", _UC_A_FIELDS)
     sig = _sig(_UC_A_FIELDS, mode="UC-A", total_bytes=10**9, risk_share=0.9,
-               distinct_domains=5, total_requests=100, risk_requests=90)
+               distinct_domains=5, total_requests=100, risk_requests=90,
+               bytes_source="bytes")
     tech, _ = am._evaluate(avail, "T1041", am._HOST_HEURISTICS,
                            am._heuristic_t1041_host, sig)
     assert tech is not None
     assert tech.evidence["es_mode"] == "UC-A"
-    assert tech.evidence["bytes_source"] == "none"
+    assert tech.evidence["bytes_source"] == "bytes"
     assert "field_availability" in tech.evidence
 
 
@@ -700,14 +718,20 @@ def test_downgrade_only_field_is_not_charged():
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1078", True),
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1583.003", True),
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1204.002", True),
-        # … and byte/rule-gated ones are withheld. T1041/T1029.001 have no
-        # ``required`` leg, so they are gate-eligible via duration_seconds —
-        # their byte leg is enforced inside the predicate, not the gate.
-        ("COLLAPSED", _COLLAPSED_FIELDS, "T1029.001", True),
-        ("COLLAPSED", _COLLAPSED_FIELDS, "T1041", True),
+        # … and byte-gated ones are withheld when no *measured* byte counter is
+        # in the inventory. `duration_seconds` is not a byte leg (spec §j.9.2),
+        # so a baseline-only COLLAPSED stream cannot open T1041/T1029.001.
+        ("COLLAPSED", _COLLAPSED_FIELDS, "T1029.001", False),
+        ("COLLAPSED", _COLLAPSED_FIELDS, "T1041", False),
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1567", False),
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1567.002", False),
         ("COLLAPSED", _COLLAPSED_FIELDS, "T1114.002", False),
+        # … but with real byte fields in the inventory they open again, in
+        # COLLAPSED as in any other mode (spec §j.8: inventory drives presence).
+        ("COLLAPSED", _COLLAPSED_FIELDS | {"bytes_downloaded", "bytes_uploaded"},
+         "T1041", True),
+        ("COLLAPSED", _COLLAPSED_FIELDS | {"bytes_downloaded", "bytes_uploaded"},
+         "T1029.001", True),
     ],
 )
 def test_technique_eligibility_per_mode(mode, names, technique_id, eligible):
@@ -734,3 +758,276 @@ def test_url_catalogue_byte_gate():
     # With bytes present (UC-A inventory) it is eligible.
     avail_full = _avail("UC-A", _UC_A_FIELDS)
     assert am._gate(avail_full, "T1105", am._URL_HEURISTICS) is None
+
+
+# ── §j reconciliation with the operator's real documents ────────────────────
+#
+# The fixtures below are modelled on a VERBATIM logstash-proxy document the
+# operator supplied (spec §j.0). They exist because the rest of this file
+# builds its COLLAPSED inventory as exactly the six baseline fields, which is
+# NOT what real Elasticsearch returns: `inventory_field_names()` unions the
+# sample document's keys with `field_caps`, so a real document's `category`,
+# `bytes_*`, `rule_name`, `http_status_code`, … resolve PRESENT even in
+# COLLAPSED. Every test here uses the real document's key set.
+
+# Verbatim `_source` from the operator's sample (spec §j.0), unmodified.
+_REAL_DOC = {
+    "@version": "1",
+    "category": "facebook.com",
+    "rule_info": "RN190,SNI,BS",
+    "rule_name": "facebook.com",
+    "action": "DENY",
+    "@timestamp": "2026-08-31T23:59:11.000Z",
+    "user_id": "172.21.122.6",
+    "server_ip": "57.144.192.3",
+    "url": "https://z-m-gateway.facebook.com/",
+    "duration_seconds": 0.01,
+    "host": {"ip": "172.21.73.13"},
+    "bytes_downloaded": 0,
+    "bytes_uploaded": 215,
+    "client_ip": "172.21.122.6",
+    "country_code": "BE",
+    "http_status_code": 0,
+}
+
+
+def test_real_document_resolves_to_collapsed():
+    """§j.8 — the operator's document resolves to COLLAPSED, and permanently.
+
+    The deployment carries neither `username` nor `session`, so no sampling
+    window can un-collapse it; the only field the document adds over the
+    baseline six is `@version`/`host`/…, none of which `_resolve_mode` reads.
+    """
+    from app.services.es_fields import _resolve_mode
+
+    assert _resolve_mode(_REAL_DOC, {}, es_online=True) == "COLLAPSED"
+
+
+def test_inventory_union_not_derivable_from_mode_only():
+    """False COLLAPSED invariant: real inventory ≠ the baseline six."""
+    from app.services.es_fields import inventory_field_names
+
+    # (No cache in a unit test, so exercise the union rule directly via the
+    # resolver: names supplied that the mode does not require must survive.)
+    real_inventory = set(_REAL_DOC.keys())
+    avail = resolve_availability(
+        mode="COLLAPSED", inventory_names=real_inventory, es_online=True
+    )
+    # The spec used to claim these are ABSENT in COLLAPSED. They are present
+    # in the real document, so a resolver that says ABSENT is fabricating the
+    # opposite error (hiding real data).
+    for name in ("category", "bytes_downloaded", "bytes_uploaded", "rule_name"):
+        assert avail.fields[name] == PRESENT, (
+            f"{name} is in the real document and must resolve PRESENT"
+        )
+    # `domain` is not in the document and not in `field_caps`, and the mode
+    # never tested for it — so the honest state is UNKNOWN ("not sampled"),
+    # not ABSENT. Either way the gate treats it as unusable, so the
+    # domain-gated predicates still decline.
+    assert avail.fields["domain"] == UNKNOWN
+    # Sanity: the cache is untouched by a direct call.
+    assert inventory_field_names() == set()
+
+
+def test_real_document_byte_techniques_are_gate_eligible_but_decline():
+    """§j.8 — the honest outcome: gate-eligible, predicate-declined.
+
+    T1567/T1114.002/T1567.002 are NOT withheld by the gate (their fields exist
+    in the real document), which contradicts §b.2's COLLAPSED column. They
+    decline on threshold, which is the correct and different behaviour.
+    """
+    avail = resolve_availability(
+        mode="COLLAPSED", inventory_names=set(_REAL_DOC.keys()), es_online=True
+    )
+    for tid in ("T1567", "T1567.002", "T1114.002"):
+        assert am._gate(avail, tid, am._HOST_HEURISTICS) is None, (
+            f"{tid} was believed withheld in COLLAPSED; its fields are present"
+        )
+
+
+def test_t1041_declines_on_duration_proxy_as_sole_byte_source():
+    """§j.6/§j.9.2 — the duration proxy may not cross a byte floor alone.
+
+    On the real traffic (duration_seconds=0.01) the proxy invents 8192 B/row
+    against a real 215 B — 38×. Before the fix, T1041's byte leg had no
+    `required` entry, so this Signal (proxy total, no measured source) emitted
+    a "100 MB exfiltration" from invented numbers.
+    """
+    avail = _avail("COLLAPSED", set(_REAL_DOC.keys()))
+    sig = _sig(
+        set(_REAL_DOC.keys()), mode="COLLAPSED", total_bytes=10**9,
+        risk_share=0.9, distinct_domains=0, total_requests=500,
+        risk_requests=450, enforcements=0, bytes_source="duration-proxy",
+    )
+    tech, _ = am._evaluate(
+        avail, "T1041", am._HOST_HEURISTICS, am._heuristic_t1041_host, sig
+    )
+    assert tech is None, "T1041 must not emit on an invented byte total"
+
+    # The same numbers WITH a measured source do emit — the fix is a source
+    # check, not a threshold change.
+    sig_measured = _sig(
+        set(_REAL_DOC.keys()), mode="COLLAPSED", total_bytes=10**9,
+        risk_share=0.9, distinct_domains=0, total_requests=500,
+        risk_requests=450, enforcements=0, bytes_source="bytes",
+    )
+    tech2, _ = am._evaluate(
+        avail, "T1041", am._HOST_HEURISTICS, am._heuristic_t1041_host, sig_measured
+    )
+    assert tech2 is not None
+
+
+def test_t1029_001_declines_on_duration_proxy_as_sole_byte_source():
+    """§j.6 — T1029.001's 1 MB volume leg takes the same guard.
+
+    122 ordinary rows reach 1 MB via the proxy; the predicate must not read
+    that as measured volume.
+    """
+    sig = _sig(
+        set(_REAL_DOC.keys()), mode="COLLAPSED", distinct_dest_ips=12,
+        total_bytes=10**6, risk_requests=0, enforcements=0,
+        bytes_source="duration-proxy",
+    )
+    assert am._heuristic_t1029_001_host(sig) is None
+
+    sig_measured = _sig(
+        set(_REAL_DOC.keys()), mode="COLLAPSED", distinct_dest_ips=12,
+        total_bytes=10**6, risk_requests=0, enforcements=0,
+        bytes_source="bytes",
+    )
+    assert am._heuristic_t1029_001_host(sig_measured) is not None
+
+
+def test_real_document_upload_share_is_arithmetic_not_evidence():
+    """§j.5 — on an all-DENY mix upload_share is 1.0 by construction.
+
+    download is always 0, so the share leg is satisfied without any upload
+    behaviour; only the absolute byte floor stops T1567 from firing. This
+    pins that the floor is what protects it.
+    """
+    avail = resolve_availability(
+        mode="COLLAPSED", inventory_names=set(_REAL_DOC.keys()), es_online=True
+    )
+    # 500 denied rows: download 0, upload 215 each.
+    sig = _sig(
+        set(_REAL_DOC.keys()), mode="COLLAPSED",
+        total_requests=500, risk_requests=0, enforcements=500,
+        download_bytes=0, upload_bytes=500 * 215,
+        total_bytes=500 * 215, upload_share=1.0, bytes_source="bytes",
+    )
+    assert sig.upload_share == 1.0  # the vacuous share
+    tech, _ = am._evaluate(
+        avail, "T1567", am._HOST_HEURISTICS, am._heuristic_t1567_host, sig
+    )
+    assert tech is None, (
+        "T1567 must decline on the absolute floor despite upload_share == 1.0"
+    )
+
+
+def test_http_status_zero_is_not_a_not_found():
+    """§j.4 — `http_status_code: 0` means 'no upstream response', not 404.
+
+    The document carries `0`; the engine must not fold that into a 404 rate
+    (the not_found_rate signal is unimplemented, and this pins why it must
+    stay that way until a real status field lands).
+    """
+    assert _REAL_DOC["http_status_code"] == 0
+    assert _REAL_DOC["http_status_code"] != 404
+
+
+def test_user_id_is_a_client_ip_alias_in_the_real_document():
+    """§j.1 — `user_id` is an IP, identical to `client_ip`, not a principal."""
+    assert _REAL_DOC["user_id"] == _REAL_DOC["client_ip"]
+    # A minimal IPv4 sanity check: the value is an address, not a principal.
+    assert all(p.isdigit() for p in _REAL_DOC["user_id"].split("."))
+
+
+def test_rule_info_is_present_but_unmapped():
+    """§j.3 — `rule_info` exists (so 'Hard ABSENT' was wrong) but the code set
+    is undocumented, so no predicate may read it.
+    """
+    assert _REAL_DOC["rule_info"] == "RN190,SNI,BS"
+    # The engine resolves it for reporting...
+    avail = resolve_availability(
+        mode="COLLAPSED", inventory_names=set(_REAL_DOC.keys()), es_online=True
+    )
+    assert avail.fields["rule_info"] == PRESENT
+    # ...but no catalogue entry may *require* it (it is uninterpretable).
+    for catalogue in (am._HOST_HEURISTICS, am._URL_HEURISTICS):
+        for tid, meta in catalogue.items():
+            assert "rule_info" not in meta.get("required", ()), (
+                f"{tid} gates on an undocumented code set"
+            )
+            assert "rule_info" not in meta.get("required_any", ()), (
+                f"{tid} gates on an undocumented code set"
+            )
+
+
+def test_duration_only_stream_cannot_emit_t1041_end_to_end():
+    """§j.9.2 — the gate itself blocks a duration-only stream, not just the
+    predicate.
+
+    The original bug was a *gate* bug: T1041's `required_any` listed
+    `duration_seconds`, so the technique opened with no byte counter at all and
+    the predicate then compared `duration × 8192` against a real floor. This
+    test drives the gate (not the predicate) to prove the catalogue no longer
+    admits that shape.
+    """
+    # A baseline-only COLLAPSED inventory: `duration_seconds` exists, no bytes.
+    avail = _avail("COLLAPSED", _COLLAPSED_FIELDS)
+    assert avail.has("duration_seconds")
+    assert not avail.any_of("bytes_uploaded", "bytes_downloaded")
+    reason = am._gate(avail, "T1041", am._HOST_HEURISTICS)
+    assert reason is not None, (
+        "a duration-only stream must not open T1041's gate"
+    )
+    assert "bytes_uploaded" in reason and "bytes_downloaded" in reason
+    # …and the runner emits nothing for it.
+    sig = _sig(_COLLAPSED_FIELDS, mode="COLLAPSED", total_requests=5000,
+               risk_share=0.9, risk_requests=4500, enforcements=0,
+               total_bytes=5000 * 8192, bytes_source="duration-proxy")
+    techniques, _ = am._run_host_heuristics(sig, avail)
+    assert "T1041" not in {t.technique_id for t in techniques}
+
+
+def test_availability_prefers_inventory_over_mode():
+    """§j.9.1 — presence is inventory-driven; mode only marks proven-absent.
+
+    Three sources speak with different authority:
+    * `field_caps` (index-wide mapping) -> PRESENT;
+    * a key present in the sampled document but not in caps -> PRESENT (the
+      value is readable in `_source`, which is all a heuristic needs);
+    * a field the mode explicitly tested and rejected -> ABSENT;
+    * a field no source mentions -> UNKNOWN, never ABSENT.
+    """
+    # `field_caps`-only presence (no sample key) still resolves PRESENT.
+    avail = resolve_availability(
+        mode="COLLAPSED",
+        inventory_names={"category"},  # imagine this came from field_caps alone
+        es_online=True,
+    )
+    assert avail.fields["category"] == PRESENT
+    # A field the mode tested and rejected is proven ABSENT...
+    assert avail.fields["username"] == ABSENT
+    assert avail.fields["session"] == ABSENT
+    assert avail.fields["user_agent"] == ABSENT
+    # ...and one it never tested is UNKNOWN.
+    assert avail.fields["domain"] == UNKNOWN
+
+
+def test_collapsed_does_not_hide_present_byte_fields():
+    """§j.9.1 regression guard — the exact operator shape.
+
+    The operator's document carries `bytes_downloaded`/`bytes_uploaded` and
+    resolves to COLLAPSED. The old resolver marked both ABSENT, so every
+    byte-reading heuristic was starved on real data. They must be PRESENT.
+    """
+    avail = resolve_availability(
+        mode="COLLAPSED", inventory_names=set(_REAL_DOC.keys()), es_online=True
+    )
+    assert avail.mode == "COLLAPSED"
+    for name in ("bytes_downloaded", "bytes_uploaded", "category",
+                 "rule_name", "http_status_code", "country_code"):
+        assert avail.fields[name] == PRESENT, (
+            f"{name} is in the real document; COLLAPSED must not hide it"
+        )
