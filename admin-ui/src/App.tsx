@@ -15,6 +15,7 @@ import { AddBlacklistDialog, AddBlacklistButton } from "./components/AddBlacklis
 import { AddJaillistDialog, AddJaillistButton } from "./components/AddJaillistDialog"
 import { ThemeProvider, type View } from "./components/Sidebar"
 import { FilterProvider, useFilter } from "./contexts/FilterContext"
+import { ZoneProvider } from "./contexts/ZoneContext"
 import { ToastProvider, Skeleton } from "./components/ui"
 import { MotionGate } from "./components/motion"
 import { GlobalSearchPalette } from "./components/GlobalSearchPalette"
@@ -233,124 +234,126 @@ function AppRoutes() {
   }
 
   return (
-    <AppShell
-      currentView={view === "report-host" ? "host" : view === "report-url" ? "url" : view}
-      onNavigate={handleNavigate}
-      onLogout={handleLogout}
-      title="uNetWatch"
-      description="Pattern console"
-      actions={
-        <>
-          <AddJaillistButton onOpen={() => setJaillistDialogOpen(true)} />
-          <AddJaillistDialog
-            open={jaillistDialogOpen}
-            onClose={() => setJaillistDialogOpen(false)}
-          />
-          <AddBlacklistButton onOpen={() => setBlacklistDialogOpen(true)} />
-          <AddBlacklistDialog
-            open={blacklistDialogOpen}
-            onClose={() => setBlacklistDialogOpen(false)}
-          />
-          <AddPatternButton onOpen={() => setPatternDialogOpen(true)} />
-          <AddPatternDialog
-            open={patternDialogOpen}
-            onClose={() => setPatternDialogOpen(false)}
-          />
-        </>
-      }
-    >
-      <Suspense fallback={<PageFallback />}>
-        {/* Keep visited pages mounted so switching tabs never resets their
-            state — each renders in a hidden wrapper when inactive. */}
-        {visited.has("dashboard") && (
-          <div hidden={view !== "dashboard"}>
-            <DashboardPage
-              remaining={remaining}
-              intervalSec={intervalSec}
-              status={status}
-              counts={counts}
-              lastUpdated={lastUpdated}
-              onRefresh={fetchStats}
-              onNavigate={handleNavigate}
-            />
-          </div>
-        )}
-        {visited.has("query") && (
-          <div hidden={view !== "query"}>
-            <QueryPage onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("patterns") && (
-          <div hidden={view !== "patterns"}>
-            <PatternTable externalSearch={patternSearch} />
-          </div>
-        )}
-        {visited.has("findings") && (
-          <div hidden={view !== "findings"}>
-            <FindingsPage initialSearch={findingsSearch} onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("blacklist") && (
-          <div hidden={view !== "blacklist"}>
-            <BlacklistPage />
-          </div>
-        )}
-        {visited.has("jaillist") && (
-          <div hidden={view !== "jaillist"}>
-            <JaillistPage />
-          </div>
-        )}
-        {visited.has("redirects") && (
-          <div hidden={view !== "redirects"}>
-            <RedirectsPage />
-          </div>
-        )}
-        {visited.has("logs") && (
-          <div hidden={view !== "logs"}>
-            <LogsPage externalSearch={logsSearch} />
-          </div>
-        )}
-        {visited.has("host") && (
-          <div hidden={view !== "host"}>
-            <HostInspectorPage onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("url") && (
-          <div hidden={view !== "url"}>
-            <UrlInvestigationPage onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("analytics") && (
-          <div hidden={view !== "analytics"}>
-            <AnalyticsPage onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("attck-fleet") && (
-          <div hidden={view !== "attck-fleet"}>
-            <AttckFleetPage onNavigate={handleNavigate} />
-          </div>
-        )}
-        {visited.has("report-host") && (
-          <div hidden={view !== "report-host"}>
-            <ReportPage kind="host" value={globalFilter} onBack={() => handleNavigate("host")} />
-          </div>
-        )}
-        {visited.has("report-url") && (
-          <div hidden={view !== "report-url"}>
-            <ReportPage kind="url" value={globalFilter} onBack={() => handleNavigate("url")} />
-          </div>
-        )}
-      </Suspense>
-
-      <GlobalSearchPalette
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
+    <ZoneProvider>
+      <AppShell
+        currentView={view === "report-host" ? "host" : view === "report-url" ? "url" : view}
         onNavigate={handleNavigate}
-        onFindingsSearch={setFindingsSearch}
-        onPatternSearch={setPatternSearch}
-        onLogsSearch={setLogsSearch}
-      />
-    </AppShell>
+        onLogout={handleLogout}
+        title="uNetWatch"
+        description="Pattern console"
+        actions={
+          <>
+            <AddJaillistButton onOpen={() => setJaillistDialogOpen(true)} />
+            <AddJaillistDialog
+              open={jaillistDialogOpen}
+              onClose={() => setJaillistDialogOpen(false)}
+            />
+            <AddBlacklistButton onOpen={() => setBlacklistDialogOpen(true)} />
+            <AddBlacklistDialog
+              open={blacklistDialogOpen}
+              onClose={() => setBlacklistDialogOpen(false)}
+            />
+            <AddPatternButton onOpen={() => setPatternDialogOpen(true)} />
+            <AddPatternDialog
+              open={patternDialogOpen}
+              onClose={() => setPatternDialogOpen(false)}
+            />
+          </>
+        }
+      >
+        <Suspense fallback={<PageFallback />}>
+          {/* Keep visited pages mounted so switching tabs never resets their
+              state — each renders in a hidden wrapper when inactive. */}
+          {visited.has("dashboard") && (
+            <div hidden={view !== "dashboard"}>
+              <DashboardPage
+                remaining={remaining}
+                intervalSec={intervalSec}
+                status={status}
+                counts={counts}
+                lastUpdated={lastUpdated}
+                onRefresh={fetchStats}
+                onNavigate={handleNavigate}
+              />
+            </div>
+          )}
+          {visited.has("query") && (
+            <div hidden={view !== "query"}>
+              <QueryPage onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("patterns") && (
+            <div hidden={view !== "patterns"}>
+              <PatternTable externalSearch={patternSearch} />
+            </div>
+          )}
+          {visited.has("findings") && (
+            <div hidden={view !== "findings"}>
+              <FindingsPage initialSearch={findingsSearch} onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("blacklist") && (
+            <div hidden={view !== "blacklist"}>
+              <BlacklistPage />
+            </div>
+          )}
+          {visited.has("jaillist") && (
+            <div hidden={view !== "jaillist"}>
+              <JaillistPage />
+            </div>
+          )}
+          {visited.has("redirects") && (
+            <div hidden={view !== "redirects"}>
+              <RedirectsPage />
+            </div>
+          )}
+          {visited.has("logs") && (
+            <div hidden={view !== "logs"}>
+              <LogsPage externalSearch={logsSearch} />
+            </div>
+          )}
+          {visited.has("host") && (
+            <div hidden={view !== "host"}>
+              <HostInspectorPage onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("url") && (
+            <div hidden={view !== "url"}>
+              <UrlInvestigationPage onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("analytics") && (
+            <div hidden={view !== "analytics"}>
+              <AnalyticsPage onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("attck-fleet") && (
+            <div hidden={view !== "attck-fleet"}>
+              <AttckFleetPage onNavigate={handleNavigate} />
+            </div>
+          )}
+          {visited.has("report-host") && (
+            <div hidden={view !== "report-host"}>
+              <ReportPage kind="host" value={globalFilter} onBack={() => handleNavigate("host")} />
+            </div>
+          )}
+          {visited.has("report-url") && (
+            <div hidden={view !== "report-url"}>
+              <ReportPage kind="url" value={globalFilter} onBack={() => handleNavigate("url")} />
+            </div>
+          )}
+        </Suspense>
+  
+        <GlobalSearchPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          onNavigate={handleNavigate}
+          onFindingsSearch={setFindingsSearch}
+          onPatternSearch={setPatternSearch}
+          onLogsSearch={setLogsSearch}
+        />
+      </AppShell>
+    </ZoneProvider>
   )
 }
 

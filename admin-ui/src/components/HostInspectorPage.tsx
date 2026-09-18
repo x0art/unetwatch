@@ -446,7 +446,7 @@ export function HostInspectorPage({
   }, [])
 
   // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
-  // InspectionDrawer "View Host History" land on the right host. Re-runs on
+  // "View Host History" land on the right host. Re-runs on
   // every globalFilter change (the page stays mounted across tabs now) — but
   // only when the filter is a host/IP, not a URL.
   useEffect(() => {

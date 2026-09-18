@@ -2226,3 +2226,33 @@ export async function getHostEnrichment(ip: string, timeoutS = 3): Promise<Enric
 export async function getUrlEnrichment(url: string, timeoutS = 3): Promise<EnrichUrl> {
   return request(`/enrich/url/${encodeURIComponent(url)}?timeout_s=${timeoutS}`)
 }
+
+/* ── Operator display zone (backend half of timestamp rendering) ──── */
+
+export interface OperatorZone {
+  /** Honest label for the active zone: "UTC", "+07:00", "Asia/Bangkok". */
+  label: string
+  /** The zone's current UTC offset in minutes (DST-aware for IANA zones). */
+  offsetMinutes: number
+}
+
+/**
+ * The configured operator display zone (GET /api/timezone — admin-gated,
+ * same session auth as every other admin-UI read). Returns `null` when the
+ * endpoint is absent, unreachable, or 401s without a usable session —
+ * callers must then render timestamps browser-local (the pre-zone
+ * behavior) and never break the page. Never throws.
+ */
+export async function getOperatorZone(): Promise<OperatorZone | null> {
+  try {
+    const z = await request<{ label?: unknown; offsetMinutes?: unknown }>("/timezone")
+    if (typeof z?.label !== "string" || z.label === "") return null
+    return {
+      label: z.label,
+      offsetMinutes:
+        typeof z.offsetMinutes === "number" && Number.isFinite(z.offsetMinutes) ? z.offsetMinutes : 0,
+    }
+  } catch {
+    return null
+  }
+}

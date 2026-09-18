@@ -40,7 +40,8 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { cn, useDebounce } from "../lib/utils"
+import { cn, formatInstant, useDebounce } from "../lib/utils"
+import { useZone } from "../contexts/ZoneContext"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -49,12 +50,6 @@ const KIND_OPTIONS = [
   { value: "poll", label: "Polls (webhook)" },
   { value: "query", label: "Query runs" },
 ]
-
-function formatWhen(ts: string) {
-  const d = new Date(ts)
-  if (Number.isNaN(d.getTime())) return ts
-  return d.toLocaleString()
-}
 
 function formatDuration(ms: number) {
   if (ms < 1000) return `${ms}ms`
@@ -453,6 +448,7 @@ function BackupPanel() {
 
 export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const { toast } = useToast()
+  const zone = useZone()
   const [items, setItems] = useState<MonitorLog[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -693,7 +689,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         open={!!detail}
         onClose={() => setDetail(null)}
         title="Run details"
-        description={detail ? `${detail.kind === "poll" ? "Poll" : "Query run"} · ${formatWhen(detail.started_at)}` : undefined}
+        description={detail ? `${detail.kind === "poll" ? "Poll" : "Query run"} · ${formatInstant(detail.started_at, zone)}` : undefined}
         className="max-w-2xl"
       >
         {detail && (

@@ -137,6 +137,19 @@ def zone_label(tz: tzinfo | None = None) -> str:
     return f"{sign}{hours:02d}:{minutes:02d}"
 
 
+def utc_offset_minutes(tz: tzinfo | None = None) -> int:
+    """The zone's UTC offset **right now**, in minutes (e.g. 420 for ``+07:00``).
+
+    Fixed-offset zones report their constant offset; IANA zones report the
+    offset in effect at the current instant (DST-aware). Resolves through
+    :func:`operator_tz` when ``tz`` is omitted, so a misconfigured
+    ``DISPLAY_TZ`` degrades to 0 exactly like every other helper here.
+    """
+    zone = tz or operator_tz()
+    offset = datetime.now(UTC).astimezone(zone).utcoffset()
+    return int(offset.total_seconds() // 60) if offset else 0
+
+
 def format_peak(dt_value: datetime, tz: tzinfo | None = None) -> str:
     """Format an instant as ``'Tue 14:00 +07:00'`` in the configured zone.
 

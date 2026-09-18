@@ -26,8 +26,9 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react"
-import { cn, copyText, formatRelativeTime } from "../lib/utils"
+import { cn, copyText, formatInstant, formatRelativeTime } from "../lib/utils"
 import { AnimatedNumber, Stagger, StaggerItem } from "./motion"
+import { useZone } from "../contexts/ZoneContext"
 
 /* ────────────────────────────────────────────────────────────────
  * Button — soft: hairline border, rounded corners, subtle shadow,
@@ -96,8 +97,9 @@ export function LoadingIcon({ className }: { className?: string }) {
  * Pass the RAW timestamp (ISO string or epoch-ms) — the component derives
  * both lines, so relative time never parses a lossy locale string. */
 export function TimestampCell({ value, className }: { value: string | number; className?: string }) {
+  const zone = useZone()
   const ms = typeof value === "number" ? value : Date.parse(value)
-  const absolute = Number.isNaN(ms) ? String(value) : new Date(ms).toLocaleString()
+  const absolute = Number.isNaN(ms) ? String(value) : formatInstant(value, zone)
   return (
     <span className={cn("block whitespace-nowrap", className)} title={absolute}>
       <span className="block text-foreground">{formatRelativeTime(value)}</span>

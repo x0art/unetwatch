@@ -29,6 +29,7 @@ from app.routes import (
     patterns,
     query,
     redirects,
+    timezone,
 )
 from app.services.feeds import sync_regenerate, sync_regenerate_jail
 
@@ -238,6 +239,10 @@ app.include_router(attck.router, dependencies=[Depends(verify_admin)])
 app.include_router(enrich.router, dependencies=[Depends(verify_admin)])
 app.include_router(hosts.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
+# Timezone router is mounted with the admin default like every other admin-UI
+# read: it exposes the operator's configured zone (mild config disclosure) and
+# the SPA already authenticates every API call, so exemption would save nothing.
+app.include_router(timezone.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 
 from app.routes import readout as readout_routes

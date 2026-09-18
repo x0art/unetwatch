@@ -1,9 +1,10 @@
 import { Copy, ExternalLink, X } from "lucide-react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { Badge, Button, useToast } from "./ui"
+import { useZone } from "../contexts/ZoneContext"
 import { useFilter } from "../contexts/FilterContext"
 import { formatBytes } from "../api"
-import { copyText } from "../lib/utils"
+import { copyText, formatInstant } from "../lib/utils"
 import { cn } from "../lib/utils"
 import {
   getSrcIp,
@@ -88,6 +89,7 @@ export interface EventInspectorSidebarProps {
 export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspectorSidebarProps) {
   const { setGlobalFilter } = useFilter()
   const { toast } = useToast()
+  const zone = useZone()
 
   if (!row) return null
 
@@ -172,7 +174,7 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
                 Event #{String(rowId).slice(0, 20)}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="mt-1 font-mono text-[11px] text-muted-foreground">
-                {row.timestamp ? new Date(row.timestamp).toLocaleString() : "—"}
+                {row.timestamp ? formatInstant(row.timestamp, zone) : "—"}
               </DialogPrimitive.Description>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge variant={actionVariant(row.action ?? "")}>{row.action || "—"}</Badge>

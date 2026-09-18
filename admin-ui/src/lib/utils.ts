@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { useEffect, useState } from "react"
+import type { OperatorZone } from "../api"
 
 /**
  * Merge Tailwind classes with proper de-duplication.
@@ -101,6 +102,39 @@ export function formatRelativeTime(input: string | number): string {
   const months = Math.floor(days / 30)
   if (months < 12) return `${months}mo ago`
   return `${Math.floor(months / 12)}y ago`
+}
+
+/**
+ * Render an instant in the operator's display zone: the backend buckets and
+ * labels every aggregation in that zone (Settings.display_tz), so evidence
+ * timestamps must render in the same zone or the UI shows one instant as two
+ * clock readings. `zone === null` (endpoint absent/failed) falls back to
+ * browser-local rendering — the pre-zone behavior. Unparseable input is
+ * returned unchanged. Never throws.
+ */
+export function formatInstant(input: string | number, zone: OperatorZone | null): string {
+  const d = new Date(input)
+  if (Number.isNaN(d.getTime())) return String(input)
+  if (!zone) return d.toLocaleString()
+  try {
+    // IANA labels ("Asia/Bangkok", "UTC") are valid Intl timeZone identifiers
+    // and DST-aware per instant. Fixed-offset labels ("+07:00") are rejected
+    // by some engines — the fallback below covers those.
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: zone.label,
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }).format(d)
+  } catch {
+    // Fixed-offset zones have no DST, so shifting the instant by the zone's
+    // offset and reading it back as UTC wall-clock is exact for any instant.
+    const shifted = new Date(d.getTime() + zone.offsetMinutes * 60_000)
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: "UTC",
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }).format(shifted)
+  }
 }
 
 /**

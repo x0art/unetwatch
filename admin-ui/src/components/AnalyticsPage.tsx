@@ -29,8 +29,9 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { TrendCharts, type TrendPoint } from "./TrendCharts"
-import { useAutoRefresh } from "../lib/utils"
+import { formatInstant, useAutoRefresh } from "../lib/utils"
 import { useFilter } from "../contexts/FilterContext"
+import { useZone } from "../contexts/ZoneContext"
 import {
   getAnalyticsSummary,
   getAnalyticsBandwidth,
@@ -97,12 +98,6 @@ function csvRows(header: string[], rows: unknown[][]): string {
   return [header.map(csvCell).join(","), ...rows.map((r) => r.map(csvCell).join(","))].join("\n")
 }
 
-function formatWhen(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
-}
-
 /** Collapse rows to one per unique domain (base_url), keeping the first. */
 function dedupeByDomain<T extends { base_url?: string; url?: string }>(rows: T[]): T[] {
   const seen = new Set<string>()
@@ -125,6 +120,7 @@ export function AnalyticsPage({
 } = {}) {
   const { setGlobalFilter, timeRange: range, setTimeRange: setRange } = useFilter()
   const { toast } = useToast()
+  const zone = useZone()
 
   const [compare, setCompare] = useState("none")
 
@@ -234,7 +230,11 @@ export function AnalyticsPage({
     ? pctArrow(summary!.enforcementsDeltaPct) ?? (compare === "previous" ? "no prev data" : "handled")
     : "handled"
   const hostHint = hasRealData ? rangeLabel(range) : rangeLabel(range)
-  const peakHint = hasRealData ? "UTC hour with most requests" : "busiest hour"
+  // The hint must never contradict the value beside it: the backend always
+  // ends the peak value with its zone label (format_peak → "Tue 14:00 +07:00"),
+  // so derive the zone from the value itself instead of a hardcoded word.
+  const peakZoneLabel = peakValue === "—" ? null : peakValue.trim().split(/\s+/).slice(-1)[0]
+  const peakHint = peakZoneLabel ? `${peakZoneLabel} hour with most requests` : "busiest hour"
 
   /* ── Trend chart data ──────────────────────────────────────────────── */
 
@@ -354,7 +354,7 @@ export function AnalyticsPage({
         header: "Timestamp",
         filterType: "datetime",
         accessor: (r) => r.log_timestamp,
-        cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatWhen(r.log_timestamp)}</span>,
+        cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{formatInstant(r.log_timestamp, zone)}</span>,
         width: "w-44",
         defaultSortDir: "desc",
       },
@@ -501,7 +501,7 @@ export function AnalyticsPage({
         width: "w-24",
       },
     ],
-    [openHost, openUrl],
+    [openHost, openUrl, zone],
   )
 
   /* ── Export handlers ──────────────────────────────────────────────── */
