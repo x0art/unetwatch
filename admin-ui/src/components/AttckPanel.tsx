@@ -42,6 +42,13 @@ export function AttckPanel({ mapping, loading, error, entityLabel, embedded = fa
   const hasTechniques = !!mapping && mapping.techniques.length > 0
   const hasHighSeverity =
     !!mapping && mapping.techniques.some((t) => t.severity === "HIGH")
+  // A suppressed technique produces no row in `techniques`, so without this
+  // the panel would show "no techniques detected" and hide the fact that the
+  // engine actively withheld them for absent fields. Only render rows the
+  // backend actually reported (id + reason).
+  const suppressed = (mapping?.signals?.suppressed ?? []).filter(
+    (s) => !!s?.id && !!s?.reason,
+  )
   // Icon reads the real state: an offline/empty mapping must NOT show the
   // green "all clear" shield that a clean result would show.
   const panelIcon = hasTechniques
@@ -145,6 +152,27 @@ export function AttckPanel({ mapping, loading, error, entityLabel, embedded = fa
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+          {suppressed.length > 0 && (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">
+                {suppressed.length} technique
+                {suppressed.length === 1 ? "" : "s"} withheld — required field
+                {suppressed.length === 1 ? " was" : "s were"} absent:
+              </p>
+              <ul className="space-y-1">
+                {suppressed.map((s) => (
+                  <li key={s.id} className="flex gap-2 text-xs">
+                    <span className="font-mono text-muted-foreground">
+                      {s.id}
+                    </span>
+                    <span className="break-words text-muted-foreground/80">
+                      {s.reason}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

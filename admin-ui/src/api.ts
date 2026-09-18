@@ -2122,6 +2122,11 @@ export interface AttckSignal {
   first_seen?: string | null
   host_is_cdn?: boolean
   host_is_proxy?: boolean
+  /** Techniques the field-availability gate WITHHELD. A suppressed technique
+   * emits no `techniques[]` row, so this is the only structured home for the
+   * reasons (the same text is also appended to `summary`). Optional because
+   * older payloads and the offline sentinels omit it. */
+  suppressed?: { id: string; reason: string }[]
 }
 
 export interface AttckTechnique {
