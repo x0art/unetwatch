@@ -44,16 +44,23 @@ Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
 
 ``compare`` and ``hostGroup`` are accepted and echoed but do not change the
 aggregation (documented honest no-op — see each endpoint docstring).
+
+Calendar days and clock labels follow the operator's zone: every ``bucket``
+date and every peak-time label is converted from the UTC feed into
+``Settings.display_tz`` (env ``DISPLAY_TZ``, default ``UTC``) via
+``app/services/timeutil.py``. Invalid zones degrade to UTC with one warning.
+The ``bucket`` field stays a ``YYYY-MM-DD`` string — only its value changes,
+and only when a non-UTC zone is configured.
 """
 
 import json
 import re
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException as FastAPIHTTPException
 
 from app.database import get_db_conn
+from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -201,13 +208,12 @@ def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
 
 
 def _fmt_peak(ts: str) -> str:
-    """Format an ISO bucket as 'Tue 14:00 EST' (best-effort, UTC-backed)."""
-    try:
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return ts
-    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[dt.weekday()]
-    return f"{weekday} {dt.strftime('%H:%M')} EST"
+    """Format an ISO bucket as ``'Tue 14:00 +07:00'`` in the operator's zone.
+
+    The label is derived from the configured zone (``DISPLAY_TZ``),
+    never hardcoded; unparseable input is returned verbatim.
+    """
+    return format_peak_iso(ts)
 
 
 # ── Aggregation helpers (SQL over findings) ────────────────────────────────
@@ -266,15 +272,13 @@ async def _findings_summary(db, minutes: int) -> dict:
         by_host: dict[str, int] = {}
         for r in rows:
             by_host[r["client_ip"]] = by_host.get(r["client_ip"], 0) + 1
-        top_host = max(by_host, key=by_host.get) if by_host else ""
-
-        # Peak hour = the UTC hour with the most rows (best-effort; the UI
-        # formats the weekday + hour label).
+        # Peak hour = the operator-local hour with the most rows (best-effort;
+        # the UI shows the weekday + hour + zone label verbatim).
         by_hour: dict[str, int] = {}
         for r in rows:
-            ts = r.get("log_timestamp") or ""
-            if len(ts) >= 13:
-                by_hour[ts[:13] + ":00:00"] = by_hour.get(ts[:13] + ":00:00", 0) + 1
+            hour = local_hour_bucket(r.get("log_timestamp") or "")
+            if hour:
+                by_hour[hour] = by_hour.get(hour, 0) + 1
         if by_hour:
             peak_ts = max(by_hour, key=by_hour.get)
 
@@ -350,7 +354,7 @@ async def _findings_bandwidth(db, minutes: int) -> list[dict]:
 
     buckets: dict[str, dict[str, int]] = {}
     for r in rows:
-        day = (r.get("log_timestamp") or "")[:10]
+        day = local_day(r.get("log_timestamp") or "")
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
@@ -390,7 +394,7 @@ async def _findings_enforcements(db, minutes: int) -> list[dict]:
 
     buckets: dict[str, dict[str, int]] = {}
     for r in rows:
-        day = (r.get("log_timestamp") or "")[:10]
+        day = local_day(r.get("log_timestamp") or "")
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
@@ -620,8 +624,15 @@ async def _es_summary(minutes: int) -> dict | None:
         by_host = df["client_ip"].astype(str).value_counts()
         top_host = str(by_host.index[0]) if len(by_host) else ""
 
-        hour_series = df["@timestamp"].astype(str).str[:13]
-        peak_hour = hour_series.value_counts().index[0] + ":00:00" if len(hour_series) else ""
+        # Peak hour in the operator's zone — counting on the raw UTC hour
+        # string would label the peak with the wrong hour AND the wrong day
+        # for any row that crosses local midnight.
+        by_hour: dict[str, int] = {}
+        for value in df["@timestamp"].astype(str):
+            hour = local_hour_bucket(value)
+            if hour:
+                by_hour[hour] = by_hour.get(hour, 0) + 1
+        peak_hour = max(by_hour, key=by_hour.get) if by_hour else ""
         return {
             "totalVolume": total_volume,
             "totalRisk": total_risk,
@@ -695,7 +706,7 @@ async def _es_enforcements(minutes: int) -> list[dict] | None:
         buckets: dict[str, dict[str, int]] = {}
         ts = df["@timestamp"].astype(str)
         for idx in df.index:
-            day = ts[idx][:10]
+            day = local_day(ts[idx])
             if not day:
                 continue
             b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
@@ -876,7 +887,8 @@ async def bandwidth(
 ):
     """Daily bandwidth consumption — area chart (inbound vs outbound).
 
-    Aggregates the persisted findings by UTC day, summing bytes. Direction is
+    Aggregates the persisted findings by the operator-local day (see
+    ``Settings.display_tz``), summing bytes. Direction is
     not captured by the feed, so ``inbound`` is 0 unless the ES projection can
     resolve a per-document direction field (the route tries ES first with the
     same fallback chain as ``summary`` — see module docstring).

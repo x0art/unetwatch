@@ -8,7 +8,7 @@ enforcements = 0.
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import aiosqlite
 
@@ -321,3 +321,184 @@ async def test_top_clients_rejects_bad_range(client, db_path):
     """GET /api/analytics/top-clients 422s on an unknown range."""
     res = client.get("/api/analytics/top-clients?range=bogus")
     assert res.status_code == 422
+
+
+# ── Operator timezone: day bucketing + honest time labels ─────────────────
+#
+# The proxy feed emits UTC. A request the operator made at local 06:59 on
+# 1 September (+07:00) is ``2026-08-31T23:59:11Z`` in UTC (verified against a
+# real document: the same instant carries ``[01/Sep/2026:06:59:11 +0700]`` in
+# the local ``message`` field). Bucketing on the UTC date string therefore
+# files it under 31 Aug — one calendar day off the operator's view.
+
+_BOUNDARY_TS = "2026-08-31T23:59:11Z"
+
+
+def _boundary_rows():
+    """A single row one hour before UTC midnight (the defect's exact shape).
+
+    Pinned to 23:59:11 **UTC** so that under +07:00 it is 06:59:11 the *next*
+    local day. Only one row is seeded so the bucket set is unambiguous.
+    """
+    boundary = datetime.now(UTC).replace(hour=23, minute=59, second=11, microsecond=0)
+    boundary_ts = boundary.strftime("%Y-%m-%dT%H:%M:%SZ")
+    pats = json.dumps(["*evil*"])
+    return [
+        ("1.1.1.1", "", "http://evil.example/a", "evil.example", boundary_ts, pats, "ALLOW"),
+    ], boundary_ts
+
+
+async def test_bandwidth_buckets_by_local_day_under_configured_zone(
+    client, db_path, monkeypatch
+):
+    """A UTC-evening request lands in the operator's *next* local day (+07:00).
+
+    Pins that the setting actually changes behaviour, not just the code path:
+    the same seeded instant buckets differently under UTC and under +07:00.
+    """
+    from app.config import get_settings
+
+    rows, boundary_ts = _boundary_rows()
+    await _seed(client, db_path, rows, add_action_col=True)
+
+    # The seeded instant is deliberately one hour before UTC midnight, so its
+    # local (+07:00) day is the *following* calendar date.
+    assert datetime.fromisoformat(
+        boundary_ts.replace("Z", "+00:00")
+    ).hour == 23
+    utc_day = boundary_ts[:10]
+    local_day = (
+        datetime.fromisoformat(boundary_ts.replace("Z", "+00:00"))
+        .astimezone(timezone(timedelta(hours=7)))
+        .strftime("%Y-%m-%d")
+    )
+    assert utc_day != local_day  # the defect only exists when these differ
+
+    # 1) Operator zone = +07:00 → the boundary row buckets into the LOCAL day.
+    monkeypatch.setenv("DISPLAY_TZ", "+07:00")
+    get_settings.cache_clear()
+    try:
+        res = client.get("/api/analytics/bandwidth?range=7d")
+        assert res.status_code == 200
+        buckets = {p["bucket"] for p in res.json()["points"]}
+        assert local_day in buckets
+        assert utc_day not in buckets
+
+        # 2) Operator zone = UTC → the very same row buckets into the UTC day.
+        monkeypatch.setenv("DISPLAY_TZ", "UTC")
+        get_settings.cache_clear()
+        res = client.get("/api/analytics/bandwidth?range=7d")
+        assert res.status_code == 200
+        buckets = {p["bucket"] for p in res.json()["points"]}
+        assert utc_day in buckets
+        assert local_day not in buckets
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_enforcements_buckets_by_local_day_under_configured_zone(
+    client, db_path, monkeypatch
+):
+    """The findings enforcements chart uses the same local-day bucketing."""
+    from app.config import get_settings
+
+    rows, boundary_ts = _boundary_rows()
+    await _seed(client, db_path, rows, add_action_col=True)
+    local_day = (
+        datetime.fromisoformat(boundary_ts.replace("Z", "+00:00"))
+        .astimezone(timezone(timedelta(hours=7)))
+        .strftime("%Y-%m-%d")
+    )
+
+    monkeypatch.setenv("DISPLAY_TZ", "+07:00")
+    get_settings.cache_clear()
+    try:
+        res = client.get("/api/analytics/enforcements?range=7d")
+        assert res.status_code == 200
+        assert local_day in {p["bucket"] for p in res.json()["points"]}
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_fmt_peak_uses_configured_zone_not_hardcoded_est(monkeypatch):
+    """``_fmt_peak`` labels the zone it actually used — never a false ``EST``."""
+    from app.config import get_settings
+    from app.routes.analytics import _fmt_peak
+
+    monkeypatch.setenv("DISPLAY_TZ", "+07:00")
+    get_settings.cache_clear()
+    try:
+        label = _fmt_peak(_BOUNDARY_TS)
+        assert "EST" not in label
+        assert label.endswith("+07:00")
+        # 23:59 UTC → 06:59 next day, local.
+        assert "07:00" in label
+        assert label.startswith("Tue")
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_fmt_peak_default_zone_is_utc_and_unparseable_passthrough(monkeypatch):
+    """Default zone is UTC (honest label) and bad input is returned verbatim."""
+    from app.config import get_settings
+    from app.routes.analytics import _fmt_peak
+
+    monkeypatch.delenv("DISPLAY_TZ", raising=False)
+    get_settings.cache_clear()
+    try:
+        assert _fmt_peak(_BOUNDARY_TS) == "Mon 23:59 UTC"
+        assert _fmt_peak("not-a-timestamp") == "not-a-timestamp"
+        assert _fmt_peak("") == ""
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_invalid_timezone_degrades_to_utc_without_raising(
+    client, db_path, monkeypatch
+):
+    """An unknown zone name must not 500 any endpoint — it falls back to UTC."""
+    from app.config import get_settings
+    from app.services import timeutil
+
+    rows, boundary_ts = _boundary_rows()
+    await _seed(client, db_path, rows, add_action_col=True)
+
+    monkeypatch.setenv("DISPLAY_TZ", "Not/AZone")
+    get_settings.cache_clear()
+    timeutil.reset_warning_cache()
+    try:
+        res = client.get("/api/analytics/bandwidth?range=7d")
+        assert res.status_code == 200
+        buckets = {p["bucket"] for p in res.json()["points"]}
+        assert boundary_ts[:10] in buckets  # UTC fallback, not a crash
+
+        res = client.get("/api/analytics/summary?range=7d")
+        assert res.status_code == 200
+        assert "EST" not in res.json()["peakTrafficTime"]
+    finally:
+        get_settings.cache_clear()
+        timeutil.reset_warning_cache()
+
+
+async def test_client_report_buckets_by_local_day(client, db_path, monkeypatch):
+    """The client report shares the operator-zone bucketing (sibling path)."""
+    from app.config import get_settings
+
+    rows, boundary_ts = _boundary_rows()
+    await _seed(client, db_path, rows, add_action_col=True)
+    local_day = (
+        datetime.fromisoformat(boundary_ts.replace("Z", "+00:00"))
+        .astimezone(timezone(timedelta(hours=7)))
+        .strftime("%Y-%m-%d")
+    )
+
+    monkeypatch.setenv("DISPLAY_TZ", "+07:00")
+    get_settings.cache_clear()
+    try:
+        res = client.get("/api/client-report/1.1.1.1")
+        assert res.status_code == 200
+        data = res.json()
+        buckets = {p["bucket"] for p in data["bandwidth"]["points"]}
+        assert "EST" not in data["peak_hour"]
+    finally:
+        get_settings.cache_clear()

@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     admin_user: str = "admin"
     admin_pass: str = "changeme"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # The zone the operator's calendar is in, used for day bucketing and time
+    # labels (Analytics charts, client report). The feed emits UTC; a local
+    # request at 06:59 on 1 Sep (+07:00) is 2026-08-31T23:59Z in UTC and must
+    # land in the 1 Sep bucket. Env var follows the house convention above —
+    # the bare field name (``DISPLAY_TZ``), not a prefixed one. IANA name
+    # ("Asia/Bangkok") or fixed offset ("+07:00"). Unknown values degrade to
+    # UTC with one warning — they never raise (see app/services/timeutil.py).
+    display_tz: str = "UTC"
 
     # Risk scoring weights (env: RISK_WEIGHT_<CLASS> or risk_weight_<class> in .env)
     # Default 1.0 per class if not specified.

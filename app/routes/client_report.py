@@ -27,6 +27,7 @@ from fastapi import HTTPException as FastAPIHTTPException
 from fastapi.responses import PlainTextResponse
 
 from app.database import get_db_conn
+from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
 router = APIRouter(prefix="/api/client-report", tags=["client-report"])
 
@@ -116,12 +117,8 @@ def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
 
 
 def _fmt_peak(ts: str) -> str:
-    try:
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except ValueError:
-        return ts
-    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[dt.weekday()]
-    return f"{weekday} {dt.strftime('%H:%M')} EST"
+    """Format an ISO bucket in the operator's zone with an honest label."""
+    return format_peak_iso(ts)
 
 
 def _whitelist_fully_sql(patterns: list[str], sql_clauses: list[str]) -> bool:
@@ -231,13 +228,10 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
     peak_hour = ""
     if rows:
         by_hour: dict[str, int] = {}
-        by_hour_raw: dict[str, str] = {}
         for r in rows:
-            ts = r.get("log_timestamp") or ""
-            if len(ts) >= 13:
-                k = ts[:13] + ":00:00"
-                by_hour[k] = by_hour.get(k, 0) + 1
-                by_hour_raw[k] = k
+            hour = local_hour_bucket(r.get("log_timestamp") or "")
+            if hour:
+                by_hour[hour] = by_hour.get(hour, 0) + 1
         if by_hour:
             peak_ts = max(by_hour, key=by_hour.get)
             peak_hour = _fmt_peak(peak_ts)
@@ -249,7 +243,7 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
         bw_buckets: dict[str, dict] = {}
         enf_buckets: dict[str, dict] = {}
         for r in rows:
-            day = (r.get("log_timestamp") or "")[:10]
+            day = local_day(r.get("log_timestamp") or "")
             if not day:
                 continue
             b = bw_buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
