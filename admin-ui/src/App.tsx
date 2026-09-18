@@ -60,6 +60,9 @@ const UrlInvestigationPage = lazy(() =>
 const AnalyticsPage = lazy(() =>
   import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
 )
+const AttckFleetPage = lazy(() =>
+  import("./components/AttckFleetPage").then((m) => ({ default: m.AttckFleetPage })),
+)
 
 const ReportPage = lazy(() =>
   import("./components/ReportPage").then((m) => ({ default: m.ReportPage })),
@@ -90,7 +93,7 @@ function AppRoutes() {
   const VIEW_KEY = "unetwatch_view"
   const storedView = localStorage.getItem(VIEW_KEY) as AppView | null
   const [view, setView] = useState<AppView>(
-    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "jaillist", "redirects", "logs", "host", "url", "analytics", "report-host", "report-url"].includes(storedView)
+    storedView && ["dashboard", "query", "patterns", "findings", "blacklist", "jaillist", "redirects", "logs", "host", "url", "analytics", "attck-fleet", "report-host", "report-url"].includes(storedView)
       ? storedView
       : "dashboard",
   )
@@ -320,6 +323,11 @@ function AppRoutes() {
         {visited.has("analytics") && (
           <div hidden={view !== "analytics"}>
             <AnalyticsPage onNavigate={handleNavigate} />
+          </div>
+        )}
+        {visited.has("attck-fleet") && (
+          <div hidden={view !== "attck-fleet"}>
+            <AttckFleetPage onNavigate={handleNavigate} />
           </div>
         )}
         {visited.has("report-host") && (

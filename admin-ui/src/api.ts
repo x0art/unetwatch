@@ -2168,6 +2168,49 @@ export async function getUrlAttckMapping(
   const q = qs.toString() ? `?${qs}` : ""
   return request(`/attck/url/${encodeURIComponent(url)}${q}`)
 }
+
+/** One technique aggregated across every host that evidenced it (fleet view). */
+export interface FleetTechnique {
+  technique_id: string
+  name: string
+  severity: "HIGH" | "MEDIUM" | "LOW"
+  description: string
+  host_count: number
+  example_hosts: string[]
+}
+
+/** One host's compact row in the fleet breakdown. */
+export interface FleetHostSummary {
+  client_ip: string
+  total_requests: number
+  risk_share: number
+  techniques: string[]
+}
+
+/** Fleet-wide ATT&CK aggregate over the persisted findings table. */
+export interface FleetMapping {
+  generated_at: string
+  es_online: boolean
+  mode: string
+  data_sources: string[]
+  hosts_scanned: number
+  hosts_with_techniques: number
+  techniques: FleetTechnique[]
+  host_summaries: FleetHostSummary[]
+  suppressed: { id: string; reason: string }[]
+  summary: string
+}
+
+export async function getFleetAttckMapping(
+  params?: { minutes?: number; timeRange?: string; hostLimit?: number },
+): Promise<FleetMapping> {
+  const qs = new URLSearchParams()
+  if (params?.minutes) qs.set("minutes", String(params.minutes))
+  if (params?.timeRange) qs.set("timeRange", params.timeRange)
+  if (params?.hostLimit) qs.set("hostLimit", String(params.hostLimit))
+  const q = qs.toString() ? `?${qs}` : ""
+  return request(`/attck/fleet${q}`)
+}
 /* ── Network Enrichment ─────────────────────────────────── */
 export interface EnrichLookup { status: string; hostname?: string | null; addresses?: string[]; error?: string | null }
 export interface EnrichRdap { status: string; handle: string | null; org: string | null; country: string | null; abuse_contact: string | null; raw_url: string | null; error: string | null }

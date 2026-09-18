@@ -23,9 +23,10 @@ import {
   Menu,
   Moon,
   Radar,
-  Users,
   ScrollText,
+  ShieldAlert,
   Sun,
+  Users,
   X,
   type LucideIcon,
 } from "lucide-react"
@@ -112,6 +113,7 @@ export type View =
   | "host"
   | "url"
   | "analytics"
+  | "attck-fleet"
 
 export interface NavItem {
   view: View
@@ -138,6 +140,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: "host", label: "Host Investigation", icon: Users },
       { view: "url", label: "URL Investigation", icon: Link2 },
       { view: "analytics", label: "Analytics", icon: BarChart3 },
+      { view: "attck-fleet", label: "ATT&CK Coverage", icon: ShieldAlert },
     ],
   },
   {
