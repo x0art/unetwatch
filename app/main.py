@@ -99,6 +99,7 @@ async def lifespan(app: FastAPI):
         "interval",
         minutes=settings.redirect_check_interval_minutes,
     )
+    from app.services.monitor import refresh_field_inventory, warm_field_inventory
     from app.services.upstream_blacklist import sync_upstream_blacklist
     from app.services.upstream_jaillist import sync_upstream_jaillist
 
@@ -118,6 +119,22 @@ async def lifespan(app: FastAPI):
         coalesce=True,
         max_instances=1,
     )
+    # The field inventory is a statement about the ES *schema*, which changes
+    # rarely and only by an operator re-indexing or adding a field. An hourly
+    # refresh is therefore ample: it costs 24 requests/day against a healthy
+    # ES, while still picking up a schema change (and, more importantly,
+    # recovering automatically from an ES outage at boot: the failure path no
+    # longer poisons the cache, so the next successful run repopulates it)
+    # without an app restart. Non-fatal by construction — refresh_field_
+    # inventory catches every exception and logs.
+    scheduler.add_job(
+        refresh_field_inventory,
+        "interval",
+        minutes=60,
+        id="es-field-inventory-refresh",
+        coalesce=True,
+        max_instances=1,
+    )
     scheduler.start()
 
     # One best-effort immediate upstream sync; never blocks boot.
@@ -132,8 +149,6 @@ async def lifespan(app: FastAPI):
         log.warning("initial upstream jaillist sync failed: %s", e)
 
     # Warm ES field inventory (best-effort, never crashes boot)
-    from app.services.monitor import warm_field_inventory
-
     await warm_field_inventory()
 
     yield

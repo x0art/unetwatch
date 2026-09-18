@@ -190,3 +190,89 @@ async def test_invalidate_cache_clears(mock_settings):
 
     _invalidate_cache()
     assert get_cached_inventory() is None
+
+
+# ── cache policy: a failure must never poison the process ───────────────────
+
+
+async def test_failed_fetch_is_not_cached_permanently(mock_settings):
+    """A transient ES failure must not pin mode=UNKNOWN for the whole process.
+
+    Regression test for the boot-time trap: ``warm_field_inventory`` swallows
+    the error, so if the failed payload were cached the operator would see an
+    empty ATT&CK panel until restart. The failure is returned (never raises)
+    but the success cache stays empty, so the next call retries and honours a
+    recovered ES.
+    """
+    failing = MockESClient(should_fail=True)
+    failed = await fetch_field_inventory(es=failing)
+
+    assert failed["es_online"] is False
+    assert failed["mode"] == "UNKNOWN"
+    # Crucially, the failure was NOT promoted into the success cache.
+    assert get_cached_inventory() is None
+
+
+async def test_success_after_failure_is_honoured(mock_settings):
+    """ES recovers => the next fetch returns a real mode, not the stale failure."""
+    sample = {
+        "@timestamp": "2024-01-01T00:00:00Z",
+        "url": "http://example.com",
+        "client_ip": "1.2.3.4",
+        "server_ip": "5.6.7.8",
+        "duration_seconds": 10,
+        "action": "ALLOW",
+        # UC-A needs the username/session pair observed in the inventory
+        # (see _resolve_mode) — the baseline six alone resolve COLLAPSED.
+        "username": "alice",
+        "session": "abc123",
+        "user_agent": "curl/8.0",
+    }
+    healthy = MockESClient(sample_doc=sample, field_caps={k: {} for k in sample})
+    recovered = await fetch_field_inventory(es=healthy)
+
+    assert recovered["es_online"] is True
+    assert recovered["mode"] == "UC-A"
+    assert recovered["cached"] is False
+
+
+async def test_failed_fetch_is_throttled_within_ttl(mock_settings):
+    """A down ES must not make every caller pay a fresh ES round-trip."""
+    calls = 0
+
+    class _Counting:
+        async def search(self, index, body):
+            nonlocal calls
+            calls += 1
+            raise Exception("ES search failed")
+
+        async def field_caps(self, index):  # pragma: no cover - never reached
+            raise Exception("ES field_caps failed")
+
+    assert (await fetch_field_inventory(es=_Counting()))["es_online"] is False
+    assert calls == 1
+
+    # Second call inside the TTL is served from the memoised failure.
+    second = await fetch_field_inventory(es=_Counting())
+    assert second["es_online"] is False
+    assert second["cached"] is True
+    assert calls == 1, "the throttled retry must not hit ES again"
+
+
+async def test_invalidate_cache_clears_failure_throttle(mock_settings):
+    """_invalidate_cache must drop the negative result too, not just success."""
+    assert (await fetch_field_inventory(es=MockESClient(should_fail=True)))[
+        "es_online"
+    ] is False
+
+    _invalidate_cache()
+
+    assert get_cached_inventory() is None
+    # With the throttle cleared the very next call goes back to ES and can
+    # succeed, even inside what would have been the TTL window.
+    sample = {"@timestamp": "2024-01-01T00:00:00Z", "url": "test"}
+    recovered = await fetch_field_inventory(
+        es=MockESClient(sample_doc=sample, field_caps={k: {} for k in sample})
+    )
+    assert recovered["es_online"] is True
+    assert recovered["cached"] is False

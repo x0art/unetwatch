@@ -565,6 +565,33 @@ async def warm_field_inventory() -> None:
         _log.warning(f"[monitor] Field inventory warmup failed (non-fatal): {e}")
 
 
+async def refresh_field_inventory() -> None:
+    """Scheduled re-fetch of the ES field inventory (never raises).
+
+    The startup warmup captures the schema once; a long-running process would
+    otherwise never notice an operator re-indexing with new fields. This job
+    clears the cached inventory and fetches it again, so the ATT&CK gate sees
+    the new field set without a restart. Failures are non-fatal: the cache is
+    left empty (not poisoned) and the next run retries — see the cache policy
+    in ``app/services/es_fields.py``.
+    """
+    import logging
+
+    from app.services.es_fields import _invalidate_cache, fetch_field_inventory
+
+    _log = logging.getLogger(__name__)
+    try:
+        _invalidate_cache()
+        inventory = await fetch_field_inventory()
+        _log.info(
+            "[monitor] Field inventory refreshed: mode=%s es_online=%s",
+            inventory.get("mode"),
+            inventory.get("es_online"),
+        )
+    except Exception as e:
+        _log.warning(f"[monitor] Field inventory refresh failed (non-fatal): {e}")
+
+
 # ── Poll (scheduler entry point) ───────────────────────────────────────────
 
 def _default_log(kind: str, minutes: int | None) -> dict:
