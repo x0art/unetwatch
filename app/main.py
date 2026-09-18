@@ -7,7 +7,7 @@ from pathlib import Path
 
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -236,6 +236,7 @@ app.include_router(analytics.router, dependencies=[Depends(verify_admin)])
 app.include_router(backup.router, dependencies=[Depends(verify_admin)])
 app.include_router(attck.router, dependencies=[Depends(verify_admin)])
 app.include_router(enrich.router, dependencies=[Depends(verify_admin)])
+app.include_router(hosts.router, dependencies=[Depends(verify_admin)])
 app.include_router(logs.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 
@@ -246,6 +247,24 @@ app.include_router(readout_routes.router, dependencies=[Depends(verify_admin)])
 from app.routes import client_report as client_report_routes
 
 app.include_router(client_report_routes.router, dependencies=[Depends(verify_admin)])
+
+
+def is_api_reserved_path(full_path: str) -> bool:
+    """True when a request path must never be answered with the SPA shell.
+
+    The SPA catch-all returns index.html for unmatched paths. That turns any
+    unregistered (or mistyped) API/health route into an HTTP 200 HTML response
+    — a fake success that silently masks a missing router (see the hosts
+    regression). Reserved prefixes therefore 404 as JSON instead.
+
+    Module-level so it is testable without the conditional dist mount.
+    """
+    return (
+        full_path == "health"
+        or full_path == "api"
+        or full_path.startswith(("api/", "health/"))
+    )
+
 
 # ── ES Field Inventory Debug Endpoint ───────────────────────────────────────
 from app.services.es_fields import fetch_field_inventory
@@ -337,6 +356,12 @@ if os.path.isdir(_ADMIN_DIST):
     async def admin_spa(full_path: str):
         if not full_path:
             return FileResponse(_ADMIN_DIST_PATH / "index.html")
+        # Never answer an unmatched API/health path with the SPA shell: a
+        # mistyped or unregistered endpoint must 404 as JSON, not return
+        # index.html with HTTP 200 (which masked a missing router for real
+        # users — see tests/test_route_precedence.py).
+        if is_api_reserved_path(full_path):
+            raise HTTPException(status_code=404, detail="Not Found")
         candidate = (_ADMIN_DIST_PATH / full_path).resolve()
         # Prevent path traversal outside the dist directory
         if _ADMIN_DIST_PATH in candidate.parents and candidate.is_file():
