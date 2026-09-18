@@ -40,3 +40,7 @@ graphify-out/
 .agents/
 .claude/skills/
 skills-lock.json
+
+# ES handover collector output — carries verbatim sample documents (URLs,
+# IPs, usernames). Regenerate locally; never commit.
+docs/es-field-handover.json
