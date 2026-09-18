@@ -1031,3 +1031,212 @@ def test_collapsed_does_not_hide_present_byte_fields():
         assert avail.fields[name] == PRESENT, (
             f"{name} is in the real document; COLLAPSED must not hide it"
         )
+
+
+# ── §j.7 raw-line recovery (sentinel honesty, proxy nodes, rule codes) ──────
+#
+# The recovery path reads the operator's real documents: `message` (the raw
+# line, whose positional slots say which response sizes were actually
+# recorded) and `host` (the proxy node itself). Both are projected by
+# QUERY_SOURCE_FIELDS — the `_source` filter is the only thing between ES and
+# the df — so the fixtures below carry them verbatim.
+
+
+def _operator_hits(
+    n: int = 300,
+    client_ip: str = "10.0.0.1",
+    server_ip: str = "57.144.192.3",
+    request_size: int = 250_000,
+    response_sizes: list[str] | None = None,
+    node_ips: list[str] | None = None,
+    with_rule_info: bool = True,
+    codes: str = "RN190,SNI,BS",
+    stamp: str = "01/Sep/2026:06:59:11 +0700",
+):
+    """Hits shaped like the operator's real documents (spec §j.0/§j.7): the
+    flat fields plus `message` — the raw line, whose response-size slot is
+    the `-` sentinel unless *response_sizes* says otherwise — and `host`
+    (the proxy node) when *node_ips* is given. The flat `bytes_downloaded`
+    mirrors logstash: 0 for a `-` row, the recorded size otherwise.
+    """
+    now = datetime.now(UTC)
+    hits = []
+    for i in range(n):
+        size = response_sizes[i] if response_sizes is not None else "-"
+        src = {
+            "@timestamp": (now - timedelta(minutes=i)).isoformat(),
+            "url": f"http://evil.example/{i}",
+            "client_ip": client_ip,
+            "server_ip": server_ip,
+            "duration_seconds": 0.01,
+            "action": "DENY",
+            "bytes_downloaded": 0 if size == "-" else 1,
+            "bytes_uploaded": request_size,
+            "category": "facebook.com",
+            "http_status_code": 0,
+            "country_code": "BE",
+            "message": (
+                f"[{stamp}] {client_ip} {client_ip} {server_ip} "
+                f'"facebook.com" 0.01 {size} https://z-m-gateway.facebook.com/ '
+                f'- 0 {request_size} DENY {codes} BE "facebook.com"'
+            ),
+        }
+        if with_rule_info:
+            src["rule_info"] = "RN190,SNI,BS"
+        if node_ips is not None:
+            src["host"] = {"ip": node_ips[i % len(node_ips)]}
+        hits.append({"_source": src})
+    return hits
+
+
+async def _map_host_hits(monkeypatch, hits):
+    """Run the full map_host path against canned hits (spec §j.7 fixtures)."""
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*evil*','block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            return {"hits": {"hits": hits}}
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(am, "es_client", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(
+        am,
+        "resolve_availability",
+        lambda **kw: resolve_availability(
+            mode="COLLAPSED",
+            inventory_names=set(_REAL_DOC.keys()),
+            es_online=True,
+        ),
+    )
+    return await am.map_host("10.0.0.1", 1440)
+
+
+async def test_unrecorded_response_sizes_withhold_the_upload_share(monkeypatch):
+    """§j.5/§j.7 — an all-`-` window must not read a measured zero.
+
+    The flat `bytes_downloaded` IS in the projection (logstash collapsed
+    every `-` slot to 0), so a naive sum would report download_bytes=0 and a
+    vacuous upload_share=1.0 that crosses T1567's share leg on its 5e7 floor.
+    With the raw line readable the parse decides: nothing was recorded, so
+    the download side is UNKNOWN and the share is withheld.
+    """
+    result = await _map_host_hits(monkeypatch, _operator_hits())
+    s = result.signals
+
+    assert s.download_bytes is None, (
+        "a collapsed flat 0 must never read as a measured download total"
+    )
+    assert s.upload_bytes == 300 * 250_000
+    assert s.total_bytes == 300 * 250_000  # measured part only
+    assert s.upload_share is None, (
+        "a partially measured denominator withholds the share"
+    )
+    assert s.bytes_source == "bytes"  # upload still measured
+    # T1567's floor IS crossed (7.5e7 >= 5e7), so the decline is the
+    # withheld share's work — the §j.5 trap closed end to end.
+    assert "T1567" not in {t.technique_id for t in result.techniques}
+
+
+async def test_mixed_window_share_withheld_until_all_measured(monkeypatch):
+    """§j.5/§j.7 — one unrecorded row withholds the share over the subset.
+
+    The recomputed share over the measured rows would pass (299 recorded
+    1-byte responses against a 250 kB upload each => ~1.0); a share that
+    silently ignores the unknown slice must never read as upload evidence.
+    """
+    result = await _map_host_hits(
+        monkeypatch, _operator_hits(response_sizes=["-"] + ["1"] * 299)
+    )
+    s = result.signals
+
+    assert s.download_bytes == 299  # recorded rows only
+    assert s.upload_bytes == 300 * 250_000
+    assert s.total_bytes == 300 * 250_000 + 299
+    assert s.upload_share is None, (
+        "the share is withheld while any row's recording state is unknown"
+    )
+    assert s.bytes_source == "bytes"
+    assert "T1567" not in {t.technique_id for t in result.techniques}
+
+
+async def test_proxy_nodes_surface_in_signals_and_summary(monkeypatch):
+    """§j.7 — host.ip is the proxy node: provenance for NOC triage."""
+    result = await _map_host_hits(
+        monkeypatch, _operator_hits(node_ips=["172.21.73.13"])
+    )
+    assert result.signals.proxy_nodes == {"172.21.73.13"}
+    assert "observed via node(s) 172.21.73.13" in result.summary
+
+
+async def test_multi_node_traffic_shows_every_node(monkeypatch):
+    """§j.7 — a fleet of proxy nodes is the dimension a NOC triages on."""
+    result = await _map_host_hits(
+        monkeypatch,
+        _operator_hits(node_ips=["172.21.73.13", "172.21.73.14"]),
+    )
+    assert result.signals.proxy_nodes == {"172.21.73.13", "172.21.73.14"}
+    assert "172.21.73.13" in result.summary
+    assert "172.21.73.14" in result.summary
+
+
+async def test_rule_codes_ride_structured_and_create_no_technique(monkeypatch):
+    """§j.3/§j.7 — the code set is undecoded: context, never a detector.
+
+    The flat `rule_info` set is the primary source (flat-first); the parsed
+    slot-13 codes are the fallback when the flat is missing. Either way the
+    emitted technique set must be identical — the codes buy no technique.
+    """
+    result = await _map_host_hits(monkeypatch, _operator_hits())
+    assert result.signals.rule_codes == ["BS", "RN190", "SNI"]  # sorted set
+    for t in result.techniques:
+        assert "rule_codes" not in t.evidence
+        assert "rule_info" not in t.evidence
+
+    # The parsed slot-13 fallback: the flat absent, the line's codes present
+    # (a valid line with an unmapped placeholder code).
+    fallback = await _map_host_hits(
+        monkeypatch, _operator_hits(with_rule_info=False, codes="ZZ0")
+    )
+    assert fallback.signals.rule_codes == ["ZZ0"]
+    # The codes bought no technique here either.
+    assert {t.technique_id for t in fallback.techniques} == {
+        t.technique_id for t in result.techniques
+    }
+
+
+async def test_line_tz_note_surfaces_only_on_mismatch(monkeypatch):
+    """§j.7 — the display-tz cross-check is a NOTE, never a gate.
+
+    Default display_tz is UTC (+0000): a window stamped +0700 gets a note
+    naming the mismatch; a window stamped +0000 matches and gets none.
+    """
+    mismatched = await _map_host_hits(
+        monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0700")
+    )
+    assert "note: lines stamped +0700" in mismatched.summary
+    assert mismatched.signals.line_tz_offsets == {"+0700"}
+
+    matching = await _map_host_hits(
+        monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0000")
+    )
+    assert "note:" not in matching.summary

@@ -322,7 +322,7 @@ is.
 | Signal | Formula | Fields | Failure mode | Feeds | Status |
 |---|---|---|---|---|---|
 | `upload_bytes` | `Σ bytes_uploaded` | `bytes_uploaded` | Absent ⇒ `None` (UNKNOWN) | T1041, T1567, T1114.002 | **implemented** |
-| `upload_share` | `upload_bytes / total_bytes` | both byte counters | Absent ⇒ `None` | T1567, T1114.002 | **implemented** |
+| `upload_share` | `upload_bytes / total_bytes` | both byte counters | Absent ⇒ `None`; **also withheld (`None`) when the raw-line parse shows an unrecorded `-` response-size slot (§j.5/§j.7)** | T1567, T1114.002 | **implemented** |
 | `download_bytes` | `Σ bytes_downloaded` | `bytes_downloaded` | Absent ⇒ `None` | T1105, T1041 | **implemented** |
 | `bytes_source` | provenance tag: `bytes` / `duration-proxy` / `none` | byte counters, `duration_seconds` | never | all byte techniques (evidence) | **implemented** |
 | `interval_cv` | `σ(Δt between bursts) / μ(Δt)`, merge gap 1 h, `n ≥ 10` | `@timestamp` | Sparse ⇒ `None` (UNKNOWN, never `0.0`) | T1071.001 (beacon ↑), T1053.005 | **implemented** |
@@ -753,6 +753,8 @@ its frozen key set.
 
 | 2026-09-18 | **Two code fixes from the §j traces.** (1) `resolve_availability` no longer marks every non-baseline field `ABSENT` in COLLAPSED — presence is now inventory-driven (`field_caps` ∪ sampled `_source`) in every mode, with `ABSENT` reserved for the closed set `_resolve_mode` explicitly tested and rejected, and `UNKNOWN` for fields no source mentions (§j.9.1). (2) `duration_seconds` removed from the `required_any` legs of T1041/T1029.001 and a `bytes_source == "bytes"` check added to both predicates, so the duration proxy can no longer be sole evidence for crossing a byte floor (§j.9.2); T1567/T1114.002/T1567.002 audited and unchanged (§j.12). | backend |
 
+| 2026-09-18 | **§j.7 recovery path wired.** The ATT&CK engine now reads the operator's real documents without changing the data: `host`/`message` joined the `QUERY_SOURCE_FIELDS` projection (the `_source` filter was the only thing between ES and the DataFrame); a `-` response-size slot parsed from the raw line is a NOT-RECORDED sentinel — the download side sums recorded rows only and the share is computed only over a fully-measured window, closing the §j.5 vacuous-denominator trap end to end (T1567 declines via the new `upload_share is None` guard); `host.ip` rides `Signal.proxy_nodes` as provenance with summary prose and a display-tz cross-check NOTE; the undecoded `rule_info` set rides `Signal.rule_codes` (flat-first, parsed fallback) and creates no technique. New module `app/services/logline.py` (pure parser, never raises) + `tests/test_logline.py`. | backend |
+
 ---
 
 ## j) Reconciliation with the Operator's Real Documents (2026-09-18)
@@ -925,6 +927,19 @@ make T1567 fire on ordinary blocked traffic. **The byte-threshold predicates
 are not wrong, but they are inert here** — and a share computed over a
 zero-download mix must never be read as evidence of upload.
 
+**FIXED 2026-09-18 (§j.7 recovery path).** The vacuous denominator is closed
+when the raw line is readable: a `-` response-size slot is a NOT-RECORDED
+sentinel, parsed by `app/services/logline.py`, the download side sums
+recorded rows only (`None` when nothing was recorded), and the share is
+computed ONLY over a fully-measured window — any unrecorded (or unparseable)
+row withholds it (`upload_share = None`, UNKNOWN), so the share leg can no
+longer pass on a partially-vacuous denominator while the absolute byte floor
+still applies to the measured part. Pinned by
+`test_unrecorded_response_sizes_withhold_the_upload_share` and
+`test_mixed_window_share_withheld_until_all_measured`. When the `message`
+column is absent/entirely empty (or every parse fails) the flat counters
+decide alone — the parse fabricates no unrecorded-ness either.
+
 ### j.6 `duration_seconds: 0.01` → the `duration-proxy` invents ~8 KiB/row — **CONFIRMED fabrication risk, contra §a.1/§c.1**
 
 §a.1: `bytes_proxy = Σ max(1, floor(duration_seconds)) × 8192`, declared
@@ -952,15 +967,18 @@ enforced only inside T1041's `≥ 1e8` floor, which the proxy reaches at ~12k
 rows. **This is a genuine fabrication path on this traffic mix** and the
 correction is recorded in §j.9.
 
-### j.7 `host.ip`, `event.original`, `message`, `@version` — **CONFIRMED: the app never reads them, and the raw line is the richest field present**
+### j.7 `host.ip`, `event.original`, `message`, `@version` — **CONFIRMED: the app never read them, and the raw line is the richest field present — recovery path wired 2026-09-18**
 
 * **`host.ip` = `172.21.73.13`** — an internal address, distinct from the
   client (`172.21.122.6`) and the destination (`57.144.192.3`). It is the
   **proxy/gateway node itself**, i.e. *which sensor produced the log*. The app
-  does not read it. It buys **provenance and multi-node correlation**: on a
-  fleet of proxy nodes it is the dimension that turns "the organisation saw
-  this" into "node `172.21.73.13` saw this", which is what a NOC triages on.
-  It is **not** a technique field and must never be treated as one.
+  **now reads it as `Signal.proxy_nodes`** (2026-09-18: `host` joined the
+  `QUERY_SOURCE_FIELDS` projection, the aggregate extracts node IPs, and the
+  summary says `observed via node(s) …`). It buys **provenance and multi-node
+  correlation**: on a fleet of proxy nodes it is the dimension that turns "the
+  organisation saw this" into "node `172.21.73.13` saw this", which is what a
+  NOC triages on. It is **not** a technique field and must never be treated as
+  one.
 * **`message` / `event.original`** — the **full raw log line**, which is a
   strict superset of the flat fields:
   `… 172.21.122.6 172.21.122.6 57.144.192.3 "facebook.com" 0.01 - https://z-m-gateway.facebook.com/ - 0 215 DENY RN190,SNI,BS BE "facebook.com"`.
@@ -975,7 +993,11 @@ correction is recorded in §j.9.
   response size in the line), and (b) any **field the projection drops**.
   It is a *recovery* path, not a new detector: it re-derives signals the flat
   fields already flatten, so it belongs behind a parser with tests, **not**
-  as a regex in a predicate. Recorded as a handover item (§f), not enabled.
+  as a regex in a predicate. **Enabled 2026-09-18** behind
+  `app/services/logline.py` (a pure, never-raising parser with tests): the
+  parse decides which response-size slots were actually recorded — the §j.5
+  sentinel honesty — and the undecoded code set rides `Signal.rule_codes`
+  (flat-first, parsed fallback); it never feeds a technique predicate.
 * **`@version`** — Logstash pipeline metadata, constant `"1"`. No analytic
   value.
 

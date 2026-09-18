@@ -14,14 +14,18 @@ import re
 _QUERY_STRING_SPECIAL = re.compile(r"([+\-!(){}[\]^\"~:\\\/&| ])")
 
 
-# Columns read by apply_filters / build_items / _build_timeline / _build_flow.
-# Projecting _source to these fields keeps long-window fetches small; extra
-# fields are harmless.
+# Columns read by apply_filters / build_items / _build_timeline / _build_flow,
+# plus `host`/`message` which the ATT&CK aggregate reads for proxy-node
+# provenance and raw-line recovery (spec §j.7). Projecting _source to these
+# fields keeps long-window fetches small; extra fields are harmless — every
+# consumer reads named columns only, so a field none of them touch is simply
+# ignored.
 QUERY_SOURCE_FIELDS = [
     "url", "client_ip", "server_ip", "@timestamp", "action",
     "duration_seconds", "domain", "base_url", "category", "http_method",
     "http_status_code", "country_code", "bytes_downloaded", "bytes_uploaded",
     "rule_info", "rule_name", "user_id", "matched_patterns", "user_agent",
+    "host", "message",
 ]
 
 

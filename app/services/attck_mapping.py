@@ -45,6 +45,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -52,6 +53,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.services import es_fields
 from app.services.es_client import es_client
+from app.services.logline import LogLine, parse_line, parse_rule_codes
 from app.services.monitor import (
     build_logs_query,
     get_block_patterns,
@@ -651,6 +653,16 @@ class Signal:
     download_bytes: int | None = None
     upload_share: float | None = None
 
+    # ── Raw-line recovery (spec §j.7) ──
+    # Context the flat schema loses, read from `message`/`host` behind
+    # app/services/logline.py. Never technique predicates (§e.7):
+    # `proxy_nodes` is which sensor produced the log (NOC triage provenance),
+    # `rule_codes` is the undecoded policy code set (§j.3), and
+    # `line_tz_offsets` feeds the display-tz NOTE in the summary.
+    proxy_nodes: set[str] = field(default_factory=set)
+    rule_codes: list[str] = field(default_factory=list)
+    line_tz_offsets: set[str] = field(default_factory=set)
+
     # ── Periodicity (the two sound statistics) ──
     interval_cv: float | None = None
     slot_concentration: float | None = None
@@ -1092,9 +1104,16 @@ def _heuristic_t1567_host(sig: Signal) -> AttckTechnique | None:
     """T1567 — Exfiltration Over Web Service.
 
     Upload-heavy split to a web service. Uses whichever byte counter is
-    readable; suppressed upstream when none is.
+    readable; suppressed upstream when none is, and when the share was
+    withheld over a partially measured denominator (§j.5).
     """
     if sig.upload_bytes is None or sig.download_bytes is None:
+        return None
+    if sig.upload_share is None:
+        # The share was withheld (partially measured denominator): recomputing
+        # it here would repeat the vacuous-denominator trap on the measured
+        # subset (§j.5). The absolute byte floor below still applies when the
+        # share IS measured.
         return None
     if sig.upload_bytes < 50_000_000:
         return None
@@ -1109,7 +1128,7 @@ def _heuristic_t1567_host(sig: Signal) -> AttckTechnique | None:
         evidence={
             "upload_bytes": sig.upload_bytes,
             "download_bytes": sig.download_bytes,
-            "upload_share": round(sig.upload_share or 0.0, 4),
+            "upload_share": round(sig.upload_share, 4),
         },
     )
 
@@ -1448,6 +1467,23 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
             summary_parts.insert(1, f"{signals.distinct_domains} distinct domains,")
         if signals.bytes_source != "none":
             summary_parts.append(f"bytes={signals.total_bytes} ({signals.bytes_source}).")
+        if signals.proxy_nodes:
+            summary_parts.append(
+                "observed via node(s) " + ", ".join(sorted(signals.proxy_nodes)) + "."
+            )
+        if signals.line_tz_offsets:
+            # Cross-check only — a NOTE, never a gate. now()-based display-tz
+            # offset vs the lines' row-instant stamps can disagree across a
+            # DST boundary; that nuance is acceptable for prose.
+            try:
+                display_off = datetime.now(ZoneInfo(settings.display_tz)).strftime("%z")
+            except Exception:
+                display_off = ""
+            if display_off and display_off not in signals.line_tz_offsets:
+                summary_parts.append(
+                    f"note: lines stamped {', '.join(sorted(signals.line_tz_offsets))}"
+                    f" (display tz {settings.display_tz} is {display_off})."
+                )
         if techniques:
             summary_parts.append(
                 "Matched "
@@ -1485,6 +1521,23 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
         techniques=techniques,
         summary=summary,
     )
+
+
+def _parse_message_column(df: pd.DataFrame) -> list[LogLine]:
+    """Parse every non-empty ``message`` row; ``[]`` when the parse proves
+    nothing (no column, all empty, every parse failed) so the caller falls
+    back to the flat counters — the parse fabricates no unrecorded-ness.
+    """
+    if "message" not in df.columns:
+        return []
+    parsed: list[LogLine] = []
+    for raw in df["message"]:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        line = parse_line(raw)
+        if line.ok:
+            parsed.append(line)
+    return parsed
 
 
 def _aggregate_host_signals(
@@ -1533,14 +1586,77 @@ def _aggregate_host_signals(
         else set()
     )
 
+    # ── raw-line recovery (spec §j.7) ──
+    # `message` carries the raw line, whose positional slots say which
+    # response sizes were actually recorded — the fact the flat schema loses
+    # when logstash collapses a `-` to `bytes_downloaded: 0` (§j.5). `host.ip`
+    # is the proxy node itself: provenance for NOC triage, never a technique
+    # field. Both are guarded on column presence, which is real data (the
+    # column exists iff >=1 document carried it; apply_filters default-fills
+    # neither).
+    parsed_rows = _parse_message_column(df)
+    if parsed_rows:
+        # The parse carries tz_offset for free; map_host compares it against
+        # the display tz as a NOTE, never a gate.
+        signals.line_tz_offsets = {
+            r.tz_offset for r in parsed_rows if r.tz_offset
+        }
+    if "host" in df.columns:
+        for v in df["host"]:
+            if isinstance(v, dict):
+                node_ip = v.get("ip")
+                if isinstance(node_ip, str) and node_ip.strip():
+                    signals.proxy_nodes.add(node_ip.strip())
+
+    # Rule codes ride structured (§j.3): the flat `rule_info` set is the
+    # primary source (flat-first), the parsed slot-13 codes the fallback.
+    codes: set[str] = set()
+    if "rule_info" in df.columns:
+        for v in df["rule_info"].dropna():
+            if str(v).strip():
+                codes.update(parse_rule_codes(str(v)))
+    if not codes:
+        codes.update(c for r in parsed_rows for c in r.rule_codes)
+    signals.rule_codes = sorted(codes)
+
     # ── byte accounting, with provenance ──
+    # A `-` response-size slot is a NOT-RECORDED sentinel, not a zero: logstash
+    # collapsed it to `bytes_downloaded: 0`, and a measured zero in the
+    # denominator makes `upload/(upload+download)` vacuously 1.0 (§j.5). When
+    # the raw line is readable the parse decides recorded-ness: the download
+    # side sums recorded rows only (None when nothing was recorded, vs the
+    # flat column's collapsed 0), and the share is computed ONLY over a fully
+    # measured window — any unrecorded or unparseable row withholds it
+    # (UNKNOWN), while the absolute byte floor still applies to the measured
+    # part. When the parse proves nothing the flat counters below decide
+    # alone: the parse fabricates no unrecorded-ness either.
     download = _sum_column(df, "bytes_downloaded")
     upload = _sum_column(df, "bytes_uploaded")
+    incomplete = False
+    if parsed_rows:
+        recorded = [
+            r.response_size for r in parsed_rows if r.response_size_recorded
+        ]
+        download = int(sum(recorded)) if recorded else None
+        incomplete = any(
+            not r.response_size_recorded for r in parsed_rows
+        ) or len(parsed_rows) < len(df)
     if download is not None or upload is not None:
-        signals.download_bytes = int(download or 0)
+        # The sentinel path keeps download as the recorded-only sum (None when
+        # nothing was recorded); legacy keeps the flat sum (0 when absent).
+        signals.download_bytes = download if parsed_rows else int(download or 0)
         signals.upload_bytes = int(upload or 0)
-        signals.total_bytes = signals.download_bytes + signals.upload_bytes
+        signals.total_bytes = (signals.download_bytes or 0) + signals.upload_bytes
         signals.bytes_source = "bytes"
+        if parsed_rows:
+            if not incomplete and signals.total_bytes:
+                signals.upload_share = round(
+                    signals.upload_bytes / signals.total_bytes, 4
+                )
+        elif signals.total_bytes:
+            signals.upload_share = round(
+                (signals.upload_bytes or 0) / signals.total_bytes, 4
+            )
     elif avail.has("duration_seconds"):
         # Documented proxy: duration × 8192 bytes/s (analytics.py does the
         # same). Kept distinct in evidence so a reader never mistakes it for a
@@ -1554,8 +1670,6 @@ def _aggregate_host_signals(
     else:
         signals.total_bytes = None  # UNKNOWN — nothing to measure with
         signals.bytes_source = "none"
-    if signals.total_bytes:
-        signals.upload_share = round((signals.upload_bytes or 0) / signals.total_bytes, 4)
 
     signals.risk_share = (
         signals.risk_requests / signals.total_requests
