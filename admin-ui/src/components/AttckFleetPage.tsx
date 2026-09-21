@@ -92,7 +92,7 @@ export function AttckFleetPage({ onNavigate }: Props) {
   )
 
   // Icon reads the real state: an offline/empty mapping must not show the
-  // green "all clear" shield a clean result would show (mirrors AttckPanel).
+  // green "all clear" shield a clean result would show.
   const hasTechniques = !!mapping && mapping.techniques.length > 0
   const hasHighSeverity =
     !!mapping && mapping.techniques.some((t) => t.severity === "HIGH")

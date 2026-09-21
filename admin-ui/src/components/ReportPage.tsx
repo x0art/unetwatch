@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowLeft, Copy, FileText, Info, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Copy, FileText, Info, ShieldQuestion } from "lucide-react"
 import {
   getClientReport,
-  getHostAttckMapping,
   getHostEnrichment,
   getHostProfile,
-  getUrlAttckMapping,
   getUrlBreakdown,
   getUrlEnrichment,
   probeEsHealth,
-  type AttckMapping,
   type ClientReport,
   type EnrichHost,
   type EnrichUrl,
@@ -19,7 +16,6 @@ import {
   type UrlBreakdown,
 } from "../api"
 import { copyText } from "../lib/utils"
-import { AttckPanel } from "./AttckPanel"
 import {
   Badge,
   Button,
@@ -59,12 +55,6 @@ function lookupError(status: string, error: string | null | undefined): string |
   return error?.trim() ? error : "no reason reported"
 }
 
-/** Panel icon for section 05, mirroring AttckPanel's own state logic so the
- * embedded panel still signals "nothing assessed" rather than "all clear". */
-function attckIcon(mapping: AttckMapping | null) {
-  if (!mapping || mapping.techniques.length === 0) return ShieldQuestion
-  return mapping.techniques.some((t) => t.severity === "HIGH") ? ShieldAlert : ShieldCheck
-}
 
 /** Shared indicator table for report section 03. All four tables (host
  * domains/patterns/urls, url clients) were byte-identical markup differing
@@ -234,10 +224,8 @@ export function ReportPage({ kind, value, onBack }: Props) {
 
   const [profile, setProfile] = useState<SectionState<HostProfile>>({ data: null, loading: true, error: null })
   const [report, setReport] = useState<SectionState<ClientReport>>({ data: null, loading: true, error: null })
-  const [hostAttck, setHostAttck] = useState<SectionState<AttckMapping>>({ data: null, loading: true, error: null })
   const [hostEnrich, setHostEnrich] = useState<SectionState<EnrichHost>>({ data: null, loading: true, error: null })
   const [breakdown, setBreakdown] = useState<SectionState<UrlBreakdown>>({ data: null, loading: true, error: null })
-  const [urlAttck, setUrlAttck] = useState<SectionState<AttckMapping>>({ data: null, loading: true, error: null })
   const [urlEnrich, setUrlEnrich] = useState<SectionState<EnrichUrl>>({ data: null, loading: true, error: null })
   // Explicit ES-reachability probe — NEVER inferred from a section payload.
   // /health always answers and reports dependencies.elasticsearch as
@@ -251,18 +239,6 @@ export function ReportPage({ kind, value, onBack }: Props) {
     return () => { cancelled = true }
   }, [])
 
-  // Single ATT&CK loader shared by the main effect and section 05's Retry, so
-  // a failed mapping can be refetched in place without a page reload.
-  const fetchAttck = useCallback(() => {
-    const set = kind === "host" ? setHostAttck : setUrlAttck
-    set({ data: null, loading: true, error: null })
-    const req = kind === "host"
-      ? getHostAttckMapping(value, { timeRange: "24h" })
-      : getUrlAttckMapping(value, { source: "findings", limit: 100 })
-    return req
-      .then((data) => set({ data, loading: false, error: null }))
-      .catch((e: unknown) => set({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }))
-  }, [kind, value])
   useEffect(() => {
     // Re-stamp on every refetch so the timestamp always belongs to the data
     // currently on screen (report views stay mounted; switching entity only
@@ -275,7 +251,6 @@ export function ReportPage({ kind, value, onBack }: Props) {
     if (kind === "host") {
       setProfile({ data: null, loading: true, error: null })
       setReport({ data: null, loading: true, error: null })
-      setHostAttck({ data: null, loading: true, error: null })
       setHostEnrich({ data: null, loading: true, error: null })
       void getHostProfile(value, "24h")
         .then((data) => { if (!cancelled) setProfile({ data, loading: false, error: null }) })
@@ -283,33 +258,27 @@ export function ReportPage({ kind, value, onBack }: Props) {
       void getClientReport(value)
         .then((data) => { if (!cancelled) setReport({ data, loading: false, error: null }) })
         .catch((e: unknown) => { if (!cancelled) setReport({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
-      void fetchAttck()
       void getHostEnrichment(value)
         .then((data) => { if (!cancelled) setHostEnrich({ data, loading: false, error: null }) })
         .catch((e: unknown) => { if (!cancelled) setHostEnrich({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
     } else {
       setBreakdown({ data: null, loading: true, error: null })
-      setUrlAttck({ data: null, loading: true, error: null })
       setUrlEnrich({ data: null, loading: true, error: null })
       void getUrlBreakdown(value, { limit: 100, source: "findings" })
         .then((data) => { if (!cancelled) setBreakdown({ data, loading: false, error: null }) })
         .catch((e: unknown) => { if (!cancelled) setBreakdown({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
-      void fetchAttck()
       void getUrlEnrichment(value)
         .then((data) => { if (!cancelled) setUrlEnrich({ data, loading: false, error: null }) })
         .catch((e: unknown) => { if (!cancelled) setUrlEnrich({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
     }
     return () => { cancelled = true }
-    // fetchAttck is memoized on [kind, value] — the same keys this effect uses —
-    // so including it here changes nothing but satisfies exhaustive-deps.
-  }, [kind, value, fetchAttck])
+  }, [kind, value])
 
   const handleCopy = useCallback(async () => {
     const ok = await copyText(`${kind}:${value} @ ${generatedAt}`)
     toast(ok ? { title: "Reference copied", variant: "success" } : { title: "Copy failed", variant: "error" })
   }, [generatedAt, kind, toast, value])
 
-  const attck = kind === "host" ? hostAttck : urlAttck
   const enrichLoading = kind === "host" ? hostEnrich.loading : urlEnrich.loading
   const enrichError = kind === "host" ? hostEnrich.error : urlEnrich.error
   const enrichOk = kind === "host" ? hostEnrich.data !== null : urlEnrich.data !== null
@@ -348,12 +317,10 @@ export function ReportPage({ kind, value, onBack }: Props) {
     ? [
         profile.data ? "host profile (live ES / findings)" : null,
         report.data ? "findings (SQLite)" : null,
-        attck.data ? "ATT&CK mapping" : null,
         (kind === "host" ? hostEnrich.data : urlEnrich.data) ? "enrichment" : null,
       ].filter(Boolean).join(", ") || "none resolved"
     : [
         breakdown.data ? "findings (SQLite)" : null,
-        attck.data ? "ATT&CK mapping" : null,
         urlEnrich.data ? "enrichment" : null,
       ].filter(Boolean).join(", ") || "none resolved"
 
@@ -392,8 +359,6 @@ export function ReportPage({ kind, value, onBack }: Props) {
           {profileLoading ? <Badge variant="secondary">loading</Badge> : profileOk ? <Badge variant="success">ok</Badge> : <Badge variant="secondary">unavailable</Badge>}
           <span>Findings</span>
           {findingsLoading ? <Badge variant="secondary">loading</Badge> : findingsOk ? <Badge variant="success">ok</Badge> : <Badge variant="secondary">unavailable</Badge>}
-          <span>ATT&CK</span>
-          {attck.loading ? <Badge variant="secondary">loading</Badge> : attck.data !== null ? <Badge variant="success">ok</Badge> : <Badge variant="secondary">unavailable</Badge>}
           <span>Enrichment</span>
           {enrichLoading ? <Badge variant="secondary">loading</Badge> : enrichOk ? <Badge variant="success">ok</Badge> : <Badge variant="secondary">unavailable</Badge>}
         </div>
@@ -594,19 +559,6 @@ export function ReportPage({ kind, value, onBack }: Props) {
         ) : (
           <p className="text-sm text-muted-foreground">Enrichment unavailable{enrichError ? `: ${enrichError}` : ""}</p>
         )}
-      </Panel>
-      <Panel
-        title="05 · MITRE ATT&CK"
-        icon={attckIcon(attck.data)}
-      >
-        <AttckPanel
-          onRetry={() => void fetchAttck()}
-          embedded
-          mapping={attck.data}
-          loading={attck.loading}
-          error={attck.error}
-          entityLabel={kind === "host" ? "Host" : "URL"}
-        />
       </Panel>
 
       <Panel title="06 · Notes & next steps">
