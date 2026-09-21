@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { ArrowLeft, Copy, FileText, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Copy, FileText, Info, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
 import {
   getClientReport,
   getHostAttckMapping,
@@ -14,6 +14,8 @@ import {
   type EnrichHost,
   type EnrichUrl,
   type HostProfile,
+  type HostRiskExplained,
+  type HostRiskUnavailable,
   type UrlBreakdown,
 } from "../api"
 import { copyText } from "../lib/utils"
@@ -105,6 +107,125 @@ function IndicatorTable<T>({
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+/** Section 02's body — the risk summary, WITH its justification.
+ *
+ * The operator's complaint was a SPECTRE of a score: `Risk Score: HIGH 92/100`
+ * with nothing saying why, and no way to tell a measured 92 from the flat
+ * blacklist floor. Three outcomes are rendered distinctly:
+ *
+ *  - unavailable: the reason carries `state: "unavailable"` (ES unreachable /
+ *    field mode UNKNOWN). NO score is shown; an explicit marker says so,
+ *    mirroring AttckPanel's "Elasticsearch unavailable" tone. A host that was
+ *    not measured must never read as a clean one.
+ *  - explained: the score is shown with the reason sentence and the rule that
+ *    produced it; the blacklist floor is badged so it cannot pass as a
+ *    measurement.
+ *  - no reason at all (a profile from an older backend): the score is still
+ *    shown, with a notice that no justification was supplied — never a bare
+ *    number pretending to explain itself.
+ */
+function RiskSummaryBody({ profile }: { profile: HostProfile }) {
+  const risk = profile.risk
+  // Narrowing by a discriminant, not a probe: `state` exists ONLY on the
+  // unavailable variant, so this is safe under the isolated-modules build too.
+  const reason = risk.riskReason
+  const unavailable: HostRiskUnavailable | null =
+    reason && "state" in reason && reason.state === "unavailable" ? reason : null
+  if (unavailable) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Risk not computed</p>
+              <p className="text-xs text-muted-foreground">{unavailable.text}</p>
+              <p className="font-mono text-xs text-muted-foreground/70">
+                reason: {unavailable.reason}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            icon={ShieldQuestion}
+            label="Risk score"
+            value="Unavailable"
+            tone="default"
+            hint="Not measured — no score"
+          />
+          <StatCard icon={FileText} label="Total requests" value="Unavailable" hint={profile.hostname || profile.primaryIp} />
+          <StatCard icon={FileText} label="Risk requests" value="Unavailable" hint="ALLOW pattern matches" />
+          <StatCard icon={FileText} label="Enforcements" value="Unavailable" hint="DENY — proxy handled" />
+        </div>
+        <p className="text-xs italic text-muted-foreground">
+          Source: Elasticsearch — unreachable or field inventory unresolved.
+        </p>
+      </div>
+    )
+  }
+  const explained: HostRiskExplained | null =
+    reason && "rule" in reason ? reason : null
+  return (
+    <div className="space-y-3">
+      {profile.placeholder && (
+        <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
+          icon={FileText}
+          label="Risk score"
+          value={`${risk.riskScore}/100`}
+          tone={risk.riskLevel === "HIGH" ? "danger" : risk.riskLevel === "MEDIUM" ? "warning" : "success"}
+          hint={`Level ${risk.riskLevel}`}
+        />
+        <StatCard icon={FileText} label="Total requests" value={risk.totalRequests.toLocaleString()} hint={profile.hostname || profile.primaryIp} />
+        <StatCard icon={FileText} label="Risk requests" value={risk.riskRequests.toLocaleString()} tone="warning" hint="ALLOW pattern matches" />
+        <StatCard icon={FileText} label="Enforcements" value={risk.enforcements.toLocaleString()} tone="info" hint={`${risk.enforcementsPct.toFixed(1)}% enforced · DENY handled`} />
+      </div>
+      {explained ? (
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          <div className="flex items-start gap-2">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">{explained.text}</p>
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant={explained.floored ? "destructive" : "secondary"}>
+                  {explained.floored ? "FLAT FLOOR — not a measurement" : "rule"}
+                </Badge>
+                <span className="font-mono text-muted-foreground">{explained.rule}</span>
+                <span className="text-muted-foreground/50">·</span>
+                <span className="font-mono text-muted-foreground">
+                  {explained.inputs.riskRequests}/{explained.inputs.totalRequests} risk (ALLOW)
+                  {explained.inputs.blacklistedRequests > 0
+                    ? `, ${explained.inputs.blacklistedRequests} to blacklisted destinations`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs italic text-muted-foreground">
+          No reason supplied with this score — it cannot be justified from the
+          response. Re-fetch from the host endpoint to obtain one.
+        </p>
+      )}
+      {risk.sources && (
+        <p className="text-xs text-muted-foreground">
+          Score source:{" "}
+          <span className="font-mono">
+            {risk.sources.risk.available ? (risk.sources.risk.source ?? "unreported") : "unavailable"}
+          </span>
+          {risk.sources.risk.window !== "—" && <> · window <span className="font-mono">{risk.sources.risk.window}</span></>}
+          {" · "}
+          Detail tables source: <span className="font-mono">{risk.sources.risk.persisted_detail}</span> (all time)
+        </p>
+      )}
     </div>
   )
 }
@@ -288,23 +409,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
               <Skeleton className="h-28 w-full" />
             </div>
           ) : profile.data ? (
-            <div className="space-y-3">
-              {profile.data.placeholder && (
-                <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
-              )}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <StatCard
-                  icon={FileText}
-                  label="Risk score"
-                  value={`${profile.data.risk.riskScore}/100`}
-                  tone={profile.data.risk.riskLevel === "HIGH" ? "danger" : profile.data.risk.riskLevel === "MEDIUM" ? "warning" : "success"}
-                  hint={`Level ${profile.data.risk.riskLevel}`}
-                />
-                <StatCard icon={FileText} label="Total requests" value={profile.data.risk.totalRequests.toLocaleString()} hint={profile.data.hostname || profile.data.primaryIp} />
-                <StatCard icon={FileText} label="Risk requests" value={profile.data.risk.riskRequests.toLocaleString()} tone="warning" hint="ALLOW pattern matches" />
-                <StatCard icon={FileText} label="Enforcements" value={profile.data.risk.enforcements.toLocaleString()} tone="info" hint={`${profile.data.risk.enforcementsPct.toFixed(1)}% enforced`} />
-              </div>
-            </div>
+            <RiskSummaryBody profile={profile.data} />
           ) : (
             <p className="text-sm text-muted-foreground">Section unavailable: {profile.error ?? "no profile"}</p>
           )}

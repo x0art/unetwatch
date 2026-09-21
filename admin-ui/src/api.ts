@@ -743,7 +743,6 @@ export async function getLiveMetrics(opts?: {
     }
     if (totalBytes > 0) bandwidth = formatBytes(totalBytes)
   }
-  if (bandwidth === "—") bandwidth = "420 MB"
 
   return { activeHosts, totalRequests, deniedRequests, bandwidth, avgDuration }
 }
@@ -1506,6 +1505,66 @@ export interface HostRisk {
   /** 0..100 share of total that was enforced (proxy handled). */
   enforcementsPct: number
   bandwidth: string
+  /** Present only from the backend host endpoint. `riskScore` is NOT
+   * renderable when this is `{state: "unavailable"}` — branch on it. */
+  riskReason?: HostRiskUnavailable | HostRiskExplained
+  /** False when no score could be computed (ES unreachable / mode UNKNOWN).
+   * Absent on profiles assembled client-side (findings/query fallbacks). */
+  riskScoreAvailable?: boolean
+  sources?: HostRiskSources
+}
+
+/** When the risk figure could not be computed at all (ES unreachable or the
+ * field inventory never resolved). Rendered INSTEAD of a score — a host that
+ * was not measured must never look like a clean one. Mirrors the shape
+ * AttckPanel already uses for the missing-schema case. */
+export interface HostRiskUnavailable {
+  state: "unavailable"
+  reason: string
+  text: string
+}
+
+/** Which rule produced the level, and the exact inputs it consumed. Only
+ * returned when a score WAS computed — `rule` names the branch so a flat
+ * floor (92) is distinguishable from a graded measurement. */
+export interface HostRiskExplained {
+  /**
+   * - `blacklisted_destination_floor` — the hardcoded max(92, score) floor:
+   *   a risk (ALLOW) request reached a blacklisted destination.
+   * - `share_above_0.5` / `share_above_0.2` / `share_at_or_below_0.2` — the
+   *   ALLOW-share brackets.
+   * - `no_traffic` — nothing in the window; the 12 baseline, not a measurement.
+   */
+  rule:
+    | "blacklisted_destination_floor"
+    | "share_above_0.5"
+    | "share_above_0.2"
+    | "share_at_or_below_0.2"
+    | "no_traffic"
+  level: HostRisk["riskLevel"]
+  score: number
+  /** True only when the hardcoded 92 floor raised the score. */
+  floored: boolean
+  inputs: {
+    totalRequests: number
+    riskRequests: number
+    blacklistedRequests: number
+    riskShare?: number
+  }
+  text: string
+}
+
+/** Provenance for the section-02 figures: the score is LIVE ES over the
+ * selected window, the detail tables are PERSISTED findings (all time), and
+ * the report must say so rather than imply one source. */
+export interface HostRiskSources {
+  risk: {
+    source: string | null
+    window: string
+    available: boolean
+    persisted_detail: string
+    persisted_detail_window: string
+  }
 }
 
 export interface HostProfile extends HostIdentity {
@@ -1514,6 +1573,8 @@ export interface HostProfile extends HostIdentity {
   /** True when this profile is a hardcoded wireframe placeholder (no real
    * data existed for the entity). MUST NOT be treated as evidence. */
   placeholder?: boolean
+  /** Backend host endpoint only: mirrors `risk.riskScoreAvailable`. */
+  es_online?: boolean
 }
 
 function hostRiskFromShares(totalRequests: number, riskRequests: number): { level: HostRisk["riskLevel"]; score: number } {
@@ -1622,10 +1683,22 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
     const data = await request<Record<string, unknown>>(
       `/hosts/${encodeURIComponent(cleanIp)}?timeRange=${encodeURIComponent(timeRange)}`,
     )
-    // Accept either { host, risk } or flat HostProfile shape. When the backend
-    // reports es_online false + zero traffic, fall through so the client-side
-    // live-ES / findings paths can still fill the profile.
+    // Accept either { host, risk } or flat HostProfile shape.
+    //
+    // The endpoint's ES-unavailable state (es_online:false + riskReason
+    // {state:"unavailable"}) is now RETURNED, not fallen through: it is the
+    // honest answer, and the report must render it rather than a plausible
+    // LOW assembled from a fallback. Only the older "offline + zero traffic
+    // with no explicit reason" response still falls through, so legacy
+    // backends keep working.
     if (data && typeof data === "object") {
+      const reason = ((data as Record<string, unknown>)?.risk as Record<string, unknown> | undefined)
+        ?.riskReason as Record<string, unknown> | undefined
+      const explicitUnavailable = (data as Record<string, unknown>).es_online === false &&
+        reason?.state === "unavailable"
+      if ("risk" in data && "hostname" in data && explicitUnavailable) {
+        return data as unknown as HostProfile
+      }
       const endpointOffline = (data as Record<string, unknown>).es_online === false
       const zeroTraffic =
         ((data as Record<string, unknown>)?.risk as Record<string, unknown> | undefined)

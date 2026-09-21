@@ -29,24 +29,145 @@ def _risk_from_shares(
     ``blacklisted_risk`` counts ALLOWed requests to blacklisted destinations —
     an operator explicitly flagged the target and the proxy still let it
     through, the highest-risk signal. Any such request escalates to HIGH.
+
+    The returned dict carries a ``riskReason`` alongside the score so a caller
+    can never render the score without its justification (see
+    ``_unavailable_risk_reason`` for the ES-unavailable case, which this pure
+    helper has no way to see):
+
+    ``{"rule", "level", "score", "floored", "inputs", "text"}``
+
+    - ``rule`` names WHICH branch fired, so a floored 92 is distinguishable
+      from a measured 92 (``blacklisted_destination_floor`` vs a share
+      bracket) — the operator's actual case.
+    - ``floored`` is True only when the hardcoded 92 floor raised the score.
+    - ``inputs`` are the exact counts the branch consumed.
+    - ``text`` is the operator-facing sentence, stated in ADR 0001 vocabulary
+      ("risk (ALLOW matches)", "enforcements (DENY)").
     """
     if total <= 0:
         score = 12
         level = "LOW"
+        reason = {
+            "rule": "no_traffic",
+            "level": level,
+            "score": score,
+            "floored": False,
+            "inputs": {
+                "totalRequests": total,
+                "riskRequests": risk_requests,
+                "blacklistedRequests": blacklisted_risk,
+            },
+            "text": (
+                "No traffic in the window — score is the model's empty-window "
+                "baseline, not a measurement."
+            ),
+        }
+        return {"riskScore": score, "riskLevel": level, "riskReason": reason}
+    share = risk_requests / total
+    if share > 0.5:
+        score = min(95, 72 + round((share - 0.5) * 40))
+        level = "HIGH"
+        rule = "share_above_0.5"
+    elif share > 0.2:
+        score = round(45 + ((share - 0.2) / 0.3) * 25)
+        level = "MEDIUM"
+        rule = "share_above_0.2"
     else:
-        share = risk_requests / total
-        if share > 0.5:
-            score = min(95, 72 + round((share - 0.5) * 40))
-            level = "HIGH"
-        elif share > 0.2:
-            score = round(45 + ((share - 0.2) / 0.3) * 25)
-            level = "MEDIUM"
-        else:
-            score = round(12 + (share / 0.2) * 32)
-            level = "LOW"
+        score = round(12 + (share / 0.2) * 32)
+        level = "LOW"
+        rule = "share_at_or_below_0.2"
+    reason = {
+        "rule": rule,
+        "level": level,
+        "score": score,
+        "floored": False,
+        "inputs": {
+            "totalRequests": total,
+            "riskRequests": risk_requests,
+            "blacklistedRequests": blacklisted_risk,
+            "riskShare": round(share, 4),
+        },
+        "text": (
+            f"{risk_requests} of {total} requests were risk (ALLOW matches) "
+            f"— {share:.1%} share → {level} bracket ({rule})."
+        ),
+    }
     if blacklisted_risk > 0:
-        return {"riskScore": max(92, score), "riskLevel": "HIGH"}
-    return {"riskScore": score, "riskLevel": level}
+        floored = max(92, score)
+        # The floor fires whenever a blacklisted destination was ALLOWed. It is
+        # a FLAT 92, not a graded measurement — say so, and keep the bracket
+        # the share alone would have produced so the two are comparable.
+        return {
+            "riskScore": floored,
+            "riskLevel": "HIGH",
+            "riskReason": {
+                "rule": "blacklisted_destination_floor",
+                "level": "HIGH",
+                "score": floored,
+                "floored": True,
+                "inputs": {
+                    "totalRequests": total,
+                    "riskRequests": risk_requests,
+                    "blacklistedRequests": blacklisted_risk,
+                    "riskShare": round(share, 4),
+                },
+                "text": (
+                    f"Escalated to HIGH by the blacklisted-destination rule: "
+                    f"{blacklisted_risk} risk (ALLOW) request(s) reached a "
+                    f"destination on the blacklist. Score is the flat "
+                    f"{floored} floor, not a graded measurement "
+                    f"(share-only bracket would be {level} {score})."
+                ),
+            },
+        }
+    return {"riskScore": score, "riskLevel": level, "riskReason": reason}
+
+
+# The two figures in section 02 come from DIFFERENT sources with different
+# windows; label both so the report never implies they share one.
+LIVE_WINDOW_SOURCE = "live Elasticsearch (block-pattern window)"
+PERSISTED_SOURCE = "persisted findings (SQLite)"
+
+
+def _normalize_minutes(minutes: int) -> int:
+    """Map an accepted ``timeRange`` label to minutes (already-resolved
+    ``minutes`` pass through). Mirrors the mapping in ``host_profile``."""
+    return {
+        "1h": 60, "24h": 1440, "3d": 4320, "7d": 10080,
+        "30d": 43200, "90d": 129600, "1y": 525600,
+    }.get(minutes, minutes)
+
+
+def _window_label(minutes: int) -> str:
+    if minutes <= 0:
+        return "all time"
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440}d"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}h"
+    return f"{minutes}m"
+
+
+def _unavailable_risk_reason() -> dict:
+    """The ES-unavailable state — deliberately carries NO score.
+
+    A host the system could not measure must never render a plausible LOW
+    (the old behaviour defaulted every count to 0, and ``0 -> LOW 12`` made an
+    un-looked-at host indistinguishable from a clean one). The frontend
+    branches on ``state == "unavailable"`` and renders this instead of a
+    number.
+    """
+    return {
+        "state": "unavailable",
+        "reason": "es_offline_or_field_mode_unknown",
+        "text": (
+            "Elasticsearch unavailable — risk not computed. The field "
+            "inventory is unresolved or the ES query failed, so no risk "
+            "figure can be stated for this host. Do not read the counts below "
+            "as zero activity."
+        ),
+    }
 
 
 def _synthesize_bandwidth(total_requests: int) -> str:
@@ -159,8 +280,14 @@ async def host_profile(
 
     ``minutes`` drives the ES window (defaults to the 24h FilterContext default).
     Returns a flat ``HostProfile``-shaped payload:
-    ``{ hostname, primaryIp, ip, risk: { riskScore, riskLevel, totalRequests,
-    riskRequests, enforcements, enforcementsPct, bandwidth } }``
+    ``{ hostname, primaryIp, ip, es_online, risk: { riskScore, riskLevel,
+    totalRequests, riskRequests, enforcements, enforcementsPct, bandwidth,
+    riskReason, sources } }``.
+
+    Additive contract (2026-09-21): the risk sub-dict carries ``riskReason``
+    (WHICH rule produced the level, and its inputs) and ``sources`` (which
+    store each figure came from, and over what window). Existing keys are
+    unchanged.
     """
     settings = get_settings()
 
@@ -173,14 +300,38 @@ async def host_profile(
         }.get(timeRange, 1440)
 
     agg = await _aggregate_host(ip, minutes)
+    risk_available = agg is not None
     es_online = bool(agg and agg["es_online"])
     total = (agg or {}).get("totalRequests", 0)
     risk_requests = (agg or {}).get("riskRequests", 0)
-    enforcements = (agg or {}).get("enforcements", 0)
     blacklisted_requests = (agg or {}).get("blacklistedRequests", 0)
-
-    risk = _risk_from_shares(total, risk_requests, blacklisted_requests)
+    enforcements = (agg or {}).get("enforcements", 0)
     enforcements_pct = (enforcements / total) * 100 if total > 0 else 0
+
+    if risk_available:
+        risk = _risk_from_shares(total, risk_requests, blacklisted_requests)
+        risk_reason = risk["riskReason"]
+    else:
+        # ES unreachable / field mode UNKNOWN: the score itself is unknown.
+        # Keep riskScore/riskLevel for backwards-compatibility (they default to
+        # the old values) but mark the reason unavailable so the UI renders the
+        # unavailable state instead of a plausible LOW.
+        risk = _risk_from_shares(0, 0, 0)
+        risk_reason = _unavailable_risk_reason()
+
+    window = _window_label(_normalize_minutes(minutes))
+    sources = {
+        # Which store produced the risk numbers on screen, and over what window.
+        # Section 02 of the report must state both — the score is LIVE and the
+        # detail tables are PERSISTED, and the two can disagree.
+        "risk": {
+            "source": LIVE_WINDOW_SOURCE if risk_available else None,
+            "window": window,
+            "available": risk_available,
+            "persisted_detail": PERSISTED_SOURCE,
+            "persisted_detail_window": "all time",
+        },
+    }
 
     return {
         "hostname": f"Host-{ip.split('.').pop() if ip.split('.') else ip[:4]}",
@@ -195,6 +346,9 @@ async def host_profile(
             "enforcements": enforcements,
             "blacklistedRequests": blacklisted_requests,
             "enforcementsPct": round(enforcements_pct, 1),
+            "riskScoreAvailable": risk_available,
+            "riskReason": risk_reason,
+            "sources": sources,
             "bandwidth": _synthesize_bandwidth(total),
         },
     }
