@@ -613,6 +613,53 @@ def test_interval_cv_aliasing_regression():
     assert beat_cv <= 0.35 < load_cv
 
 
+def test_interval_cv_derives_seconds_not_nanoseconds():
+    """Pin the unit of the second-derivation against a hardcoded divisor.
+
+    `_interval_cv` converts timestamps to whole seconds before differencing.
+    The defect this guards: `stamps.astype("int64")` returns the count in the
+    Series' OWN unit — `us` under the project's pandas 3.0.5, `ns` under
+    pandas 2.x — so dividing by a fixed `1_000_000_000` mis-scales by 1000x on
+    microsecond input and collapses every gap to the same value. That produced
+    a CV of 0.0 (or quantization jitter) and made the `<= 0.35` gates accept
+    every host.
+
+    Feed arrivals a KNOWN gap apart and assert the derived CV reflects the real
+    second-scale interval, not a resolution-collapsed one. A reintroduced
+    nanosecond divisor (or any fixed divisor that does not match the dtype)
+    makes the two intervals below differ by 1000x and this test fail.
+    """
+    import pandas as pd
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    # A 1-minute beat: real gaps are 60 s. The correct CV of a constant gap is
+    # exactly 0.0; a resolution-collapsed derivation also yields 0.0, so the CV
+    # alone cannot distinguish the units. Assert the derived seconds directly.
+    minute_beat = pd.Series([start + timedelta(minutes=i) for i in range(30)])
+    stamps = (
+        pd.to_datetime(minute_beat, errors="coerce", utc=True)
+        .dropna()
+        .sort_values()
+    )
+    secs = (
+        stamps.dt.floor("s").dt.tz_localize(None).astype("datetime64[s]").astype("int64")
+    )
+    gaps = [int(b) - int(a) for a, b in zip(secs, secs.iloc[1:])]
+    assert gaps == [60] * 29, (
+        f"a 60-second gap was derived as {gaps[:3]} — the timestamp unit was "
+        "mis-scaled (a nanosecond divisor over a microsecond dtype divides "
+        "the real gap by 1000)"
+    )
+
+    # And the statistic on a mixed second-scale cadence proves the value is
+    # usable: exact 2-minute gap -> CV 0.0, still under the 0.35 gate.
+    two_minute = pd.Series([start + timedelta(minutes=2 * i) for i in range(30)])
+    cv = _interval_cv(two_minute)
+    assert cv is not None and cv == 0.0
+
+
+
 # ── §e gate mechanics (the paths that have silently swallowed bugs) ──────────
 
 

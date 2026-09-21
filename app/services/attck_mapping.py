@@ -532,14 +532,37 @@ def _interval_cv(ts: pd.Series) -> float | None:
     indistinguishable — and slightly *inverted* (a jittered beat scored 0.005,
     noise 0.014). The merge is deleted; the threshold below does the work.
 
-    ``None`` means "cannot tell" (fewer than ``_INTERVAL_MIN_SAMPLES`` gaps),
-    which the caller must surface as UNKNOWN — never as 0.0, which would read
-    as "acyclic".
+    Resolution is whole seconds. Intervals are taken between arrivals floored to
+    the second, so a sub-second gap reads as a zero-second interval and is then
+    dropped by the ``b > a`` filter below — the statistic measures second-scale
+    and coarser cadence, and does not claim to resolve faster beats.
+
+    ``None`` means "cannot tell" — fewer than ``_INTERVAL_MIN_SAMPLES``
+    positive gaps survived, either because fewer than two arrivals parsed or
+    because the arrivals were dense enough that all gaps floored away. The
+    caller surfaces it as UNKNOWN, never as 0.0, which would read as "acyclic"
+    (a regular beat) and satisfy the ``<= 0.35`` gates.
     """
     stamps = pd.to_datetime(ts, errors="coerce", utc=True).dropna().sort_values()
     if len(stamps) < 2:
         return None
-    secs = stamps.astype("int64") // 1_000_000_000
+    # Whole seconds, unit-agnostically. `astype("int64")` on a datetime64 Series
+    # returns the integer count in the SERIES' OWN unit — under pandas 3.0.5
+    # `to_datetime(..., utc=True)` yields `datetime64[us, UTC]` (microseconds),
+    # but the same call yields `datetime64[ns]` under pandas 2.x, and a future
+    # version may yield `s` or `ms`. Dividing by a fixed
+    # `1_000_000_000` therefore assumed nanoseconds and mis-scaled by 1000x on
+    # microsecond input: minute-scale intervals collapsed to a constant 1, the
+    # CV read 0.0, and the `<= 0.35` gates below accepted every host.
+    # Going through `datetime64[s]` lets numpy rescale from whatever the source
+    # unit is, so this cannot silently mis-scale on an unanticipated unit.
+    # Flooring with `.dt.floor("s")` first is deliberate: truncation is the
+    # intended semantics (a sub-second gap is a zero-second interval), and
+    # making the floor explicit documents it rather than leaving it implicit in
+    # the cast. `tz_localize(None)` is required — pandas refuses to cast a
+    # tz-aware datetime64 to `datetime64[s]` in one step (raises TypeError).
+    whole_seconds = stamps.dt.floor("s").dt.tz_localize(None)
+    secs = whole_seconds.astype("datetime64[s]").astype("int64")
     intervals = [int(b) - int(a) for a, b in zip(secs, secs.iloc[1:]) if b > a]
     if len(intervals) < _INTERVAL_MIN_SAMPLES:
         return None
