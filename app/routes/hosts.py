@@ -129,7 +129,6 @@ def _risk_from_shares(
 LIVE_WINDOW_SOURCE = "live Elasticsearch (block-pattern window)"
 PERSISTED_SOURCE = "persisted findings (SQLite)"
 
-
 def _normalize_minutes(minutes: int) -> int:
     """Map an accepted ``timeRange`` label to minutes (already-resolved
     ``minutes`` pass through). Mirrors the mapping in ``host_profile``."""
@@ -170,13 +169,41 @@ def _unavailable_risk_reason() -> dict:
     }
 
 
-def _synthesize_bandwidth(total_requests: int) -> str:
-    """Byte accounting not yet on the host profile — scale a placeholder."""
-    if total_requests <= 0:
-        return "—"
-    if total_requests < 1000:
-        return f"{(total_requests * 0.12):.1f} MB"
-    return f"{(total_requests / 1024):.1f} GB"
+async def _host_byte_totals(ip: str, minutes: int) -> tuple[int | None, int | None]:
+    """SUM the persisted byte counters for one host over the window.
+
+    Returns ``(download, upload)`` summed over the host's persisted findings,
+    or ``(None, None)`` when the host has no persisted rows (nothing to
+    measure — a genuine ``None``, never a fabricated ``0``).
+
+    Honesty caveat (docs/specs/... §j.5, app/services/logline.py:3-6): the
+    flat ``bytes_downloaded`` column collapses the raw line's ``-``
+    NOT-RECORDED sentinel to ``0``, so a summed ``0`` cannot be distinguished
+    from "genuinely zero" using the persisted columns alone. The caller
+    therefore renders the total as measured bytes; a ``0`` sum is the
+    sum of the persisted values, not a claim that traffic was measured zero.
+    """
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        clause = "WHERE client_ip = ?"
+        params: list = [ip]
+        if minutes:
+            clause += " AND log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+            params.append(f"-{minutes} minutes")
+        cursor = await db.execute(
+            f"SELECT COALESCE(SUM(CAST(bytes_downloaded AS INTEGER)), 0), "
+            f"COALESCE(SUM(CAST(bytes_uploaded AS INTEGER)), 0), "
+            f"COUNT(*) FROM findings {clause}",
+            params,
+        )
+        row = await cursor.fetchone()
+    finally:
+        await db.close()
+    if not row or not row[2]:
+        return None, None
+    return int(row[0] or 0), int(row[1] or 0)
 
 
 async def _aggregate_host(ip: str, minutes: int) -> dict | None:
@@ -300,14 +327,20 @@ async def host_profile(
         }.get(timeRange, 1440)
 
     agg = await _aggregate_host(ip, minutes)
-    risk_available = agg is not None
     es_online = bool(agg and agg["es_online"])
+    risk_available = agg is not None
     total = (agg or {}).get("totalRequests", 0)
     risk_requests = (agg or {}).get("riskRequests", 0)
     blacklisted_requests = (agg or {}).get("blacklistedRequests", 0)
     enforcements = (agg or {}).get("enforcements", 0)
     enforcements_pct = (enforcements / total) * 100 if total > 0 else 0
 
+    # Real byte totals from persisted findings — an ES-independent path, so
+    # the figure survives an Elasticsearch outage. `bandwidthNeverMeasured`
+    # marks "nothing to sum": the total is never invented, and a measured 0 is
+    # never conflated with an absence of data.
+    bandwidth_download, bandwidth_upload = await _host_byte_totals(ip, minutes)
+    bandwidth_never_measured = bandwidth_download is None
     if risk_available:
         risk = _risk_from_shares(total, risk_requests, blacklisted_requests)
         risk_reason = risk["riskReason"]
@@ -346,9 +379,15 @@ async def host_profile(
             "enforcements": enforcements,
             "blacklistedRequests": blacklisted_requests,
             "enforcementsPct": round(enforcements_pct, 1),
+            # Real byte totals from persisted findings — `null` when nothing
+            # was persisted, with bandwidthNeverMeasured marking that state.
+            "bandwidthDownload": bandwidth_download,
+            "bandwidthUpload": bandwidth_upload,
+            "bandwidthNeverMeasured": bandwidth_never_measured,
+            # No synthesized display string; kept as a null legacy key.
+            "bandwidth": None,
             "riskScoreAvailable": risk_available,
             "riskReason": risk_reason,
             "sources": sources,
-            "bandwidth": _synthesize_bandwidth(total),
         },
     }

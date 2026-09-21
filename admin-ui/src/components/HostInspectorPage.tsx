@@ -1074,6 +1074,15 @@ export function HostInspectorPage({
       {/* ── LIVE branch — Spec §3.2 sections (render only once a host is resolved) ── */}
       {showSections && (
         <>
+          {/* The demo host (192.168.1.45) is synthesize-only — nothing below is
+              evidence. Flag it exactly like ReportPage so fabricated counts can
+              never be mistaken for measured data. `demoMeta` is set only by
+              buildDemoSections, so it is the honest marker for this path. */}
+          {sections?.demoMeta && (
+            <div>
+              <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
+            </div>
+          )}
           {sectionsError && (
             <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
               <span>{sectionsError}</span>

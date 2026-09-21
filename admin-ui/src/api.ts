@@ -731,8 +731,9 @@ export async function getLiveMetrics(opts?: {
   }
 
   // Real bandwidth from the flat proxy feed — sum bytes_downloaded (inbound)
-  // + bytes_uploaded (outbound) across the fetched items. Falls back to a
-  // placeholder only when the feed carries no byte fields.
+  // + bytes_uploaded (outbound) across the fetched items. When the feed
+  // carries no byte fields, `"—"` marks bandwidth as unavailable — never a
+  // synthesized figure.
   let bandwidth = "—"
   if (query && query.items.length > 0) {
     let totalBytes = 0
@@ -1504,7 +1505,16 @@ export interface HostRisk {
   blacklistedRequests?: number
   /** 0..100 share of total that was enforced (proxy handled). */
   enforcementsPct: number
-  bandwidth: string
+  /** Real byte totals from persisted findings. `null`/absent when nothing was
+   * persisted — render an explicit unavailable marker, never a number.
+   * `bandwidthNeverMeasured` marks that state; a present `0` is a measured
+   * sum of persisted values, not an invented figure. */
+  bandwidthDownload?: number | null
+  bandwidthUpload?: number | null
+  bandwidthNeverMeasured?: boolean
+  /** Legacy never-populated field. The backend returns `null`; no synthesized
+   * display string exists any more. Kept optional for older payload shapes. */
+  bandwidth?: string | null
   /** Present only from the backend host endpoint. `riskScore` is NOT
    * renderable when this is `{state: "unavailable"}` — branch on it. */
   riskReason?: HostRiskUnavailable | HostRiskExplained
@@ -1588,13 +1598,29 @@ function hostRiskFromShares(totalRequests: number, riskRequests: number): { leve
   return { level: "LOW", score: Math.round(12 + (share / 0.2) * 32) }
 }
 
-function synthesizeBandwidth(totalRequests: number): string {
-  // Until byte accounting lands, synthesize a plausible display value so the
-  // card matches the wireframe ("4.2 GB"). Scale with request volume.
-  if (totalRequests <= 0) return "—"
-  if (totalRequests < 1000) return `${(totalRequests * 0.12).toFixed(1)} MB`
-  if (totalRequests < 20000) return `${(totalRequests / 1024).toFixed(1)} GB`
-  return `${(totalRequests / 1024).toFixed(1)} GB`
+/** Sum the persisted byte counters of findings rows and format them. Returns
+ * `null` when no row carried a byte figure — callers render an explicit
+ * unavailable marker rather than an invented number.
+ *
+ * Typed to the byte fields only, not the whole `Finding`: both callers need
+ * it — `hostProfileFromFindings` passes `Finding[]` (persisted rows) and
+ * `hostProfileFromQuery` passes `QueryDoc[]` (live ES rows). Both carry
+ * `bytes_downloaded`/`bytes_uploaded` with identical types, so the narrowest
+ * true signature is the structural pick below (never `any`, never a cast). */
+function hostBandwidthFromFindings(
+  items: Pick<Finding, "bytes_downloaded" | "bytes_uploaded">[],
+): { download: number; upload: number } | null {
+  let download = 0
+  let upload = 0
+  let any = false
+  for (const it of items) {
+    const dn = Number(it.bytes_downloaded) || 0
+    const up = Number(it.bytes_uploaded) || 0
+    if (dn || up) any = true
+    download += dn
+    upload += up
+  }
+  return any ? { download, upload } : null
 }
 
 function hostIdentityFromFindings(ip: string, items: Finding[]): HostIdentity {
@@ -1616,6 +1642,7 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
   const enforcements = 0
   const enforcementsPct = 0
   const { level, score } = hostRiskFromShares(totalRequests, riskRequests)
+  const bw = hostBandwidthFromFindings(items)
   const identity = hostIdentityFromFindings(ip, items)
   return {
     ...identity,
@@ -1627,7 +1654,35 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
       riskRequests,
       enforcements,
       enforcementsPct,
-      bandwidth: synthesizeBandwidth(totalRequests),
+      // Real bytes summed from the persisted findings rows for this host.
+      // `null` when no row carried a byte figure → explicit unavailable.
+      bandwidthDownload: bw?.download ?? null,
+      bandwidthUpload: bw?.upload ?? null,
+      bandwidthNeverMeasured: bw === null,
+      // This profile was NOT produced by the backend risk model — it is the
+      // client-side mirror over persisted findings. Label it so the report
+      // states its source rather than borrowing the live-ES label.
+      riskScoreAvailable: true,
+      riskReason: {
+        rule: "share_above_0.5",
+        level,
+        score,
+        floored: false,
+        inputs: { totalRequests, riskRequests, blacklistedRequests: 0 },
+        text:
+          `Client-side estimate from persisted findings: ${riskRequests} risk ` +
+          `(ALLOW match) rows over an all-time window → ${level}. ` +
+          `Not the backend risk model.`,
+      },
+      sources: {
+        risk: {
+          source: "client-side aggregation over persisted findings (SQLite)",
+          window: "all time",
+          available: true,
+          persisted_detail: "persisted findings (SQLite)",
+          persisted_detail_window: "all time",
+        },
+      },
     },
   }
 }
@@ -1642,6 +1697,7 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
   const effectiveEnforcements = totalRequests > 0 ? enforcements : allItems.length
   const enforcementsPct = effectiveTotal > 0 ? (effectiveEnforcements / effectiveTotal) * 100 : 0
   const { level, score } = hostRiskFromShares(effectiveTotal, riskRequests)
+  const bw = hostBandwidthFromFindings(allItems)
   // Try to derive hostname from query docs (ADR 0001: IP + hostname only).
   const first = allItems[0] as unknown as Record<string, unknown> | undefined
   const hostname =
@@ -1660,7 +1716,37 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
       riskRequests,
       enforcements: effectiveEnforcements,
       enforcementsPct,
-      bandwidth: synthesizeBandwidth(effectiveTotal),
+      // Real bytes summed from the live ES query items for this host.
+      bandwidthDownload: bw?.download ?? null,
+      bandwidthUpload: bw?.upload ?? null,
+      bandwidthNeverMeasured: bw === null,
+      // Assembled client-side from a live ES query sample — label it as such
+      // so the report does not present it under the backend model's name.
+      riskScoreAvailable: true,
+      riskReason: {
+        rule: "share_above_0.5",
+        level,
+        score,
+        floored: false,
+        inputs: {
+          totalRequests: effectiveTotal,
+          riskRequests,
+          blacklistedRequests: 0,
+        },
+        text:
+          `Client-side estimate from a live ES query sample: ${riskRequests} risk ` +
+          `(ALLOW match) requests of ${effectiveTotal} → ${level}. ` +
+          `Not the backend risk model.`,
+      },
+      sources: {
+        risk: {
+          source: "client-side live ES query sample",
+          window: "selected window",
+          available: true,
+          persisted_detail: "persisted findings (SQLite)",
+          persisted_detail_window: "all time",
+        },
+      },
     },
   }
 }
@@ -1756,7 +1842,11 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
         riskRequests: 42118,
         enforcements: 692,
         enforcementsPct: 1.6,
-        bandwidth: "4.2 GB",
+        // Wireframe demo entity — carries no measured bytes. Explicitly
+        // unavailable (the whole card is flagged `placeholder` above).
+        bandwidthDownload: null,
+        bandwidthUpload: null,
+        bandwidthNeverMeasured: true,
       },
     }
   }
@@ -1773,7 +1863,33 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
       riskRequests: 0,
       enforcements: 0,
       enforcementsPct: 0,
-      bandwidth: "—",
+      // No persisted bytes for this host — explicit unavailable, no number.
+      bandwidthDownload: null,
+      bandwidthUpload: null,
+      bandwidthNeverMeasured: true,
+      // No source returned anything for this host. The 12/100 is the model's
+      // empty-window baseline, NOT a measurement — say so rather than letting
+      // it read as a clean host.
+      riskScoreAvailable: true,
+      riskReason: {
+        rule: "no_traffic",
+        level: "LOW",
+        score: 12,
+        floored: false,
+        inputs: { totalRequests: 0, riskRequests: 0, blacklistedRequests: 0 },
+        text:
+          "No traffic recorded for this host by any source — score is the " +
+          "model's empty-window baseline, not a measurement.",
+      },
+      sources: {
+        risk: {
+          source: null,
+          window: "—",
+          available: false,
+          persisted_detail: "persisted findings (SQLite)",
+          persisted_detail_window: "all time",
+        },
+      },
     },
   }
 }

@@ -1,5 +1,5 @@
 import { Badge } from "./ui"
-import type { HostRisk } from "../api"
+import { formatBytes, type HostRisk } from "../api"
 
 export interface HostEntityCardProps {
   /** Host is an IP + optional hostname (ADR 0001) — shown in the header only. */
@@ -13,6 +13,17 @@ function riskBadgeVariant(level: HostRisk["riskLevel"]): "destructive" | "warnin
   if (level === "HIGH") return "destructive"
   if (level === "MEDIUM") return "warning"
   return "success"
+}
+
+/** Render the host's real byte total, or an explicit unavailable marker when
+ * nothing was persisted. Never a synthesized figure (product rule: a shown
+ * number is a persisted field or explicitly unavailable). A present `0` is a
+ * measured sum of persisted values, not an invented one. */
+function bandwidthText(risk: HostRisk): string {
+  const neverMeasured = risk.bandwidthNeverMeasured ?? risk.bandwidthDownload == null
+  const total = (risk.bandwidthDownload ?? 0) + (risk.bandwidthUpload ?? 0)
+  if (neverMeasured) return "Not recorded"
+  return formatBytes(total)
 }
 
 /** Risk-only host summary card (ADR 0001: no MAC/dept/user identity; risk =
@@ -67,7 +78,7 @@ export function HostEntityCard({ host, risk, jailed }: HostEntityCardProps) {
           </div>
           <div className="flex justify-between gap-3">
             <span className="text-muted-foreground">Bandwidth</span>
-            <span className="font-bold tabular-nums text-foreground">{risk.bandwidth}</span>
+            <span className="font-bold tabular-nums text-foreground">{bandwidthText(risk)}</span>
           </div>
         </div>
       </div>
