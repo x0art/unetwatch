@@ -1593,70 +1593,30 @@ export interface HostProfile extends HostIdentity {
   es_online?: boolean
 }
 
-/**
- * Client-side MIRROR of the backend GRADED risk model (app/routes/hosts.py
- * `_risk_from_shares`). Kept numerically identical so the two paths cannot
- * produce two answers — the drift this project is removing. The constants
- * below MUST stay in lockstep with the backend's named constants.
+/** Reason text for a profile whose risk rung produced NO score.
  *
- * The client cannot see the operator's blacklist set on this path, so
- * `blacklistedDistinct` is passed in as 0 where membership is unknown — it is
- * never guessed. ATTEMPT evidence (DENY) contributes but is capped below any
- * reach, exactly as server-side.
+ * Every client-side host profile now renders one of exactly two things: the
+ * score the BACKEND computed, or this explicit unavailable state. The client
+ * no longer owns a copy of the graded model (it used to, see `getHostProfile`),
+ * so it must never present a number it did not receive. A `riskScore: 0`
+ * alongside `riskScoreAvailable: false` is the legacy-shaped placeholder the
+ * card refuses to render — never a claim that the host scored 0.
  */
-const RISK_SCALE_MIN = 0
-const RISK_SCALE_MAX = 100
-const NO_TRAFFIC_SCORE = 0
-const REACH_BASE = 20
-const REACH_PER_HIT_WEIGHT = 3
-const REACH_HIT_SATURATION = 20
-const DISTINCT_DEST_WEIGHT = 7
-const DISTINCT_DEST_SATURATION = 5
-const RECENCY_BONUS = 10
-const RECENCY_WINDOW_MIN = 60
-const ATTEMPT_WEIGHT = 2
-const ATTEMPT_CAP = 20
-const LEVEL_HIGH_MIN = 70
-const LEVEL_MEDIUM_MIN = 45
-
-/** Age in minutes of the newest among the given ISO timestamps; `null` when
- * none parse. Reads a real persisted timestamp — never a synthesized figure. */
-function newestAgeMinutes(timestamps: string[]): number | null {
-  let newest = 0
-  for (const ts of timestamps) {
-    const t = Date.parse(ts)
-    if (!Number.isNaN(t) && t > newest) newest = t
+function notComputedRiskReason(): HostRiskUnavailable {
+  return {
+    state: "unavailable",
+    reason: "risk_not_computed_client_side",
+    text:
+      "Risk was not computed for this host. The backend host endpoint did not " +
+      "answer with a score, and this client does not grade risk on its own — " +
+      "every score on this page comes from the backend model. Do not read the " +
+      "counts below as zero activity.",
   }
-  if (!newest) return null
-  return Math.max(0, Math.round((Date.now() - newest) / 60000))
 }
 
-function hostRiskFromShares(
-  totalRequests: number,
-  riskRequests: number,
-  opts?: { blacklistedDistinct?: number; enforcements?: number; newestReachAgeMinutes?: number | null },
-): { level: HostRisk["riskLevel"]; score: number; rule: HostRiskExplained["rule"] } {
-  const clamp = (v: number) => Math.max(RISK_SCALE_MIN, Math.min(RISK_SCALE_MAX, v))
-  const levelFor = (score: number): HostRisk["riskLevel"] =>
-    score >= LEVEL_HIGH_MIN ? "HIGH" : score >= LEVEL_MEDIUM_MIN ? "MEDIUM" : "LOW"
-
-  const reaches = Math.max(0, riskRequests)
-  const attempts = Math.max(0, opts?.enforcements ?? 0)
-  const reachedDistinct = Math.max(0, opts?.blacklistedDistinct ?? 0)
-  if (totalRequests <= 0) return { level: "LOW", score: NO_TRAFFIC_SCORE, rule: "no_traffic" }
-
-  const attemptTerm = Math.min(ATTEMPT_CAP, ATTEMPT_WEIGHT * attempts)
-  if (reaches <= 0) {
-    const score = clamp(attemptTerm)
-    return { level: levelFor(score), score, rule: "graded_attempt_only" }
-  }
-  const reachVolume = REACH_BASE + REACH_PER_HIT_WEIGHT * Math.min(reaches, REACH_HIT_SATURATION)
-  const breadth = DISTINCT_DEST_WEIGHT * Math.min(reachedDistinct, DISTINCT_DEST_SATURATION)
-  const age = opts?.newestReachAgeMinutes
-  const recency = age != null && age <= RECENCY_WINDOW_MIN ? RECENCY_BONUS : 0
-  const score = clamp(reachVolume + breadth + recency + attemptTerm)
-  return { level: levelFor(score), score, rule: "graded_reach" }
-}
+/** Thrown when no rung of the host-profile ladder produced a score. The
+ *  caller renders the failure state; a profile is never invented for it. */
+export const HOST_PROFILE_LOOKUP_FAILED = "HOST_PROFILE_LOOKUP_FAILED"
 
 /** Sum the persisted byte counters of findings rows and format them. Returns
  * `null` when no row carried a byte figure — callers render an explicit
@@ -1694,66 +1654,51 @@ function hostIdentityFromFindings(ip: string, items: Finding[]): HostIdentity {
   return { hostname: hostname || `Host-${ip.split(".").pop() ?? ""}`, primaryIp: ip }
 }
 
+/** Build a profile's NON-risk half from persisted findings rows.
+ *
+ * This used to compute the risk score too, via a private copy of the backend's
+ * graded model (`hostRiskFromShares` + its 14 duplicated constants). That copy
+ * is deleted — the backend owns the model, and the host endpoint now grades
+ * the persisted findings table itself when Elasticsearch is unavailable, so
+ * the mirror is both redundant and wrong (its stale `enforcements = 0` and
+ * `blacklistedDistinct: 0` forfeited the whole breadth term and all ATTEMPT
+ * evidence). The risk fields here are therefore the EXPLICIT UNAVAILABLE
+ * state: this rung has no score to render, and a fabricated one would read as
+ * measured (CONTEXT.md §"No synthesized measurements").
+ *
+ * Identity and the byte total are still built from the rows — they are real
+ * persisted fields the card renders alongside the risk figure.
+ */
 function hostProfileFromFindings(ip: string, items: Finding[], total: number): HostProfile {
-  const totalRequests = total || items.length
-  // Findings store ALLOW risk rows only (ADR 0001) — every row is a risk,
-  // enforcements are 0 from this source.
-  const riskRequests = items.length
-  const enforcements = 0
-  const enforcementsPct = 0
-  // Recency from the newest persisted reach timestamp (real field, not a proxy).
-  const newestReachAgeMinutes = newestAgeMinutes(items.map((f) => f.log_timestamp))
-  const { level, score, rule } = hostRiskFromShares(totalRequests, riskRequests, {
-    blacklistedDistinct: 0, // blacklist membership is not known on this path
-    enforcements,
-    newestReachAgeMinutes,
-  })
   const bw = hostBandwidthFromFindings(items)
   const identity = hostIdentityFromFindings(ip, items)
   return {
     ...identity,
     ip,
     risk: {
-      riskScore: score,
-      riskLevel: level,
-      totalRequests: totalRequests || 0,
-      riskRequests,
-      enforcements,
-      enforcementsPct,
+      // No score was computed anywhere for this rung — these legacy fields stay
+      // at the model's empty-window baseline, and `riskScoreAvailable: false`
+      // is what forbids rendering them. A count we did not measure is not 0.
+      riskScore: 0,
+      riskLevel: "LOW",
+      totalRequests: total || items.length,
+      riskRequests: 0,
+      enforcements: 0,
+      enforcementsPct: 0,
       // Real bytes summed from the persisted findings rows for this host.
       // `null` when no row carried a byte figure → explicit unavailable.
       bandwidthDownload: bw?.download ?? null,
       bandwidthUpload: bw?.upload ?? null,
       bandwidthNeverMeasured: bw === null,
-      // This profile was NOT produced by the backend risk model — it is the
-      // client-side mirror over persisted findings. Label it so the report
-      // states its source rather than borrowing the live-ES label.
-      riskScoreAvailable: true,
-      riskReason: {
-        rule,
-        level,
-        score,
-        floored: false,
-        inputs: {
-          totalRequests,
-          riskRequests,
-          blacklistedRequests: 0,
-          blacklistedDistinct: 0,
-          enforcements,
-          reachCount: riskRequests,
-          attemptCount: enforcements,
-          newestReachAgeMinutes,
-        },
-        text:
-          `Client-side graded estimate from persisted findings: ${riskRequests} ` +
-          `reach(es) (ALLOW match) over an all-time window → ${level} ${score}/100. ` +
-          `Blacklist membership is not visible on this path. Not the backend model.`,
-      },
+      riskScoreAvailable: false,
+      riskReason: notComputedRiskReason(),
       sources: {
         risk: {
-          source: "client-side aggregation over persisted findings (SQLite)",
-          window: "all time",
-          available: true,
+          // No store answered with a score here. The detail rows are persisted
+          // findings, and the label says exactly that.
+          source: null,
+          window: "—",
+          available: false,
           persisted_detail: "persisted findings (SQLite)",
           persisted_detail_window: "all time",
         },
@@ -1762,6 +1707,15 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
   }
 }
 
+/** Build a profile's NON-risk half from a LIVE Elasticsearch query sample.
+ *
+ * Like `hostProfileFromFindings`, this used to grade the sample with the
+ * client's own copy of the model. That copy is deleted — the backend owns it —
+ * so the risk fields are the EXPLICIT UNAVAILABLE state. The raw counts the
+ * card renders (total/reach/enforcement) are still derived here from the
+ * QueryDoc fields, because they are read straight off the rows and are not a
+ * score.
+ */
 function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
   const totalRequests = res.total_requests
   const allItems = res.items
@@ -1772,17 +1726,6 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
   const effectiveTotal = totalRequests || allItems.length || 0
   const effectiveEnforcements = totalRequests > 0 ? enforcements : allItems.length
   const enforcementsPct = effectiveTotal > 0 ? (effectiveEnforcements / effectiveTotal) * 100 : 0
-  // QueryDoc carries real blacklist membership (`blacklisted`) — so breadth is
-  // a genuine count of distinct blacklisted destinations reached here.
-  const blacklistedDistinct = new Set(
-    reachItems.filter((d) => d.blacklisted).map((d) => d.base_url),
-  ).size
-  const newestReachAgeMinutes = newestAgeMinutes(reachItems.map((d) => d.timestamp))
-  const { level, score, rule } = hostRiskFromShares(effectiveTotal, riskRequests, {
-    blacklistedDistinct,
-    enforcements: effectiveEnforcements,
-    newestReachAgeMinutes,
-  })
   const bw = hostBandwidthFromFindings(allItems)
   // Try to derive hostname from query docs (ADR 0001: IP + hostname only).
   const first = allItems[0] as unknown as Record<string, unknown> | undefined
@@ -1796,8 +1739,9 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
     primaryIp: ip,
     ip,
     risk: {
-      riskScore: score,
-      riskLevel: level,
+      // No score: the client does not grade. See `notComputedRiskReason`.
+      riskScore: 0,
+      riskLevel: "LOW",
       totalRequests: effectiveTotal,
       riskRequests,
       enforcements: effectiveEnforcements,
@@ -1806,34 +1750,13 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
       bandwidthDownload: bw?.download ?? null,
       bandwidthUpload: bw?.upload ?? null,
       bandwidthNeverMeasured: bw === null,
-      // Assembled client-side from a live ES query sample — label it as such
-      // so the report does not present it under the backend model's name.
-      riskScoreAvailable: true,
-      riskReason: {
-        rule,
-        level,
-        score,
-        floored: false,
-        inputs: {
-          totalRequests: effectiveTotal,
-          riskRequests,
-          blacklistedRequests: riskRequests,
-          blacklistedDistinct,
-          enforcements: effectiveEnforcements,
-          reachCount: riskRequests,
-          attemptCount: effectiveEnforcements,
-          newestReachAgeMinutes,
-        },
-        text:
-          `Client-side graded estimate from a live ES query sample: ${riskRequests} ` +
-          `reach(es) (ALLOW match) of ${effectiveTotal}, ${blacklistedDistinct} distinct ` +
-          `blacklisted destination(s) → ${level} ${score}/100. Not the backend model.`,
-      },
+      riskScoreAvailable: false,
+      riskReason: notComputedRiskReason(),
       sources: {
         risk: {
-          source: "client-side live ES query sample",
-          window: "selected window",
-          available: true,
+          source: null,
+          window: "—",
+          available: false,
           persisted_detail: "persisted findings (SQLite)",
           persisted_detail_window: "all time",
         },
@@ -1845,43 +1768,46 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
 /**
  * Fetch a single-host forensic profile.
  *
- * Prefers GET /api/hosts/:ip when the backend exposes it; falls back to
- * client-side aggregation from findings / query so the UI works before the
- * backend task lands. When no source records traffic for the host, the
- * fallback reports the model's 0 empty-window baseline, never a fabricated
- * figure.
+ * There is exactly ONE source of a risk SCORE: the backend host endpoint
+ * (`GET /api/hosts/:ip`), which owns the graded model and — since the
+ * single-sourcing change — grades the persisted findings table itself when the
+ * live Elasticsearch window yields nothing. This client no longer holds a copy
+ * of that model, so it cannot and must not produce a score for a host the
+ * endpoint did not answer for.
+ *
+ * Rung by rung:
+ *
+ *  1. Backend host endpoint — the ONLY rung that can return a profile with a
+ *     score. Whatever it says is returned verbatim, including its explicit
+ *     unavailable state (that state is the honest answer for a host neither
+ *     store could measure, and it must be rendered, never papered over).
+ *  2. Live ES query sample, then 3. persisted findings — used ONLY to render
+ *     identity, byte totals and the raw counts the card shows. Their risk
+ *     fields are the explicit unavailable state, because no score was computed
+ *     for them. Returning a client-graded number here is the exact drift this
+ *     change removes.
+ *  4. Nothing at all — throw `HOST_PROFILE_LOOKUP_FAILED`. A host with no
+ *     answer from any source is NOT a clean host, and the old client-side
+ *     `no_traffic` 0/100 made an unobserved host look like a scored one.
+ *
+ * Note rung 1 does not fall through on an unavailable answer: the endpoint
+ * says "no score", and rungs 2-3 could only answer with a number the client
+ * invented.
  */
 export async function getHostProfile(ip: string, timeRange: string): Promise<HostProfile> {
   const cleanIp = ip.trim()
   if (!cleanIp) throw new Error("IP required")
   const minutes = timeRangeToMinutesLive(timeRange)
 
-  // 1) Try dedicated host endpoint (backend GET /api/hosts/{ip}). 404/501 falls through.
+  // 1) Dedicated host endpoint (backend GET /api/hosts/{ip}). This is the one
+  //    rung that may return a score. 404/501/network error falls through.
   try {
     const data = await request<Record<string, unknown>>(
       `/hosts/${encodeURIComponent(cleanIp)}?timeRange=${encodeURIComponent(timeRange)}`,
     )
-    // Accept either { host, risk } or flat HostProfile shape.
-    //
-    // The endpoint's ES-unavailable state (es_online:false + riskReason
-    // {state:"unavailable"}) is now RETURNED, not fallen through: it is the
-    // honest answer, and the report must render it rather than a plausible
-    // LOW assembled from a fallback. Only the older "offline + zero traffic
-    // with no explicit reason" response still falls through, so legacy
-    // backends keep working.
+    // Accept either { host, risk } or the flat HostProfile shape.
     if (data && typeof data === "object") {
-      const reason = ((data as Record<string, unknown>)?.risk as Record<string, unknown> | undefined)
-        ?.riskReason as Record<string, unknown> | undefined
-      const explicitUnavailable = (data as Record<string, unknown>).es_online === false &&
-        reason?.state === "unavailable"
-      if ("risk" in data && "hostname" in data && explicitUnavailable) {
-        return data as unknown as HostProfile
-      }
-      const endpointOffline = (data as Record<string, unknown>).es_online === false
-      const zeroTraffic =
-        ((data as Record<string, unknown>)?.risk as Record<string, unknown> | undefined)
-          ?.totalRequests === 0
-      if ("risk" in data && "hostname" in data && !(endpointOffline && zeroTraffic)) {
+      if ("risk" in data && "hostname" in data) {
         return data as unknown as HostProfile
       }
       if ("host" in data) {
@@ -1898,10 +1824,11 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
       }
     }
   } catch {
-    /* not yet available — fall through to aggregation */
+    /* endpoint unavailable — the scale rungs below carry identity only */
   }
 
-  // 2) Try live ES query filtered to this IP — richer (action-aware) than findings.
+  // 2) Live ES query sample, filtered to this IP. CONTEXT-CARRYING ONLY: it
+  //    supplies identity, byte totals and the raw counts, never a score.
   //    The window follows the selector (1h/24h/7d/30d) via timeRangeToMinutesLive.
   try {
     const qRes = await runQuery(minutes, { q: cleanIp })
@@ -1912,61 +1839,16 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
     /* fall through */
   }
 
-  // 3) Findings aggregation (flagged hits only — interim until host endpoint)
+  // 3) Persisted findings, again CONTEXT-CARRYING ONLY. The backend grades
+  //    this same table itself now, so a score for it comes from rung 1 only.
   const findings = await getFindings({ search: cleanIp, limit: 200 })
   if (findings.items.length > 0) {
     return hostProfileFromFindings(cleanIp, findings.items, findings.total)
   }
 
-  // Generic empty host
-  return {
-    hostname: `Host-${cleanIp.split(".").pop() ?? cleanIp.slice(-4)}`,
-    primaryIp: cleanIp,
-    ip: cleanIp,
-    risk: {
-      riskScore: NO_TRAFFIC_SCORE,
-      riskLevel: "LOW",
-      totalRequests: 0,
-      riskRequests: 0,
-      enforcements: 0,
-      enforcementsPct: 0,
-      // No persisted bytes for this host — explicit unavailable, no number.
-      bandwidthDownload: null,
-      bandwidthUpload: null,
-      bandwidthNeverMeasured: true,
-      // No source returned anything for this host. The baseline is 0/100 —
-      // zero evidence, NOT a measurement and NOT a clean bill of health.
-      riskScoreAvailable: true,
-      riskReason: {
-        rule: "no_traffic",
-        level: "LOW",
-        score: NO_TRAFFIC_SCORE,
-        floored: false,
-        inputs: {
-          totalRequests: 0,
-          riskRequests: 0,
-          blacklistedRequests: 0,
-          blacklistedDistinct: 0,
-          enforcements: 0,
-          reachCount: 0,
-          attemptCount: 0,
-          newestReachAgeMinutes: null,
-        },
-        text:
-          "No traffic recorded for this host by any source — score is the " +
-          "model's 0 empty-window baseline, not a measurement.",
-      },
-      sources: {
-        risk: {
-          source: null,
-          window: "—",
-          available: false,
-          persisted_detail: "persisted findings (SQLite)",
-          persisted_detail_window: "all time",
-        },
-      },
-    },
-  }
+  // 4) No source has anything for this host, and no score may be invented for
+  //    it. Surface the failure; the caller renders its own unavailable state.
+  throw new Error(HOST_PROFILE_LOOKUP_FAILED)
 }
 
 /* ── Analytics & Reports (Task 10 — spec §3.4) ─────────────────────── */

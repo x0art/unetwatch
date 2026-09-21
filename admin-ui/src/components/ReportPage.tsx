@@ -559,11 +559,23 @@ export function ReportPage({ kind, value, onBack }: Props) {
           <li>Decide whitelist/blacklist/jaillist disposition</li>
           <li>Attach screenshots to ticket</li>
         </ul>
-        {kind === "host" && profile.data && (
-          <div className="mt-3">
-            <Badge variant={profile.data.risk.riskLevel === "HIGH" ? "destructive" : profile.data.risk.riskLevel === "MEDIUM" ? "warning" : "success"}>{profile.data.risk.riskLevel} {profile.data.risk.riskScore}/100</Badge>
-          </div>
-        )}
+        {kind === "host" && profile.data && (() => {
+          // Same discriminant narrowing as RiskSummaryBody/HostEntityCard: an
+          // unmeasured risk must not print a level+score badge on this
+          // screenshot-safe, ticket-attachable panel (a fabricated `LOW 0/100`).
+          const reason = profile.data.risk.riskReason
+          const unavailable =
+            reason && "state" in reason && reason.state === "unavailable" ? reason : null
+          return (
+            <div className="mt-3">
+              {unavailable ? (
+                <Badge variant="secondary">Risk not computed — score unavailable</Badge>
+              ) : (
+                <Badge variant={profile.data.risk.riskLevel === "HIGH" ? "destructive" : profile.data.risk.riskLevel === "MEDIUM" ? "warning" : "success"}>{profile.data.risk.riskLevel} {profile.data.risk.riskScore}/100</Badge>
+              )}
+            </div>
+          )
+        })()}
       </Panel>
 
       <p className="font-mono text-xs text-muted-foreground">

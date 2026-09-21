@@ -10,6 +10,8 @@ Elasticsearch failures degrade honestly: the endpoint never 500s, it returns
 ``es_online: false`` and a zeroed profile so the page still renders.
 """
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Query
 
 from app.config import get_settings
@@ -284,6 +286,29 @@ def _unavailable_risk_reason() -> dict:
     }
 
 
+def _both_stores_unavailable_reason() -> dict:
+    """The both-stores-empty state — deliberately carries NO score.
+
+    The live ES window yielded nothing usable (ES unreachable, the field
+    inventory unresolved, or no block patterns configured) AND the persisted
+    findings table holds no row for this host in the window either. There is
+    nothing to grade, so the honest answer is an explicit unavailable state,
+    never the empty-window 0 baseline (a host we never observed must not read
+    the same as a host we observed to be clean).
+    """
+    return {
+        "state": "unavailable",
+        "reason": "no_live_window_and_no_persisted_findings",
+        "text": (
+            "No risk figure could be computed — Elasticsearch is unavailable "
+            "or unresolved (no block patterns configured) AND the persisted "
+            "findings table holds no row for this host in the window. Neither "
+            "store produced a measurement. Do not read the counts below as "
+            "zero activity."
+        ),
+    }
+
+
 async def _host_byte_totals(ip: str, minutes: int) -> tuple[int | None, int | None]:
     """SUM the persisted byte counters for one host over the window.
 
@@ -319,6 +344,155 @@ async def _host_byte_totals(ip: str, minutes: int) -> tuple[int | None, int | No
     if not row or not row[2]:
         return None, None
     return int(row[0] or 0), int(row[1] or 0)
+
+
+# ── Persisted-findings fallback (2026-09-21) ───────────────────────────────
+#
+# The live ES path above is the PREFERRED source, but it is not always there:
+# ES is unreachable, the field inventory is UNKNOWN, or the operator has not
+# configured a block pattern yet. When that happens the route below used to
+# hand the client an "unavailable" state and nothing else — and the client
+# then computed its OWN risk score from a findings query, using a second copy
+# of this model's 14 constants and hardcoding the breadth and enforcement
+# terms to 0. Two implementations of one graded model silently disagreed.
+#
+# The fallback closes that seam by grading the PERSISTED findings table here,
+# in the owner of the model. The shape of the query follows
+# ``app/routes/analytics.py`` / ``app/routes/client_report.py``: a
+# ``WHERE client_ip = ?`` scope plus the shared window clause, and the
+# ADR 0001 row semantics expressed by ``_row_is_risk`` / ``_row_is_enforced``.
+# The helpers are imported, never re-implemented, so there is exactly one
+# statement of what "a risk" and "an enforcement" mean.
+#
+# What this path does NOT carry, and refuses to invent:
+#  - It does not use ``duration_seconds`` (or any other column) as a volume
+#    proxy: the live path's ``total`` is an ES hit count, and nothing in the
+#    persisted table measures that. ``total`` is therefore the persisted row
+#    count, and ``riskRequests`` is the subset of it that passed
+#    ``_row_is_risk`` — so the reason states ``total``/``reaches`` in the same
+#    "all persisted block-pattern evidence" sense the live path means.
+#  - It does not read byte counters for the risk inputs (``bytes_*`` collapse
+#    the ``-`` NOT-RECORDED sentinel to 0 and are structurally 0 on DENY rows);
+#    the byte totals the route reports still come from ``_host_byte_totals``.
+#  - It does not claim the live ES window. ``sources.risk.source`` names this
+#    store so the report can never present a persisted score as a live one.
+
+# The findings table is created by ``database.py.init_db`` without the rich
+# proxy columns and gets them via ALTER; a query must probe for the ones it
+# reads. '' means the column is absent — never a value.
+_FINDINGS_SQL_COLUMNS = ("action", "base_url", "log_timestamp")
+
+
+async def _fetch_findings_rows(db, ip: str, minutes: int) -> list[dict]:
+    """Every persisted findings row for one host, scoped to the window.
+
+    ``SELECT *`` (like the analytics/client-report paths) so a database that
+    predates a column still yields a row dict for the row-semantics helpers.
+    The window clause is evaluated by SQLite (UTC), never by the Python clock.
+    """
+    clause = "WHERE client_ip = ?"
+    params: list = [ip]
+    if minutes > 0:
+        clause += " AND log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+        params.append(f"-{minutes} minutes")
+    cursor = await db.execute(f"SELECT * FROM findings {clause}", params)
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
+    """Grade the PERSISTED findings table for one host — the fallback source.
+
+    Returns the same graded-input shape ``_aggregate_host`` returns, with
+    ``es_online: False`` and a ``persisted`` marker, or ``None`` when the host
+    has no persisted row in the window (nothing to grade — an explicit
+    unavailable, never a fabricated 0).
+
+    Every input is a persisted field: ``action`` (via ADR 0001 row semantics)
+    decides reach vs attempt, ``base_url`` membership in ``blacklist_entries``
+    decides breadth, and ``log_timestamp`` decides recency. No proxy formula,
+    no defaulted count.
+    """
+    from app.database import get_db
+    from app.routes.analytics import (
+        _column_names,
+        _has_column,
+        _parse_matched_patterns,
+        _row_is_enforced,
+        _row_is_risk,
+    )
+
+    db = await get_db()
+    try:
+        rows = await _fetch_findings_rows(db, ip, minutes)
+        if not rows:
+            return None
+        columns = await _column_names(db)
+        kind_cursor = await db.execute("SELECT kind, value FROM blacklist_entries")
+        blacklist_rows = await kind_cursor.fetchall()
+    finally:
+        await db.close()
+    has_action = _has_column(columns, "action")
+    blacklist_domains = {r["value"] for r in blacklist_rows if r["value"]}
+
+    reach_rows = [r for r in rows if _row_is_risk(r, has_action)]
+    attempt_rows = [r for r in rows if _row_is_enforced(r, has_action)]
+
+    # Breadth: DISTINCT blacklisted destinations actually REACHED, by the
+    # persisted ``base_url`` — real membership from the operator's blacklist,
+    # not the hardcoded 0 the deleted client mirror used on this path.
+    blacklisted_reaches = [
+        r for r in reach_rows if (r.get("base_url") or "") in blacklist_domains
+    ]
+    blacklisted_distinct = len(
+        {r.get("base_url") for r in blacklisted_reaches if r.get("base_url")}
+    )
+
+    # Recency: age (minutes) of the newest persisted REACH. LEGACY rows were
+    # stored before ``action`` existed at all — an empty action plus a non-empty
+    # ``matched_patterns`` is an ALLOW risk (ADR 0001), so those count. A row
+    # with an explicit ``action`` and no ``matched_patterns`` is a DENY-only
+    # persistence state: whether it was an ALLOW match is NOT RECORDED, and an
+    # unrecorded timestamp must never be promoted into a recency that would
+    # ADD points to the score. It is excluded from the recency input only.
+    newest_reach_age_minutes: int | None = None
+    reach_timestamps = [
+        r.get("log_timestamp") or ""
+        for r in reach_rows
+        if (r.get("action") or "").strip() == ""
+        or _parse_matched_patterns(r.get("matched_patterns"))
+    ]
+    valid_timestamps = []
+    for ts in reach_timestamps:
+        try:
+            parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        valid_timestamps.append(parsed)
+    if valid_timestamps:
+        newest = max(valid_timestamps)
+        age = (datetime.now(UTC) - newest).total_seconds() / 60.0
+        newest_reach_age_minutes = int(max(0, age))
+
+    return {
+        # The count of RECORDED FINDINGS for this host in the window — a
+        # deduplicated, filtered population. This is NOT the live path's
+        # ``total`` (block-pattern hits in the ES window, whitelist-filtered
+        # only): findings are deduped by (client_ip, url, log_timestamp) and,
+        # in whitelist-excluding modes, a further-filtered subset, recorded
+        # over time by the poll rather than measured once over the window.
+        # Both are real persisted/measured counts; they are different
+        # quantities, and the model's emptiness gate only needs ``> 0``.
+        "totalRequests": len(rows),
+        "riskRequests": len(reach_rows),
+        "enforcements": len(attempt_rows),
+        "blacklistedRequests": len(blacklisted_reaches),
+        "blacklistedDistinct": blacklisted_distinct,
+        "newestReachAgeMinutes": newest_reach_age_minutes,
+        "es_online": False,
+        "persisted": True,
+    }
 
 
 async def _aggregate_host(ip: str, minutes: int) -> dict | None:
@@ -452,6 +626,13 @@ async def host_profile(
     store each figure came from, and over what window). The score itself is now
     GRADED (see ``_risk_from_shares``) rather than a flat blacklist floor.
     Existing keys are unchanged.
+
+    Single-sourced fallback (2026-09-21): when the live ES window yields
+    nothing, the route grades the PERSISTED findings table instead of handing
+    the client an unavailable state to fill in itself. ``sources.risk.source``
+    names whichever store answered; ``es_online`` stays false on the fallback
+    (it reports ES liveness, not score availability). Only when BOTH stores are
+    empty is the explicit unavailable state returned.
     """
     settings = get_settings()
 
@@ -463,9 +644,22 @@ async def host_profile(
             "30d": 43200, "90d": 129600, "1y": 525600,
         }.get(timeRange, 1440)
 
-    agg = await _aggregate_host(ip, minutes)
-    es_online = bool(agg and agg["es_online"])
+    live_agg = await _aggregate_host(ip, minutes)
+
+    # Fallback: grade the persisted findings table when the live path yielded
+    # nothing. The model is unchanged — only WHERE its inputs come from — so a
+    # host whose ES window is unavailable still gets the SAME graded answer the
+    # live path would have produced from the same evidence. `_risk_from_shares`
+    # is called in both branches and nowhere else.
+    agg = live_agg
+    if agg is None:
+        agg = await _aggregate_host_from_findings(ip, minutes)
+
     risk_available = agg is not None
+    from_persisted = bool(agg and agg.get("persisted"))
+    # ES liveness is reported independently of score availability: the fallback
+    # answered, but Elasticsearch itself is still down.
+    es_online = bool(live_agg and live_agg["es_online"])
     total = (agg or {}).get("totalRequests", 0)
     risk_requests = (agg or {}).get("riskRequests", 0)
     blacklisted_requests = (agg or {}).get("blacklistedRequests", 0)
@@ -491,24 +685,33 @@ async def host_profile(
         )
         risk_reason = risk["riskReason"]
     else:
-        # ES unreachable / field mode UNKNOWN: the score itself is unknown.
-        # Keep riskScore/riskLevel for backwards-compatibility (they default to
-        # the old values) but mark the reason unavailable so the UI renders the
+        # Both stores came back empty: the score itself is unknown. Keep
+        # riskScore/riskLevel for backwards-compatibility (they default to the
+        # old values) but mark the reason unavailable so the UI renders the
         # unavailable state instead of a plausible LOW.
         risk = _risk_from_shares(0, 0, 0)
-        risk_reason = _unavailable_risk_reason()
+        risk_reason = _both_stores_unavailable_reason()
 
     window = _window_label(_normalize_minutes(minutes))
+    if from_persisted:
+        risk_source = PERSISTED_SOURCE
+    elif risk_available:
+        risk_source = LIVE_WINDOW_SOURCE
+    else:
+        risk_source = None
     sources = {
         # Which store produced the risk numbers on screen, and over what window.
-        # Section 02 of the report must state both — the score is LIVE and the
-        # detail tables are PERSISTED, and the two can disagree.
+        # Section 02 of the report must state both — the two stores hold
+        # different evidence and can disagree, so the score must never be
+        # presented under the other store's name.
         "risk": {
-            "source": LIVE_WINDOW_SOURCE if risk_available else None,
+            "source": risk_source,
             "window": window,
             "available": risk_available,
             "persisted_detail": PERSISTED_SOURCE,
-            "persisted_detail_window": "all time",
+            "persisted_detail_window": _window_label(_normalize_minutes(minutes))
+            if from_persisted
+            else "all time",
         },
     }
 

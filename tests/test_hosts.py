@@ -1,5 +1,9 @@
 """Host Inspector backend — GET /api/hosts/{ip} shape + ADR 0001 risk framing."""
 
+# ``_risk_from_shares``'s ATTEMPT weight, imported rather than restated so the
+# fallback test states the model's own number (no second copy in the tests).
+from app.routes.hosts import ATTEMPT_WEIGHT  # noqa: E402
+
 
 async def test_host_profile_offline_returns_zeroed_shape(client):
     """When ES is unreachable the endpoint degrades to a zeroed profile, never 500s."""
@@ -283,7 +287,13 @@ async def test_host_profile_es_unavailable_is_not_a_bare_low_score(client):
 
     The risk reason must be its own distinct unavailable state carrying no
     score, and the provenance must mark the source unavailable — so an
-    un-observed host cannot be confused with a clean one."""
+    un-observed host cannot be confused with a clean one.
+
+    Scope note (2026-09-21): the route now falls back to the persisted
+    findings table before it declares unavailability. This test's host has
+    nothing persisted either, so it exercises the BOTH-STORES-EMPTY state —
+    which is still the explicit no-score state this test is about. The
+    live-path-unavailable-but-persisted case is covered separately below."""
     res = client.get("/api/hosts/10.0.0.7?timeRange=24h")
     assert res.status_code == 200
     data = res.json()
@@ -293,10 +303,10 @@ async def test_host_profile_es_unavailable_is_not_a_bare_low_score(client):
     assert risk["riskScoreAvailable"] is False
     reason = risk["riskReason"]
     assert reason["state"] == "unavailable"
-    assert "score" not in reason, "an unavailable reason must carry no score"
-    assert "Elasticsearch unavailable" in reason["text"]
+    # The reason is the BOTH-STORES-EMPTY state, and it says so.
+    assert reason["reason"] == "no_live_window_and_no_persisted_findings"
+    assert "Elasticsearch" in reason["text"]
     # Provenance says the score is unavailable and still labels the detail
-    # source + window, so the two figures are never conflated.
     assert risk["sources"]["risk"]["available"] is False
     assert risk["sources"]["risk"]["source"] is None
     assert risk["sources"]["risk"]["window"] == "1d"
@@ -344,3 +354,297 @@ async def test_host_profile_carries_explained_reason_when_es_online(
     assert risk["sources"]["risk"]["available"] is True
     assert "Elasticsearch" in risk["sources"]["risk"]["source"]
     assert risk["sources"]["risk"]["window"] == "1d"
+
+
+# ── Persisted-findings fallback (2026-09-21) ────────────────────────────────
+# The route used to answer from live ES ONLY: with ES unreachable it returned
+# the explicit unavailable state, and the CLIENT then graded the findings table
+# itself using a second copy of this model's 14 constants — with the breadth
+# and enforcement inputs hardcoded to 0. The route now grades the persisted
+# table from the one owner of the model, and these tests pin that: the
+# fallback must reproduce the SAME graded inputs (reach count, DISTINCT
+# blacklisted destinations, enforcements, newest-reach recency) and must name
+# the store that answered.
+
+
+def _insert_finding(
+    db_path: str,
+    client_ip: str,
+    base_url: str,
+    action: str,
+    *,
+    log_timestamp: str = "",
+    matched_patterns: str = '["blocked"]',
+    path: str = "/x",
+) -> None:
+    """Persist one findings row the way the poll does (action + intent set)."""
+    import sqlite3
+
+    ts = log_timestamp or "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
+    intent = "REACH" if action == "ALLOW" else "ATTEMPT" if action == "DENY" else ""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO findings (client_ip, server_ip, url, base_url, "
+            "log_timestamp, matched_patterns, action, intent) VALUES "
+            f"(?, '10.0.0.1', ?, ?, {ts}, ?, ?, ?)",
+            (
+                client_ip,
+                f"https://{base_url}{path}",
+                base_url,
+                matched_patterns,
+                action,
+                intent,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def test_host_profile_falls_back_to_persisted_findings_when_es_offline(
+    client, db_path
+):
+    """ES unreachable + persisted rows → the BACKEND grades them, single-sourced.
+
+    The unavailable state with which this file opens must therefore not be
+    reachable while persisted evidence exists.
+    """
+    # ES is unreachable in the test environment: _aggregate_host returns None.
+    _insert_finding(db_path, "10.5.5.5", "blocked.example", "ALLOW")
+
+    res = client.get("/api/hosts/10.5.5.5?timeRange=24h")
+    assert res.status_code == 200
+    data = res.json()
+    risk = data["risk"]
+
+    # A score WAS computed, by the backend, and the reason explains it.
+    assert risk["riskScoreAvailable"] is True
+    assert risk["riskReason"].get("state") != "unavailable"
+    assert risk["riskReason"]["rule"] == "graded_reach"
+    # 1 reach, no blacklist membership, no recency penalty for a just-now row.
+    assert risk["riskScore"] == 33  # REACH_BASE 20 + 3*1 + RECENCY_BONUS 10
+    assert risk["riskRequests"] == 1
+    assert risk["totalRequests"] == 1
+    # Provenance names the PERSISTED store and its window, not the live one.
+    assert risk["sources"]["risk"]["available"] is True
+    assert "persisted findings" in risk["sources"]["risk"]["source"]
+    assert "Elasticsearch" not in risk["sources"]["risk"]["source"]
+    assert risk["sources"]["risk"]["window"] == "1d"
+    # es_online reports ES liveness (still false) — independent of the score.
+    assert data["es_online"] is False
+
+
+async def test_host_profile_fallback_counts_real_distinct_blacklisted_dests(
+    client, db_path
+):
+    """Breadth comes from real blacklist_entries membership, never a hardcoded 0.
+
+    The deleted client mirror passed ``blacklistedDistinct: 0`` and forfeited
+    the whole breadth term (up to 35 points). Three DISTINCT blacklisted
+    destinations must score strictly above one.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO blacklist_entries (kind, value) VALUES ('url', 'bad-a.example')"
+        )
+        conn.execute(
+            "INSERT INTO blacklist_entries (kind, value) VALUES ('url', 'bad-b.example')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    for dest in ("bad-a.example", "bad-b.example"):
+        _insert_finding(db_path, "10.6.6.6", dest, "ALLOW")
+
+    res = client.get("/api/hosts/10.6.6.6?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+    assert risk["blacklistedRequests"] == 2
+    assert risk["blacklistedDistinct"] == 2
+    assert risk["riskReason"]["inputs"]["blacklistedDistinct"] == 2
+    # 2 reaches: 20 + 3*2 + breadth 7*2 + recency 10 = 50.
+    assert risk["riskScore"] == 50
+
+
+async def test_host_profile_fallback_counts_real_enforcements_not_zero(client, db_path):
+    """DENY rows are ATTEMPT evidence, counted — the mirror hardcoded 0."""
+
+    # DISTINCT urls: the findings table is deduped by
+    # (client_ip, url, log_timestamp), so identical repeats would collapse
+    # into one row and the count would be a fiction of the INSERT.
+    _insert_finding(db_path, "10.7.7.7", "blocked.example", "DENY", path="/a")
+    _insert_finding(db_path, "10.7.7.7", "blocked.example", "DENY", path="/b")
+    _insert_finding(db_path, "10.7.7.7", "blocked.example", "ALLOW", path="/c")
+
+    res = client.get("/api/hosts/10.7.7.7?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+    assert risk["enforcements"] == 2
+    assert risk["riskRequests"] == 1
+    assert risk["totalRequests"] == 3
+    assert risk["riskReason"]["rule"] == "graded_reach"
+    assert risk["riskReason"]["inputs"]["attemptCount"] == 2
+    # 1 reach: 20 + 3 + recency 10 + min(20, 2*2) = 37.
+    assert risk["riskScore"] == 37
+
+
+async def test_host_profile_fallback_attempt_only_is_capped_low(client, db_path):
+    """A DENY-only host is graded by the ATTEMPT branch — still below any reach."""
+    _insert_finding(db_path, "10.8.8.8", "blocked.example", "DENY")
+
+    res = client.get("/api/hosts/10.8.8.8?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+    assert risk["riskReason"]["rule"] == "graded_attempt_only"
+    assert risk["riskScore"] == ATTEMPT_WEIGHT
+    assert risk["riskLevel"] == "LOW"
+
+
+async def test_host_profile_fallback_respects_the_window(client, db_path):
+    """A row outside the window is not graded — the window clause is real."""
+    _insert_finding(
+        db_path,
+        "10.9.9.8",
+        "blocked.example",
+        "ALLOW",
+        log_timestamp="strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')",
+    )
+
+    inside = client.get("/api/hosts/10.9.9.8?timeRange=30d").json()["risk"]
+    assert inside["riskScoreAvailable"] is True
+    assert inside["riskRequests"] == 1
+
+    outside = client.get("/api/hosts/10.9.9.8?timeRange=1h").json()["risk"]
+    assert outside["riskScoreAvailable"] is False
+    assert outside["riskReason"]["state"] == "unavailable"
+
+
+async def test_host_profile_fallback_grades_real_persisted_evidence(client, db_path):
+    """End-to-end trace of the ES-unreachable branch, in one host.
+
+    ES is unreachable (the test env has no Elasticsearch), and the findings
+    table holds six rows: 3 ALLOW reaches (2 of them to DISTINCT blacklisted
+    destinations) and 3 DENYs to a blacklisted destination.
+
+    The route must answer from the PERSISTED store, with every graded input
+    real:
+        3 reaches   -> REACH_BASE 20 + REACH_PER_HIT_WEIGHT 3*3   = 29
+        2 distinct  -> DISTINCT_DEST_WEIGHT 7*2                   = 14
+        fresh reach -> RECENCY_BONUS                              = 10
+        3 attempts  -> ATTEMPT_WEIGHT 2*3                         =  6
+                                                  total = 59, MEDIUM
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        for value in ("bad-a.example", "bad-b.example"):
+            conn.execute(
+                "INSERT INTO blacklist_entries (kind, value) VALUES ('url', ?)",
+                (value,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _insert_finding(db_path, "10.4.4.4", "bad-a.example", "ALLOW", path="/p1")
+    _insert_finding(db_path, "10.4.4.4", "bad-b.example", "ALLOW", path="/p2")
+    _insert_finding(db_path, "10.4.4.4", "ok.example", "ALLOW", path="/p3")
+    _insert_finding(db_path, "10.4.4.4", "bad-a.example", "DENY", path="/d1")
+    _insert_finding(db_path, "10.4.4.4", "bad-a.example", "DENY", path="/d2")
+    _insert_finding(db_path, "10.4.4.4", "bad-a.example", "DENY", path="/d3")
+
+    res = client.get("/api/hosts/10.4.4.4?timeRange=24h")
+    assert res.status_code == 200
+    data = res.json()
+    risk = data["risk"]
+
+    assert risk["riskScore"] == 59
+    assert risk["riskLevel"] == "MEDIUM"
+    assert risk["totalRequests"] == 6
+    assert risk["riskRequests"] == 3
+    assert risk["enforcements"] == 3
+    assert risk["blacklistedRequests"] == 2
+    assert risk["blacklistedDistinct"] == 2
+    assert risk["riskReason"]["rule"] == "graded_reach"
+    assert risk["riskReason"]["inputs"]["newestReachAgeMinutes"] == 0
+    # Provenance: the persisted store answered over the requested window, and
+    # ES itself is still reported offline.
+    assert risk["sources"]["risk"]["source"] == "persisted findings (SQLite)"
+    assert risk["sources"]["risk"]["window"] == "1d"
+    assert risk["sources"]["risk"]["available"] is True
+    assert data["es_online"] is False
+
+
+async def test_host_profile_fallback_grades_a_dedup_collapsed_population(
+    client, db_path
+):
+    """The persisted row count is a DIFFERENT population from a live hit count.
+
+    ``totalRequests`` on the fallback is the count of RECORDED FINDINGS —
+    deduplicated by (client_ip, url, log_timestamp) and filtered — not the
+    live path's block-pattern hit count over the ES window. The two are not
+    the same quantity, so this test pins both halves of the consequence:
+
+      (a) a composition that a live count would have reported differently
+          still GRADES — it is not collapsed into the ``no_traffic``
+          empty-window baseline, whose gate is ``total <= 0``; and
+      (b) the score is traceable to the fallback's own inputs, which the
+          riskReason echoes.
+
+    ``_insert_finding`` writes three rows that INTENTIONALLY share nothing but
+    their client IP, so the dedup key cannot collapse them: one ALLOW reach to
+    a blacklisted destination, one ALLOW reach to a non-blacklisted one, and
+    one DENY. Duplicated identical rows would collapse under the UNIQUE
+    constraint, so the counts asserted below are the counts actually stored.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO blacklist_entries (kind, value) VALUES ('url', 'listed.example')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _insert_finding(db_path, "10.10.10.10", "listed.example", "ALLOW", path="/r1")
+    _insert_finding(db_path, "10.10.10.10", "unlisted.example", "ALLOW", path="/r2")
+    _insert_finding(db_path, "10.10.10.10", "listed.example", "DENY", path="/a1")
+
+    res = client.get("/api/hosts/10.10.10.10?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+
+    # (a) GRADED, not the empty-window baseline: the fallback population is
+    # non-empty, so the model's `total <= 0` gate cannot fire.
+    assert risk["riskReason"]["rule"] == "graded_reach"
+    assert risk["riskReason"].get("state") != "unavailable"
+    assert risk["riskScoreAvailable"] is True
+
+    # (b) the graded inputs are the fallback's own counting, and the reason
+    # echoes the exact population they were taken over.
+    assert risk["totalRequests"] == 3
+    assert risk["riskRequests"] == 2
+    assert risk["enforcements"] == 1
+    assert risk["blacklistedRequests"] == 1
+    assert risk["blacklistedDistinct"] == 1
+    assert risk["riskReason"]["inputs"]["riskRequests"] == 2
+    assert risk["riskReason"]["inputs"]["totalRequests"] == 3
+
+    # 2 reaches -> REACH_BASE 20 + REACH_PER_HIT_WEIGHT 3*2            = 26
+    # 1 distinct -> DISTINCT_DEST_WEIGHT 7*1                          =  7
+    # fresh reach -> RECENCY_BONUS                                    = 10
+    # 1 attempt -> ATTEMPT_WEIGHT 2*1                                 =  2
+    #                                                       total = 45, MEDIUM
+    assert risk["riskScore"] == 45
+    assert risk["riskLevel"] == "MEDIUM"
+    # The reason sentence states the population it graded over, so a reader can
+    # tell which count this is — "over 3 request(s)", the persisted rows.
+    assert "over 3 request(s)" in risk["riskReason"]["text"]
