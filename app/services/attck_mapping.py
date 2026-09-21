@@ -965,9 +965,11 @@ def _heuristic_t1053_005_host(sig: Signal) -> AttckTechnique | None:
     Two independent signals, either of which is sufficient:
 
     * ``interval_cv`` — the load-bearing one. It reads the raw arrival gaps,
-      so it separates a machine beat (≤ 0.35, measured 0.00 exact / 0.28 at
-      20 % jitter) from Poisson load (≈ 1.0). This is what lets a 1-minute
-      heartbeat be found at all.
+      so a machine beat scores far below the ``0.35`` gate while Poisson load
+      scores ≈ 1.0, nowhere near it. This is what lets a 1-minute heartbeat be
+      found at all. The measured figures — and the jitter convention they
+      depend on — live in ``_interval_cv``'s docstring, which owns them; they
+      are deliberately not restated here, where a stale copy could drift.
     * ``slot_concentration`` — a coarse corroborator for a lockstep that
       survives build_timeline's bucket width (≥ 0.5). It cannot see a fast
       cadence; see its docstring. Kept because a 1-hour lockstep that is
