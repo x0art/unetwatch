@@ -13,8 +13,21 @@ These tests pin three properties that make it trustworthy:
 """
 
 
+from datetime import UTC, datetime, timedelta
+
 from app.services import attck_fleet as fleet
 from app.services.attck_fleet import map_fleet
+
+
+def _minutes_ago(n: int) -> str:
+    """An ISO-8601 UTC timestamp ``n`` minutes before now (``...T10:00:00+00:00``).
+
+    Findings fixtures must sit *inside* the caller's ``map_fleet`` window, so a
+    literal calendar date rots the moment "now" moves past it. Anchor to now
+    instead; the ``+00:00`` offset form is what ``_seed``/SQLite compare against
+    ``datetime('now', ...)``.
+    """
+    return (datetime.now(UTC) - timedelta(minutes=n)).isoformat()
 
 
 async def _seed(db, rows):
@@ -95,6 +108,11 @@ async def test_map_fleet_aggregates_across_hosts(monkeypatch):
     db = await get_db()
     try:
         rows = []
+        # Two hosts, each with 25 ALLOW rows, zero enforcements, risk_share 1.0.
+        # T1078's predicate needs total_requests >= 20, risk_share >= 0.8, no
+        # enforcements and time_span_hours >= 1.0, so the 25 arrivals span 72
+        # minutes (i=0 is 48 min old, i=24 is 120 min old) — comfortably past
+        # the 1h gate and well inside the 24h window the call below uses.
         for host in ("10.0.0.1", "10.0.0.2"):
             for i in range(25):
                 rows.append(
@@ -104,7 +122,7 @@ async def test_map_fleet_aggregates_across_hosts(monkeypatch):
                         f"https://svc.example/{i}",
                         "ALLOW",
                         0,
-                        f"2026-09-18T{10 + (i // 15):02d}:{i % 60:02d}:00+00:00",
+                        _minutes_ago(48 + 3 * i),
                     )
                 )
         await _seed(db, rows)
@@ -137,7 +155,7 @@ async def test_map_fleet_does_not_call_elasticsearch(monkeypatch):
     db = await get_db()
     try:
         await _seed(db, [("10.0.0.9", "203.0.113.9", "https://x.example/", "ALLOW", 0,
-                          "2026-09-18T10:00:00+00:00")])
+                          _minutes_ago(10))])
     finally:
         await db.close()
 
@@ -155,7 +173,7 @@ async def test_map_fleet_respects_host_limit(monkeypatch):
     try:
         rows = [
             (f"10.0.1.{i}", "203.0.113.5", f"https://svc.example/{i}", "ALLOW", 0,
-             "2026-09-18T10:00:00+00:00")
+             _minutes_ago(10))
             for i in range(10)
         ]
         await _seed(db, rows)
