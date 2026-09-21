@@ -29,9 +29,12 @@ from fastapi.responses import PlainTextResponse
 
 from app.database import get_db_conn
 from app.services.result_processor import (
+    _domain_of_base,
     _parse_matched_patterns,
+    _persisted_bytes,
     _row_is_enforced,
     _row_is_risk,
+    _volume_for_bytes,
 )
 from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
@@ -67,47 +70,6 @@ def _primary_rule(matched_patterns: str | None) -> str:
     if isinstance(pats, list) and pats:
         return str(pats[0])
     return ""
-
-
-def _domain_of_base(base_url: str) -> str:
-    m = re.match(r"^(?:https?://)?([^/]+)", base_url or "")
-    host = m.group(1) if m else (base_url or "unknown")
-    host = re.sub(r":\d+$", "", host)
-    return host or "unknown"
-
-
-def _persisted_bytes(value) -> int | None:
-    """The persisted byte figure for one row, or ``None`` when not recorded.
-
-    ``None``/``""`` are NOT-RECORDED (absent); a stored ``0`` is a persisted
-    value and must never be replaced by an estimate.
-    """
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _volume_for_bytes(rows: list[dict]) -> int | None:
-    """SUM the persisted byte counters — never a proxy, or ``None``.
-
-    Returns ``None`` when no row carried a byte counter: an unknown volume is
-    reported as unavailable, never estimated from ``duration_seconds`` or a
-    request count (CONTEXT.md, *No synthesized measurements*). The caller
-    surfaces this in ``total_volume`` / ``bandwidthNeverMeasured``.
-    """
-    total = 0
-    seen = False
-    for r in rows:
-        dn = _persisted_bytes(r.get("bytes_downloaded"))
-        up = _persisted_bytes(r.get("bytes_uploaded"))
-        if dn is None and up is None:
-            continue
-        seen = True
-        total += (dn or 0) + (up or 0)
-    return total if seen else None
 
 
 def _fmt_peak(ts: str) -> str:

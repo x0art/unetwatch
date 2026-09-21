@@ -76,6 +76,69 @@ def _row_is_risk(row: dict, has_action: bool) -> bool:
 _row_is_blocked = _row_is_enforced
 
 
+# ── Destination host + persisted byte counters (canonical) ─────────────────
+#
+# Single home for the three helpers that `analytics.py` and `client_report.py`
+# each used to carry a copy of. They are domain concerns (what a `base_url`
+# denotes, what a persisted byte column means), not endpoint concerns.
+
+
+def _domain_of_base(base_url: str) -> str:
+    """Best-effort hostname: strip scheme, port and path; keep the authority.
+
+    The trailing ``:port`` is removed so ``a.example`` and ``a.example:443``
+    aggregate into the same bucket — and so a ported destination still matches
+    the blacklist, whose entries are bare hosts (``app/services/blacklist.py``).
+    The ``www.`` prefix is deliberately NOT stripped: it is part of the
+    authority, and dropping it would reshape displayed aggregates. An empty or
+    unparseable input collapses to ``"unknown"`` rather than an empty bucket.
+    """
+    m = re.match(r"^(?:https?://)?([^/]+)", base_url or "")
+    host = m.group(1) if m else (base_url or "unknown")
+    host = re.sub(r":\d+$", "", host)
+    return host or "unknown"
+
+
+def _persisted_bytes(value) -> int | None:
+    """The persisted byte figure for one row, or ``None`` when not recorded.
+
+    ``None`` and ``""`` are NOT-RECORDED (absent), and are deliberately
+    distinct from a stored ``0``: the flat ``bytes_downloaded`` column
+    collapses the raw line's ``-`` sentinel to ``0``, so a ``0`` must never be
+    *shown* as a confident measured zero — but it is still a persisted value
+    and must not be replaced by an estimate.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _volume_for_bytes(rows: list[dict]) -> int | None:
+    """SUM the persisted byte counters — never a proxy, or ``None``.
+
+    Returns the summed ``bytes_downloaded`` + ``bytes_uploaded`` when at least
+    one row carried a byte counter, and ``None`` when no row did. There is no
+    duration or per-request fallback: a fabricated total that happened to
+    preserve the ranking order would still be a fabricated absolute figure, so
+    an unknown volume is reported as unavailable rather than estimated
+    (CONTEXT.md, *No synthesized measurements*). Callers surface ``None`` as
+    an explicit unavailable marker.
+    """
+    total = 0
+    seen = False
+    for r in rows:
+        dn = _persisted_bytes(r.get("bytes_downloaded"))
+        up = _persisted_bytes(r.get("bytes_uploaded"))
+        if dn is None and up is None:
+            continue
+        seen = True
+        total += (dn or 0) + (up or 0)
+    return total if seen else None
+
+
 def normalize_timestamp(ts, fallback: str) -> str:
     """Return a usable ISO-8601 timestamp for a finding.
 

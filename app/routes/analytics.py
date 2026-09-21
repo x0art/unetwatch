@@ -11,13 +11,19 @@ ES window roll-over; live ES is still preferred when available.
 Every endpoint accepts the same three query params the Analytics page passes
 (``range``, ``compare``, ``hostGroup``) and degrades honestly:
 
-- ``summary`` prefers live ES (real risk/enforcement split); falls back to the
-  findings table, where risk and enforcements are both counted from the
-  persisted ``action`` column (enforcements = DENY/FLAG rows).
-- ``enforcements`` and ``top-enforced`` prefer live ES but fall back to the
-  findings table, which now holds DENY rows too — both sources can report real
-  enforcement counts; the fallback sets ``es_online: False`` but no longer
-  forces ``enforcements = 0``.
+- ``summary`` prefers live ES. Its risk figure comes from the pattern frame and
+  its enforcement figure from a second, action-filtered query (both described
+  under ``enforcements`` below), so the headline enforcement count is not read
+  off the pattern frame. It falls back to the findings table, where risk and
+  enforcements are counted from the persisted ``action`` column
+  (enforcements = DENY/FLAG rows).
+- ``enforcements`` prefers live ES but falls back to the findings table, which
+  holds DENY rows too. The live path runs TWO queries — a pattern query for the
+  ALLOW series and an action query (``actions=["DENY","FLAG"]``) for the DENY
+  series — because a proxy records a DENY against the destination it refused,
+  whose URL need not match a block pattern. The fallback runs only when the
+  helper returns ``None`` (ES offline, no patterns, or a failed search);
+  a reachable-but-empty window keeps ``source: "es"`` and is honestly empty.
 - Volume is the SUM of the persisted ``bytes_downloaded``/``bytes_uploaded``
   counters only. Where the feed carries no byte counter the volume is reported
   as **unavailable** (``totalVolume: null`` with ``bandwidthNeverMeasured:
@@ -61,19 +67,19 @@ The ``bucket`` field stays a ``YYYY-MM-DD`` string — only its value changes,
 and only when a non-UTC zone is configured.
 """
 
-import json
-import re
-
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException as FastAPIHTTPException
 
 from app.database import get_db_conn
 from app.services.result_processor import (
+    _domain_of_base,
     _parse_matched_patterns,
+    _persisted_bytes,
     _row_is_blocked,
     _row_is_enforced,
     _row_is_risk,
+    _volume_for_bytes,
 )
 from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
@@ -81,7 +87,9 @@ from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 # ``_row_is_enforced`` / ``_row_is_risk`` / ``_row_is_blocked``
 # (``_row_is_blocked`` is the back-compat alias for the enforcement test) are
 # imported above and re-exported so this module keeps answering those names for
-# any older caller — the rule itself is not restated here.
+# any older caller — the rule itself is not restated here. The same module owns
+# ``_domain_of_base`` / ``_persisted_bytes`` / ``_volume_for_bytes``, so those
+# have exactly one implementation shared with ``client_report.py``.
 __all__ = ["_row_is_blocked", "_row_is_enforced", "_row_is_risk"]
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -143,55 +151,6 @@ def _primary_rule(matched_patterns: str | None) -> str:
     if isinstance(pats, list) and pats:
         return str(pats[0])
     return ""
-
-
-def _domain_of_base(base_url: str) -> str:
-    """Best-effort hostname: strip scheme/port/path, keep the authority."""
-    m = re.match(r"^(?:https?://)?([^/]+)", base_url or "")
-    host = m.group(1) if m else (base_url or "unknown")
-    # Strip trailing port and leading www. so 'a.example' and 'a.example:443'
-    # aggregate into the same bucket.
-    return host or "unknown"
-
-
-def _persisted_bytes(value) -> int | None:
-    """The persisted byte figure for one row, or ``None`` when not recorded.
-
-    ``None`` and ``""`` are NOT-RECORDED (absent), and are deliberately
-    distinct from a stored ``0``: the flat ``bytes_downloaded`` column
-    collapses the raw line's ``-`` sentinel to ``0``, so a ``0`` must never be
-    *shown* as a confident measured zero — but it is still a persisted value
-    and must not be replaced by an estimate.
-    """
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _volume_for_bytes(rows: list[dict]) -> int | None:
-    """SUM the persisted byte counters — never a proxy, or ``None``.
-
-    Returns the summed ``bytes_downloaded`` + ``bytes_uploaded`` when at least
-    one row carried a byte counter, and ``None`` when no row did. There is no
-    duration or per-request fallback: a fabricated total that happened to
-    preserve the ranking order would still be a fabricated absolute figure, so
-    an unknown volume is reported as unavailable rather than estimated
-    (CONTEXT.md, *No synthesized measurements*). Callers surface ``None`` as
-    an explicit unavailable marker.
-    """
-    total = 0
-    seen = False
-    for r in rows:
-        dn = _persisted_bytes(r.get("bytes_downloaded"))
-        up = _persisted_bytes(r.get("bytes_uploaded"))
-        if dn is None and up is None:
-            continue
-        seen = True
-        total += (dn or 0) + (up or 0)
-    return total if seen else None
 
 
 def _fmt_peak(ts: str) -> str:

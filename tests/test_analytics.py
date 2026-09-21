@@ -203,6 +203,42 @@ async def test_summary_blacklisted_allow_is_additive_risk(client, db_path):
     assert data["source"] == "findings"
     assert data["totalRisk"] == 2  # both ALLOW rows remain risk
     assert data["totalBlacklistedRisk"] == 1  # only the blacklisted one
+
+
+async def test_summary_blacklisted_risk_matches_ported_base_url(client, db_path):
+    """A blacklisted destination whose ``base_url`` still carries a port counts.
+
+    ``blacklist_domains`` is a bare-host set (``app/services/blacklist.py``
+    strips the port), so ``_domain_of_base`` MUST strip it too or the two never
+    meet. Pre-fix ``analytics.py``'s copy skipped the strip, so this row's
+    ``base_url`` of ``evil.example:8443`` never matched ``evil.example`` and
+    the card under-reported. Now it matches.
+    """
+    db = await aiosqlite.connect(db_path)
+    await db.execute(
+        "INSERT OR IGNORE INTO blacklist_entries (kind, value)"
+        " VALUES ('url', 'evil.example')"
+    )
+    await db.commit()
+    await db.close()
+
+    await _seed(
+        client,
+        db_path,
+        [
+            (
+                "1.1.1.1", "", "http://evil.example:8443/a", "evil.example:8443",
+                _now(), json.dumps(["*evil*"]), "ALLOW",
+            ),
+        ],
+        add_action_col=True,
+    )
+
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["totalRisk"] == 1
+    assert data["totalBlacklistedRisk"] == 1  # was 0 before the port strip
+
+
 async def test_summary_blacklist_deny_not_risk(client, db_path):
     """A blacklisted destination that was DENYed is an enforcement, not risk —
     totalBlacklistedRisk stays 0 (the proxy already stopped it)."""
@@ -625,6 +661,34 @@ async def test_client_report_volume_unavailable_when_no_bytes_persisted(client, 
     csv_res = client.get("/api/client-report/1.1.1.1/export.csv")
     assert csv_res.status_code == 200
     assert "not recorded" in csv_res.text
+
+
+# ── Destination-host normalisation (the port-strip defect) ────────────────
+#
+# ``_domain_of_base`` is the single copy now shared by ``analytics.py`` and
+# ``client_report.py``. ``analytics.py``'s copy used to skip the trailing-port
+# strip, so a ``base_url`` that still carried a port (``a.example:8080``) did
+# not match ``blacklist_domains`` — a bare-host set (``app/services/blacklist.py``)
+# — which under-counted ``totalBlacklistedRisk`` and split one destination into
+# two domain buckets. This pins the stripping, the IPv6 authority form, and that
+# ``www.`` is deliberately KEPT (never stripped, despite the old comment).
+
+
+def test_domain_of_base_strips_port_keeps_www():
+    """Port stripped (IPv4, DNS and IPv6-authority forms); ``www.`` retained."""
+    from app.services.result_processor import _domain_of_base
+
+    # Port removed; scheme and path removed; ``www.`` kept verbatim.
+    assert _domain_of_base("https://www.Example.com:443/path") == "www.Example.com"
+    assert _domain_of_base("http://a.example:8080") == "a.example"
+    # IPv6 authority: the ``[..]`` brackets survive; only the ``:port`` goes.
+    assert _domain_of_base("https://[2001:db8::1]:8443/x") == "[2001:db8::1]"
+    # No scheme / no port passes through untouched.
+    assert _domain_of_base("a.example") == "a.example"
+    # Absent or unparseable input collapses to the explicit sentinel.
+    assert _domain_of_base("") == "unknown"
+    assert _domain_of_base(None) == "unknown"
+
 
 
 # ── Enforcement counts on the LIVE path (the patternless-DENY defect) ──────
