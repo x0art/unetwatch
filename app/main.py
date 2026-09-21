@@ -30,6 +30,7 @@ from app.routes import (
     query,
     redirects,
     timezone,
+    triage,
 )
 from app.services.feeds import sync_regenerate, sync_regenerate_jail
 
@@ -243,6 +244,9 @@ app.include_router(logs.router, dependencies=[Depends(verify_admin)])
 # read: it exposes the operator's configured zone (mild config disclosure) and
 # the SPA already authenticates every API call, so exemption would save nothing.
 app.include_router(timezone.router, dependencies=[Depends(verify_admin)])
+# Verdict ledger: admin-gated like every other admin-UI write. The two
+# routes inside also carry their own per-route verify_admin dependency.
+app.include_router(triage.router, dependencies=[Depends(verify_admin)])
 app.include_router(auth_routes.router)
 
 from app.routes import readout as readout_routes

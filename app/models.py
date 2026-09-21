@@ -117,6 +117,30 @@ class JaillistEntryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TriageVerdictCreate(BaseModel):
+    """A human decision on a flagged subject (the verdict ledger).
+
+    ``verdict`` and ``subject_kind`` are validated against their allowed
+    values here AND in the service AND by the DB CHECK — defense in depth.
+    ``rule_ids`` records which rules the operator saw fire; ``category`` and
+    ``note`` are operator free text and never an enum.
+    """
+
+    subject_kind: str = Field(..., pattern="^(destination|source)$")
+    subject: str = Field(..., min_length=1, max_length=500)
+    verdict: str = Field(
+        ...,
+        pattern="^(HARMFUL_DESTINATION|HARMFUL_SOURCE|NOT_HARMFUL|INCONCLUSIVE)$",
+    )
+    finding_id: int | None = None
+    url: str = Field(default="", max_length=2000)
+    category: str = Field(default="", max_length=500)
+    note: str = Field(default="", max_length=2000)
+    rule_ids: list[str] | None = None
+    evidence_summary: dict | None = None
+    supersedes_id: int | None = None
+
+
 class RedirectTrackCreate(BaseModel):
     url: str = Field(..., min_length=1, max_length=500)
     source: str = Field(default="manual", pattern="^(manual|finding)$")

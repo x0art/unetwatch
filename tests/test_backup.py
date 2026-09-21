@@ -59,10 +59,30 @@ async def test_backup_export_shape(client, db_path):
     assert {"pattern": "*evil*", "pattern_type": "block"} in body["patterns"]
     assert {"pattern": "*safe*"} in body["whitelist"]
     assert any(f["url"] == "http://evil.example/x" for f in body["findings"])
-    assert {"kind": "url", "value": "evil.example", "source": "manual"} in body[
-        "blacklist"
-    ]
-    assert {"value": "10.0.0.77", "source": "manual"} in body["jaillist"]
+    # Shape changed per docs/suggestion-queues.md §7.1: the explicit export
+    # column lists now carry the new columns (blacklist: finding_id;
+    # jaillist: the eight findability columns). The seeded rows carry only
+    # value/source, so every new column is at its column default here; full
+    # dict equality is kept so an accidental column drop still fails.
+    assert {
+        "kind": "url",
+        "value": "evil.example",
+        "source": "manual",
+        "finding_id": None,
+    } in body["blacklist"]
+    assert {
+        "value": "10.0.0.77",
+        "source": "manual",
+        "finding_id": None,
+        "reason": "",
+        "url": "",
+        "category": "",
+        "note": "",
+        "evidence_summary": "{}",
+        "decided_by": "",
+        "decided_at": "",
+        "verdict_id": None,
+    } in body["jaillist"]
     assert any(t["url"] == "http://evil.example/x" for t in body["tracked_urls"])
     assert any(
         e["source_url"] == "http://evil.example/x" for e in body["redirect_edges"]
@@ -175,3 +195,74 @@ async def test_backup_import_idempotent(client, db_path):
     assert all(v == 0 for v in second["added"].values())
     total_added = sum(second["added"].values())
     assert total_added == 0
+
+
+async def test_backup_round_trips_jaillist_findability_columns(client, db_path):
+    """The §7.1 findability columns survive export → wipe → import.
+
+    These columns are the operator's jail justification — the information
+    substitute for the expiry policy the owner declined — and the explicit
+    export column list would silently drop any of them. Pin the round-trip
+    so a future column addition that forgets the export fails here.
+    """
+    db = await aiosqlite.connect(db_path)
+    await db.execute(
+        "INSERT INTO jaillist_entries (value, source, finding_id, reason, url,"
+        " category, note, evidence_summary, decided_by, decided_at, verdict_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "10.7.7.7/32",
+            "finding",
+            77,
+            "REACH to 3 blocked destinations across 2 days",
+            "https://evil.example/video/123",
+            "operator-class",
+            "noted",
+            '{"rule_ids": ["S2", "S5"]}',
+            "admin",
+            "2026-09-21T03:17:36+00:00",
+            12,
+        ),
+    )
+    await db.commit()
+    await db.close()
+
+    backup = client.get("/api/backup/export").json()
+    entry = next(e for e in backup["jaillist"] if e["value"] == "10.7.7.7/32")
+    # The export carries every findability column, not just value/source.
+    assert entry["finding_id"] == 77
+    assert entry["reason"] == "REACH to 3 blocked destinations across 2 days"
+    assert entry["url"] == "https://evil.example/video/123"
+    assert entry["category"] == "operator-class"
+    assert entry["note"] == "noted"
+    assert entry["evidence_summary"] == '{"rule_ids": ["S2", "S5"]}'
+    assert entry["decided_by"] == "admin"
+    assert entry["decided_at"] == "2026-09-21T03:17:36+00:00"
+    assert entry["verdict_id"] == 12
+
+    db = await aiosqlite.connect(db_path)
+    await db.execute("DELETE FROM jaillist_entries")
+    await db.commit()
+    await db.close()
+
+    resp = client.post("/api/backup/import", json=backup)
+    assert resp.status_code == 200
+
+    db = await aiosqlite.connect(db_path)
+    db.row_factory = aiosqlite.Row
+    cursor = await db.execute(
+        "SELECT finding_id, reason, url, category, note, evidence_summary,"
+        " decided_by, decided_at, verdict_id FROM jaillist_entries"
+        " WHERE value = '10.7.7.7/32'"
+    )
+    row = await cursor.fetchone()
+    await db.close()
+    assert row["finding_id"] == 77
+    assert row["reason"] == "REACH to 3 blocked destinations across 2 days"
+    assert row["url"] == "https://evil.example/video/123"
+    assert row["category"] == "operator-class"
+    assert row["note"] == "noted"
+    assert row["evidence_summary"] == '{"rule_ids": ["S2", "S5"]}'
+    assert row["decided_by"] == "admin"
+    assert row["decided_at"] == "2026-09-21T03:17:36+00:00"
+    assert row["verdict_id"] == 12

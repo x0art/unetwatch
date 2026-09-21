@@ -37,6 +37,10 @@ _NATURAL_KEYS: dict[str, tuple[str, ...]] = {
     "jaillist": ("value",),
     "tracked_urls": ("url",),
     "redirect_edges": ("source_url", "target_url"),
+    # The verdict ledger's identity is its id (no UNIQUE by design §7.2).
+    # Being id-keyed, it must take the fixed-key import path below — the
+    # dynamic branch drops `id`, which would make every row "skipped".
+    "triage": ("id",),
 }
 
 _TABLES: dict[str, str] = {
@@ -47,6 +51,7 @@ _TABLES: dict[str, str] = {
     "jaillist": "jaillist_entries",
     "tracked_urls": "tracked_urls",
     "redirect_edges": "redirect_edges",
+    "triage": "triage_events",
 }
 
 
@@ -66,15 +71,25 @@ async def export_backup(db=Depends(get_db_conn)):
         "SELECT pattern, pattern_type FROM url_patterns ORDER BY id"
     )
     whitelist_cur = await db.execute("SELECT pattern FROM url_whitelist ORDER BY id")
+    # Both list tables name their columns explicitly (not `SELECT *`), so a
+    # new column is silently dropped from every backup until it is added
+    # here. jaillist_entries carries the §7.1 findability columns
+    # (docs/suggestion-queues.md §7.1) — the operator's jail justification,
+    # which is the information-based substitute for the expiry policy the
+    # owner declined, so it must survive export/restore.
     blacklist_cur = await db.execute(
-        "SELECT kind, value, source FROM blacklist_entries ORDER BY id"
+        "SELECT kind, value, source, finding_id FROM blacklist_entries ORDER BY id"
     )
     jaillist_cur = await db.execute(
-        "SELECT value, source FROM jaillist_entries ORDER BY id"
+        "SELECT value, source, finding_id, reason, url, category, note,"
+        " evidence_summary, decided_by, decided_at, verdict_id"
+        " FROM jaillist_entries ORDER BY id"
     )
     findings_cur = await db.execute("SELECT * FROM findings ORDER BY id")
     tracked_cur = await db.execute("SELECT * FROM tracked_urls ORDER BY id")
     edges_cur = await db.execute("SELECT * FROM redirect_edges ORDER BY id")
+    # The verdict ledger keeps its id: identity is `id` (no UNIQUE by design).
+    triage_cur = await db.execute("SELECT * FROM triage_events ORDER BY id")
 
     body = {
         "version": BACKUP_VERSION,
@@ -86,6 +101,7 @@ async def export_backup(db=Depends(get_db_conn)):
         "jaillist": [dict(r) for r in await jaillist_cur.fetchall()],
         "tracked_urls": [_row_without_id(r) for r in await tracked_cur.fetchall()],
         "redirect_edges": [_row_without_id(r) for r in await edges_cur.fetchall()],
+        "triage": [dict(r) for r in await triage_cur.fetchall()],
     }
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return JSONResponse(
@@ -213,6 +229,7 @@ async def import_backup(request: Request, db=Depends(get_db_conn)):
             "kind": item["kind"],
             "value": item["value"],
             "source": source,
+            "finding_id": item.get("finding_id"),
         }
         if dry_run:
             if await exists("blacklist", row):
@@ -237,6 +254,15 @@ async def import_backup(request: Request, db=Depends(get_db_conn)):
         row = {
             "value": item["value"],
             "source": source,
+            "finding_id": item.get("finding_id"),
+            "reason": item.get("reason") or "",
+            "url": item.get("url") or "",
+            "category": item.get("category") or "",
+            "note": item.get("note") or "",
+            "evidence_summary": item.get("evidence_summary") or "{}",
+            "decided_by": item.get("decided_by") or "",
+            "decided_at": item.get("decided_at") or "",
+            "verdict_id": item.get("verdict_id"),
         }
         if dry_run:
             if await exists("jaillist", row):
@@ -247,6 +273,45 @@ async def import_backup(request: Request, db=Depends(get_db_conn)):
             added["jaillist"] += 1
         else:
             skipped["jaillist"] += 1
+
+    # ── triage_events (fixed shape, id-keyed) ──
+    # The verdict ledger's identity is its id, so unlike the dynamic branch
+    # below this path must PRESERVE `id` — dropping it (as the dynamic branch
+    # does) would make every row "skipped", per design §7.2's warning.
+    triage_cols = [c for c in columns["triage"] if c not in ("id", "created_at")]
+    for item in _as_list(payload, "triage"):
+        if not isinstance(item, dict):
+            skipped["triage"] += 1
+            continue
+        # `exists` checks the natural key; an id-less row cannot be inserted.
+        if item.get("id") is None or not item.get("subject") or not item.get("verdict"):
+            skipped["triage"] += 1
+            continue
+        row = {"id": item["id"]}
+        for col in triage_cols:
+            if col in item:
+                row[col] = item[col]
+        if dry_run:
+            if await exists("triage", row):
+                skipped["triage"] += 1
+            else:
+                added["triage"] += 1
+            continue
+        cols = [c for c in row if c in columns["triage"]]
+        try:
+            cursor = await db.execute(
+                f"INSERT OR IGNORE INTO {_TABLES['triage']}"
+                f" ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                tuple(row[c] for c in cols),
+            )
+        except sqlite3.IntegrityError:
+            # CHECK-constraint violation (bad subject_kind/verdict) → skip.
+            skipped["triage"] += 1
+            continue
+        if cursor.rowcount == 1:
+            added["triage"] += 1
+        else:
+            skipped["triage"] += 1
 
     # ── findings / tracked_urls / redirect_edges (dynamic row shapes) ──
     for section in ("findings", "tracked_urls", "redirect_edges"):
