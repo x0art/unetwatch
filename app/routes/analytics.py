@@ -3,18 +3,21 @@
 Risk vs enforcements (ADR 0001): a request is a **risk** when its URL matched a
 block pattern, the proxy action was ``ALLOW``, and it is not whitelisted. A
 **DENY** is an *enforcement* — the proxy already handled the request — and is
-reported separately, never as risk. The persisted ``findings`` table only ever
-contains ALLOW rows (the poll stores through ``apply_filters(actions=("ALLOW",))``),
-so real enforcement counts only exist in the live Elasticsearch window.
+reported separately, never as risk. The persisted ``findings`` table now holds
+both ALLOW and DENY rows (the poll stores through
+``apply_filters(actions=("ALLOW", "DENY"))``), so enforcement history survives
+ES window roll-over; live ES is still preferred when available.
 
 Every endpoint accepts the same three query params the Analytics page passes
 (``range``, ``compare``, ``hostGroup``) and degrades honestly:
 
 - ``summary`` prefers live ES (real risk/enforcement split); falls back to the
-  findings table (risk = row count, enforcements = 0).
-- ``enforcements`` and ``top-enforced`` prefer live ES — the only place DENY
-  rows exist; when ES is offline they fall back to the findings table with
-  ``enforcements = 0`` and ``es_online: False``.
+  findings table, where risk and enforcements are both counted from the
+  persisted ``action`` column (enforcements = DENY/FLAG rows).
+- ``enforcements`` and ``top-enforced`` prefer live ES but fall back to the
+  findings table, which now holds DENY rows too — both sources can report real
+  enforcement counts; the fallback sets ``es_online: False`` but no longer
+  forces ``enforcements = 0``.
 - Volume/direction come from real bytes where the feed carries them, falling
   back to a documented per-request heuristic (8 KiB) that keeps relative
   rankings real.
@@ -456,9 +459,9 @@ async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:
 async def _findings_top_enforced(db, minutes: int, limit: int) -> list[dict]:
     """Top enforced domains from the findings table (ADR 0001).
 
-    Only explicit DENY/FLAG rows count. The persisted table rarely holds them
-    (the poll stores ALLOW only), so callers prefer live ES — this is the
-    offline fallback.
+    Only explicit DENY/FLAG rows count. The persisted table now holds DENY rows
+    (the poll stores ALLOW and DENY), so this offline fallback reports real
+    enforcement counts; callers still prefer live ES when it is available.
     """
     columns = await _column_names(db)
     has_action = _has_column(columns, "action")
@@ -646,11 +649,10 @@ async def _es_summary(minutes: int) -> dict | None:
 
 
 async def _es_enforcements(minutes: int) -> list[dict] | None:
-    """Daily ALLOW-vs-DENY buckets from live ES — the only source of real
-    enforcement counts, since the findings table stores ALLOW rows only.
+    """Daily ALLOW-vs-DENY buckets from live ES.
 
     Returns None when ES is offline or the block-pattern query is empty, so the
-    caller falls back to the findings table (enforcements = 0).
+    caller falls back to the findings table (which also counts DENY rows).
     """
     from app.services.es_fields import get_mode
 
@@ -914,9 +916,8 @@ async def enforcements(
 ):
     """Daily policy enforcements — stacked bar (ALLOW vs DENY).
 
-    Prefers live ES (the only place real DENY counts exist, since findings
-    stores ALLOW rows only); falls back to the findings table when ES is
-    offline.
+    Prefers live ES but falls back to the findings table, which now holds DENY
+    rows too — the fallback reports real enforcement counts.
     """
     _validate_range(range_)
     minutes = _minutes_for_range(range_)
@@ -966,8 +967,8 @@ async def top_enforced(
 ):
     """Top enforced target domains — DENY filter, terms agg, primary matched rule.
 
-    Prefers live ES (the only place real enforcement counts exist); falls back
-    to the findings table (enforcements = 0) when ES is offline.
+    Prefers live ES but falls back to the findings table, which now holds DENY
+    rows too, so the offline fallback reports real enforcement counts.
     """
     _validate_range(range_)
     minutes = _minutes_for_range(range_)

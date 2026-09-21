@@ -649,7 +649,17 @@ async def fetch_logs(minutes: int = 10):
             print(f"[{datetime.now(UTC).isoformat()}][INFO] No matches found.")
             return
 
-        df = apply_filters(pd.DataFrame([h["_source"] for h in hits]), whitelist_regex)
+        # Persist BOTH ALLOW and DENY rows: ALLOW is a REACH (the client
+        # reached a prohibited destination), DENY is an ATTEMPT (the proxy
+        # blocked it). DENY history is the operator's evidence of clients
+        # trying to bypass policy via proxy/VPN. Only the explicit tuple is
+        # passed — actions=None would also admit FLAG and any future unknown
+        # action value, and only ALLOW/DENY are real here.
+        df = apply_filters(
+            pd.DataFrame([h["_source"] for h in hits]),
+            whitelist_regex,
+            actions=("ALLOW", "DENY"),
+        )
         log["filtered"] = len(df)
 
         if not df.empty:

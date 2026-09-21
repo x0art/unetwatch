@@ -7,7 +7,9 @@ No live ES path — the report is deterministic and exportable from the
 persisted findings that also feed Findings/Analytics raw tables.
 
 ADR 0001 applies verbatim: risk = ALLOW block-pattern hit not
-whitelisted; enforcements = DENY/FLAG explicitly.
+whitelisted; enforcements = DENY/FLAG explicitly. The findings table
+persists both ALLOW and DENY rows, so enforcements are counted from the
+evidence ledger rather than assumed to be zero.
 
 Endpoints:
   GET /api/client-report/{client_ip}

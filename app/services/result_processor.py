@@ -125,6 +125,20 @@ def apply_filters(
     return df
 
 
+def intent_for_action(action: str) -> str:
+    """Derive the intent class of an evidence row from its proxy action.
+
+    REACH  — ``ALLOW``: the client reached a prohibited destination.
+    ATTEMPT — ``DENY``: the proxy blocked the attempt (the client's intent).
+    ""     — anything else (``FLAG``, empty, None, unknown future values).
+    """
+    if action == "ALLOW":
+        return "REACH"
+    if action == "DENY":
+        return "ATTEMPT"
+    return ""
+
+
 async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | None = None) -> int:
     """Persist filtered matches so they surface in the Findings page.
 
@@ -136,6 +150,12 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
     category, http_method, http_status_code, country_code, bytes_*, rule_*,
     user_id) are always written — the flat logstash-proxy index carries them.
     ``user_agent`` remains mode-gated (UC-A/UC-B only).
+
+    ``intent`` is derived from ``action`` via :func:`intent_for_action` and
+    written alongside it: REACH for ALLOW, ATTEMPT for DENY, "" otherwise.
+    Legacy rows predating the column keep the DB default "" — that is
+    intentional and requires no backfill, since the value is a pure function
+    of ``action`` (which is likewise "" for those same legacy rows).
     """
     rows = []
     now = datetime.now(UTC).isoformat()
@@ -149,7 +169,7 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
         "domain", "category", "http_method", "http_status_code",
         "country_code", "bytes_downloaded", "bytes_uploaded",
         "rule_info", "rule_name", "user_id",
-        "action", "duration_seconds", "user_agent",
+        "action", "duration_seconds", "user_agent", "intent",
     ):
         if _col not in df.columns:
             df[_col] = 0 if _col == "duration_seconds" else ""
@@ -189,7 +209,10 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
     # Extended column (only in UC-A/UC-B) — user_agent remains mode-gated.
     ext_cols = ["user_agent"] if extended else []
 
-    all_cols = db_base_cols + ext_cols
+    # Derived intent column — persisted for both ALLOW (REACH) and DENY
+    # (ATTEMPT) rows; "" only for legacy rows and non-ALLOW/DENY actions.
+    df["intent"] = df["action"].astype(str).map(intent_for_action)
+    all_cols = db_base_cols + ext_cols + ["intent"]
     placeholders = ", ".join(["?"] * len(all_cols))
     col_names = ", ".join(all_cols)
 
@@ -217,6 +240,7 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
         if extended:
             # user_agent defaults to ""
             vals.append(str(df.iloc[i].get("user_agent", "")) if "user_agent" in df.columns else "")
+        vals.append(str(df.iloc[i].get("intent", "")))
         rows.append(tuple(vals))
 
     if not rows:

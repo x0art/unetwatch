@@ -131,6 +131,15 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0"
         )
 
+    # Migration: intent — derived from action at store time (REACH for ALLOW,
+    # ATTEMPT for DENY, "" otherwise). Added unconditionally like action.
+    # Legacy rows keep the '' default; no backfill is needed because intent is
+    # a pure function of action, which is likewise '' on those same rows.
+    if "intent" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN intent TEXT NOT NULL DEFAULT ''"
+        )
+
     # Migration: rich flat proxy fields — carry the full logstash-proxy schema
     # into the findings table so Query/Findings/Host/Analytics can surface them.
     rich_findings_columns = [
@@ -166,6 +175,11 @@ async def init_db():
         "CREATE INDEX IF NOT EXISTS idx_findings_log_timestamp ON findings(log_timestamp)"
     )
 
+    # Intent-aware drill-down: a client's REACH vs ATTEMPT history in a window.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_intent "
+        "ON findings(client_ip, intent, log_timestamp)"
+    )
     await db.execute("""
         CREATE TABLE IF NOT EXISTS blacklist_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,6 +205,68 @@ async def init_db():
             UNIQUE (value)
         )
     """)
+
+    # Migration (§7.1): findability columns on jaillist_entries so a jail
+    # entry can explain itself months later (who, why, with what evidence) —
+    # the information-based substitute for the expiry policy the owner
+    # declined. All nullable or defaulted, so every existing row survives
+    # unchanged and UNIQUE(value) is untouched.
+    # NOTE: this re-reads PRAGMA table_info for jaillist_entries on purpose.
+    # The `columns` variable above belongs to `findings`; reusing it here
+    # would guard against the wrong table's column set and silently no-op.
+    cursor = await db.execute("PRAGMA table_info(jaillist_entries)")
+    _jl_columns = {row[1] for row in await cursor.fetchall()}
+    for _col, _type in (
+        ("reason", "TEXT NOT NULL DEFAULT ''"),
+        ("url", "TEXT NOT NULL DEFAULT ''"),
+        ("category", "TEXT NOT NULL DEFAULT ''"),
+        ("note", "TEXT NOT NULL DEFAULT ''"),
+        ("verdict_id", "INTEGER"),
+        ("evidence_summary", "TEXT NOT NULL DEFAULT '{}'"),
+        ("decided_by", "TEXT NOT NULL DEFAULT ''"),
+        ("decided_at", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if _col not in _jl_columns:
+            await db.execute(f"ALTER TABLE jaillist_entries ADD COLUMN {_col} {_type}")
+
+    # The verdict ledger (§7.2): one row per human decision, including the
+    # decisions that produce no artifact (NOT_HARMFUL writes a whitelist
+    # pattern, INCONCLUSIVE writes nothing at all). Identity is `id` — no
+    # UNIQUE constraint, deliberately: a subject legitimately receives many
+    # verdicts over its life (jail, un-jail, re-jail), and a correction is a
+    # new row with supersedes_id, never an edit. The effective verdict is the
+    # row with the greatest decided_at that no other row supersedes.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS triage_events (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_kind  TEXT NOT NULL CHECK (subject_kind IN ('destination', 'source')),
+            subject       TEXT NOT NULL,
+            verdict       TEXT NOT NULL CHECK (verdict IN (
+                              'HARMFUL_DESTINATION', 'HARMFUL_SOURCE',
+                              'NOT_HARMFUL', 'INCONCLUSIVE')),
+            rule_ids      TEXT NOT NULL DEFAULT '[]',
+            finding_id    INTEGER,
+            url           TEXT NOT NULL DEFAULT '',
+            category      TEXT NOT NULL DEFAULT '',
+            note          TEXT NOT NULL DEFAULT '',
+            evidence_summary TEXT NOT NULL DEFAULT '{}',
+            decided_by    TEXT NOT NULL,
+            decided_at    TEXT NOT NULL,
+            decided_tz    TEXT NOT NULL DEFAULT '',
+            supersedes_id INTEGER,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # One index serves both the effective-verdict lookup (subject chain,
+    # newest first) and the per-subject history scan.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_triage_subject "
+        "ON triage_events(subject_kind, subject, decided_at)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_triage_verdict "
+        "ON triage_events(verdict, decided_at)"
+    )
 
     # URLs under redirect watch. `source` is 'manual' | 'finding' for user
     # additions and 'auto' for targets discovered while following a chain.
