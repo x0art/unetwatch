@@ -1503,6 +1503,9 @@ export interface HostRisk {
   enforcements: number
   /** Blacklisted destinations still ALLOWed — the highest-risk subset. */
   blacklistedRequests?: number
+  /** Distinct blacklisted destinations reached — breadth, additive to the
+   * payload; the graded score's breadth input. */
+  blacklistedDistinct?: number
   /** 0..100 share of total that was enforced (proxy handled). */
   enforcementsPct: number
   /** Real byte totals from persisted findings. `null`/absent when nothing was
@@ -1526,8 +1529,9 @@ export interface HostRisk {
 
 /** When the risk figure could not be computed at all (ES unreachable or the
  * field inventory never resolved). Rendered INSTEAD of a score — a host that
- * was not measured must never look like a clean one. Mirrors the shape
- * AttckPanel already uses for the missing-schema case. */
+ * was not measured must never look like a clean one. The same shape the
+ * missing-field-inventory case uses, so "we could not measure this" reads the
+ * same way across the product. */
 export interface HostRiskUnavailable {
   state: "unavailable"
   reason: string
@@ -1535,31 +1539,36 @@ export interface HostRiskUnavailable {
 }
 
 /** Which rule produced the level, and the exact inputs it consumed. Only
- * returned when a score WAS computed — `rule` names the branch so a flat
- * floor (92) is distinguishable from a graded measurement. */
+ * returned when a score WAS computed — `rule` names the branch of the GRADED
+ * model so the basis of a score is always visible. */
 export interface HostRiskExplained {
   /**
-   * - `blacklisted_destination_floor` — the hardcoded max(92, score) floor:
-   *   a risk (ALLOW) request reached a blacklisted destination.
-   * - `share_above_0.5` / `share_above_0.2` / `share_at_or_below_0.2` — the
-   *   ALLOW-share brackets.
-   * - `no_traffic` — nothing in the window; the 12 baseline, not a measurement.
+   * - `graded_reach` — the host reached at least one prohibited destination
+   *   (ALLOW). Score is graded by reach volume, distinct destinations and
+   *   recency.
+   * - `graded_attempt_only` — no reach, but the proxy blocked attempts (DENY).
+   *   Intent evidence only, capped below any reach.
+   * - `no_traffic` — nothing in the window; the 0 baseline, not a measurement.
    */
-  rule:
-    | "blacklisted_destination_floor"
-    | "share_above_0.5"
-    | "share_above_0.2"
-    | "share_at_or_below_0.2"
-    | "no_traffic"
+  rule: "graded_reach" | "graded_attempt_only" | "no_traffic"
   level: HostRisk["riskLevel"]
   score: number
-  /** True only when the hardcoded 92 floor raised the score. */
+  /** Retained for wire compatibility; the flat floor is gone, so this is
+   * always `false` and no UI branch depends on it being true. */
   floored: boolean
   inputs: {
     totalRequests: number
     riskRequests: number
     blacklistedRequests: number
     riskShare?: number
+    /** Distinct blacklisted destinations reached (breadth). */
+    blacklistedDistinct?: number
+    /** DENY/FLAG — the proxy handled these; subordinate intent evidence. */
+    enforcements?: number
+    reachCount?: number
+    attemptCount?: number
+    /** Age (minutes) of the newest reach; `null` when there was no reach. */
+    newestReachAgeMinutes?: number | null
   }
   text: string
 }
@@ -1587,15 +1596,69 @@ export interface HostProfile extends HostIdentity {
   es_online?: boolean
 }
 
-function hostRiskFromShares(totalRequests: number, riskRequests: number): { level: HostRisk["riskLevel"]; score: number } {
-  // ADR 0001: risk = the share of the host's traffic that reached a blocked
-  // pattern and was ALLOWed (the proxy did NOT handle it). A host whose
-  // traffic is mostly enforced is low-risk; mostly-ALLOW matches are high.
-  if (totalRequests <= 0) return { level: "LOW", score: 12 }
-  const share = riskRequests / totalRequests
-  if (share > 0.5) return { level: "HIGH", score: Math.min(95, 72 + Math.round((share - 0.5) * 40)) }
-  if (share > 0.2) return { level: "MEDIUM", score: Math.round(45 + ((share - 0.2) / 0.3) * 25) }
-  return { level: "LOW", score: Math.round(12 + (share / 0.2) * 32) }
+/**
+ * Client-side MIRROR of the backend GRADED risk model (app/routes/hosts.py
+ * `_risk_from_shares`). Kept numerically identical so the two paths cannot
+ * produce two answers — the drift this project is removing. The constants
+ * below MUST stay in lockstep with the backend's named constants.
+ *
+ * The client cannot see the operator's blacklist set on this path, so
+ * `blacklistedDistinct` is passed in as 0 where membership is unknown — it is
+ * never guessed. ATTEMPT evidence (DENY) contributes but is capped below any
+ * reach, exactly as server-side.
+ */
+const RISK_SCALE_MIN = 0
+const RISK_SCALE_MAX = 100
+const NO_TRAFFIC_SCORE = 0
+const REACH_BASE = 20
+const REACH_PER_HIT_WEIGHT = 3
+const REACH_HIT_SATURATION = 20
+const DISTINCT_DEST_WEIGHT = 7
+const DISTINCT_DEST_SATURATION = 5
+const RECENCY_BONUS = 10
+const RECENCY_WINDOW_MIN = 60
+const ATTEMPT_WEIGHT = 2
+const ATTEMPT_CAP = 20
+const LEVEL_HIGH_MIN = 70
+const LEVEL_MEDIUM_MIN = 45
+
+/** Age in minutes of the newest among the given ISO timestamps; `null` when
+ * none parse. Reads a real persisted timestamp — never a synthesized figure. */
+function newestAgeMinutes(timestamps: string[]): number | null {
+  let newest = 0
+  for (const ts of timestamps) {
+    const t = Date.parse(ts)
+    if (!Number.isNaN(t) && t > newest) newest = t
+  }
+  if (!newest) return null
+  return Math.max(0, Math.round((Date.now() - newest) / 60000))
+}
+
+function hostRiskFromShares(
+  totalRequests: number,
+  riskRequests: number,
+  opts?: { blacklistedDistinct?: number; enforcements?: number; newestReachAgeMinutes?: number | null },
+): { level: HostRisk["riskLevel"]; score: number; rule: HostRiskExplained["rule"] } {
+  const clamp = (v: number) => Math.max(RISK_SCALE_MIN, Math.min(RISK_SCALE_MAX, v))
+  const levelFor = (score: number): HostRisk["riskLevel"] =>
+    score >= LEVEL_HIGH_MIN ? "HIGH" : score >= LEVEL_MEDIUM_MIN ? "MEDIUM" : "LOW"
+
+  const reaches = Math.max(0, riskRequests)
+  const attempts = Math.max(0, opts?.enforcements ?? 0)
+  const reachedDistinct = Math.max(0, opts?.blacklistedDistinct ?? 0)
+  if (totalRequests <= 0) return { level: "LOW", score: NO_TRAFFIC_SCORE, rule: "no_traffic" }
+
+  const attemptTerm = Math.min(ATTEMPT_CAP, ATTEMPT_WEIGHT * attempts)
+  if (reaches <= 0) {
+    const score = clamp(attemptTerm)
+    return { level: levelFor(score), score, rule: "graded_attempt_only" }
+  }
+  const reachVolume = REACH_BASE + REACH_PER_HIT_WEIGHT * Math.min(reaches, REACH_HIT_SATURATION)
+  const breadth = DISTINCT_DEST_WEIGHT * Math.min(reachedDistinct, DISTINCT_DEST_SATURATION)
+  const age = opts?.newestReachAgeMinutes
+  const recency = age != null && age <= RECENCY_WINDOW_MIN ? RECENCY_BONUS : 0
+  const score = clamp(reachVolume + breadth + recency + attemptTerm)
+  return { level: levelFor(score), score, rule: "graded_reach" }
 }
 
 /** Sum the persisted byte counters of findings rows and format them. Returns
@@ -1641,7 +1704,13 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
   const riskRequests = items.length
   const enforcements = 0
   const enforcementsPct = 0
-  const { level, score } = hostRiskFromShares(totalRequests, riskRequests)
+  // Recency from the newest persisted reach timestamp (real field, not a proxy).
+  const newestReachAgeMinutes = newestAgeMinutes(items.map((f) => f.log_timestamp))
+  const { level, score, rule } = hostRiskFromShares(totalRequests, riskRequests, {
+    blacklistedDistinct: 0, // blacklist membership is not known on this path
+    enforcements,
+    newestReachAgeMinutes,
+  })
   const bw = hostBandwidthFromFindings(items)
   const identity = hostIdentityFromFindings(ip, items)
   return {
@@ -1664,15 +1733,24 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
       // states its source rather than borrowing the live-ES label.
       riskScoreAvailable: true,
       riskReason: {
-        rule: "share_above_0.5",
+        rule,
         level,
         score,
         floored: false,
-        inputs: { totalRequests, riskRequests, blacklistedRequests: 0 },
+        inputs: {
+          totalRequests,
+          riskRequests,
+          blacklistedRequests: 0,
+          blacklistedDistinct: 0,
+          enforcements,
+          reachCount: riskRequests,
+          attemptCount: enforcements,
+          newestReachAgeMinutes,
+        },
         text:
-          `Client-side estimate from persisted findings: ${riskRequests} risk ` +
-          `(ALLOW match) rows over an all-time window → ${level}. ` +
-          `Not the backend risk model.`,
+          `Client-side graded estimate from persisted findings: ${riskRequests} ` +
+          `reach(es) (ALLOW match) over an all-time window → ${level} ${score}/100. ` +
+          `Blacklist membership is not visible on this path. Not the backend model.`,
       },
       sources: {
         risk: {
@@ -1690,13 +1768,24 @@ function hostProfileFromFindings(ip: string, items: Finding[], total: number): H
 function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
   const totalRequests = res.total_requests
   const allItems = res.items
+  const reachItems = allItems.filter((d) => d.action === "ALLOW" || d.action === "")
   const enforcements = allItems.filter((d) => d.action === "DENY" || d.action === "FLAG").length
-  const riskRequests = allItems.filter((d) => d.action === "ALLOW" || d.action === "").length
+  const riskRequests = reachItems.length
   // Prefer server-side totals when available; fall back to sampled window.
   const effectiveTotal = totalRequests || allItems.length || 0
   const effectiveEnforcements = totalRequests > 0 ? enforcements : allItems.length
   const enforcementsPct = effectiveTotal > 0 ? (effectiveEnforcements / effectiveTotal) * 100 : 0
-  const { level, score } = hostRiskFromShares(effectiveTotal, riskRequests)
+  // QueryDoc carries real blacklist membership (`blacklisted`) — so breadth is
+  // a genuine count of distinct blacklisted destinations reached here.
+  const blacklistedDistinct = new Set(
+    reachItems.filter((d) => d.blacklisted).map((d) => d.base_url),
+  ).size
+  const newestReachAgeMinutes = newestAgeMinutes(reachItems.map((d) => d.timestamp))
+  const { level, score, rule } = hostRiskFromShares(effectiveTotal, riskRequests, {
+    blacklistedDistinct,
+    enforcements: effectiveEnforcements,
+    newestReachAgeMinutes,
+  })
   const bw = hostBandwidthFromFindings(allItems)
   // Try to derive hostname from query docs (ADR 0001: IP + hostname only).
   const first = allItems[0] as unknown as Record<string, unknown> | undefined
@@ -1724,19 +1813,24 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
       // so the report does not present it under the backend model's name.
       riskScoreAvailable: true,
       riskReason: {
-        rule: "share_above_0.5",
+        rule,
         level,
         score,
         floored: false,
         inputs: {
           totalRequests: effectiveTotal,
           riskRequests,
-          blacklistedRequests: 0,
+          blacklistedRequests: riskRequests,
+          blacklistedDistinct,
+          enforcements: effectiveEnforcements,
+          reachCount: riskRequests,
+          attemptCount: effectiveEnforcements,
+          newestReachAgeMinutes,
         },
         text:
-          `Client-side estimate from a live ES query sample: ${riskRequests} risk ` +
-          `(ALLOW match) requests of ${effectiveTotal} → ${level}. ` +
-          `Not the backend risk model.`,
+          `Client-side graded estimate from a live ES query sample: ${riskRequests} ` +
+          `reach(es) (ALLOW match) of ${effectiveTotal}, ${blacklistedDistinct} distinct ` +
+          `blacklisted destination(s) → ${level} ${score}/100. Not the backend model.`,
       },
       sources: {
         risk: {
@@ -1867,19 +1961,27 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
       bandwidthDownload: null,
       bandwidthUpload: null,
       bandwidthNeverMeasured: true,
-      // No source returned anything for this host. The 12/100 is the model's
-      // empty-window baseline, NOT a measurement — say so rather than letting
-      // it read as a clean host.
+      // No source returned anything for this host. The baseline is 0/100 —
+      // zero evidence, NOT a measurement and NOT a clean bill of health.
       riskScoreAvailable: true,
       riskReason: {
         rule: "no_traffic",
         level: "LOW",
-        score: 12,
+        score: NO_TRAFFIC_SCORE,
         floored: false,
-        inputs: { totalRequests: 0, riskRequests: 0, blacklistedRequests: 0 },
+        inputs: {
+          totalRequests: 0,
+          riskRequests: 0,
+          blacklistedRequests: 0,
+          blacklistedDistinct: 0,
+          enforcements: 0,
+          reachCount: 0,
+          attemptCount: 0,
+          newestReachAgeMinutes: null,
+        },
         text:
           "No traffic recorded for this host by any source — score is the " +
-          "model's empty-window baseline, not a measurement.",
+          "model's 0 empty-window baseline, not a measurement.",
       },
       sources: {
         risk: {

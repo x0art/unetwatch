@@ -16,19 +16,99 @@ from app.config import get_settings
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
-# Deny-rate brackets for the risk level (share of the window that was enforced).
-# A host whose traffic is mostly enforced is low-risk; mostly-ALLOW matches are
-# high-risk because the proxy did NOT stop them.
+# ── Graded host risk model (2026-09-21) ─────────────────────────────────────
+#
+# The previous model escalated EVERY host that reached even one blacklisted
+# destination to a FLAT ``max(92, share_score)`` — one stray hit and five
+# hundred hits produced the same "HIGH 92/100", which an operator cannot
+# triage with. The owner's decision: the score must be GRADED and DYNAMIC.
+#
+# Scale: 0–100. The floor is 0 (no signals ⇒ 0 evidence) and the ceiling is
+# 100 (clamped). A host with no reaches and no attempts is 0, not a magic 12.
+#
+# Every constant below is a NAMED value with its meaning stated. ⚠ PROVISIONAL:
+# measured against the production DB on 2026-09-21 it held 2 findings rows, 1
+# distinct base_url and 0 blacklist entries — UNMEASURABLE. These thresholds
+# are a defensible default, NOT a measurement; recalibrate against the real
+# distribution once volume exists (see docs/superpowers/specs/2026-09-21-*).
+#
+# No synthesized inputs: the model consumes only persisted/measured fields
+# (action, base_url, @timestamp) per CONTEXT.md §"No synthesized measurements".
+# It does NOT use duration_seconds × N byte proxies, and does NOT read
+# bytes_downloaded on DENY rows (structurally 0 — spec §j / logline.py).
+
+# Scale bounds.
+RISK_SCALE_MIN = 0
+RISK_SCALE_MAX = 100
+# Empty-window baseline: a host with no traffic has zero evidence, so 0.
+NO_TRAFFIC_SCORE = 0
+
+# REACH (ALLOW) components — the strong signal.
+# A single confirmed reach already scores this: the client GOT THROUGH.
+REACH_BASE = 20
+# Each reach beyond the first adds this much — volume must grade the score.
+REACH_PER_HIT_WEIGHT = 3
+# Reaches past this count add nothing more to the volume term: a plateau so a
+# runaway host does not climb without bound on volume alone.
+REACH_HIT_SATURATION = 20
+# Each DISTINCT prohibited destination reached adds this — breadth ranks ABOVE
+# repeats of a single destination.
+DISTINCT_DEST_WEIGHT = 7
+# Distinct destinations at or above this count are treated as maximally broad.
+DISTINCT_DEST_SATURATION = 5
+# Added when the newest reach is recent — the operator acts on current behaviour.
+RECENCY_BONUS = 10
+# "Current" horizon in minutes (6× the 10-minute default poll interval).
+RECENCY_WINDOW_MIN = 60
+
+# ATTEMPT (DENY) component — intent evidence. Subordinate to any reach.
+ATTEMPT_WEIGHT = 2
+# Cap so an ATTEMPT-only host can never outrank a REACH host. Must stay below
+# the minimum possible reach score (REACH_BASE + REACH_PER_HIT_WEIGHT = 23,
+# with no breadth/recency), so a reach always dominates intent evidence alone.
+ATTEMPT_CAP = 20
+
+# Level cut-offs.
+LEVEL_HIGH_MIN = 70
+LEVEL_MEDIUM_MIN = 45
+
+
+def _clamp(value: int, low: int = RISK_SCALE_MIN, high: int = RISK_SCALE_MAX) -> int:
+    """Clamp a score into the stated scale bounds."""
+    return max(low, min(high, value))
+
+
+def _level_for(score: int) -> str:
+    """Map a graded 0–100 score to its level (HIGH / MEDIUM / LOW)."""
+    if score >= LEVEL_HIGH_MIN:
+        return "HIGH"
+    if score >= LEVEL_MEDIUM_MIN:
+        return "MEDIUM"
+    return "LOW"
 
 
 def _risk_from_shares(
-    total: int, risk_requests: int, blacklisted_risk: int = 0
+    total: int,
+    risk_requests: int,
+    blacklisted_risk: int = 0,
+    *,
+    blacklisted_distinct: int = 0,
+    enforcements: int = 0,
+    newest_reach_age_minutes: int | None = None,
 ) -> dict:
-    """Map total/risk counts to a risk score + level (ADR 0001).
+    """Map the window's counts to a GRADED risk score + level (ADR 0001).
 
-    ``blacklisted_risk`` counts ALLOWed requests to blacklisted destinations —
-    an operator explicitly flagged the target and the proxy still let it
-    through, the highest-risk signal. Any such request escalates to HIGH.
+    All arguments are persisted/measured counts — nothing is synthesized:
+
+    - ``total`` — block-pattern matches in the window.
+    - ``risk_requests`` — REACH events: ALLOW pattern-matches the client got.
+    - ``blacklisted_risk`` — REACH events to an operator-blacklisted destination.
+    - ``blacklisted_distinct`` — how many DISTINCT blacklisted destinations were
+      reached (``base_url`` multiplicity — breadth, not volume).
+    - ``enforcements`` — ATTEMPT events: DENY/FLAG the proxy blocked. Subordinate
+      evidence of intent; contributes but always ranks below a reach.
+    - ``newest_reach_age_minutes`` — age of the most recent REACH, or ``None``
+      when there was no reach (the real timestamp age, never a proxy).
 
     The returned dict carries a ``riskReason`` alongside the score so a caller
     can never render the score without its justification (see
@@ -37,90 +117,125 @@ def _risk_from_shares(
 
     ``{"rule", "level", "score", "floored", "inputs", "text"}``
 
-    - ``rule`` names WHICH branch fired, so a floored 92 is distinguishable
-      from a measured 92 (``blacklisted_destination_floor`` vs a share
-      bracket) — the operator's actual case.
-    - ``floored`` is True only when the hardcoded 92 floor raised the score.
-    - ``inputs`` are the exact counts the branch consumed.
+    - ``rule`` names WHICH branch fired: ``graded_reach``, ``graded_attempt_only``
+      or ``no_traffic``.
+    - ``floored`` is retained for wire compatibility and is now ALWAYS ``False``
+      — the flat floor is deleted, so nothing can set it true.
+    - ``inputs`` are the exact counts the branches consumed.
     - ``text`` is the operator-facing sentence, stated in ADR 0001 vocabulary
       ("risk (ALLOW matches)", "enforcements (DENY)").
     """
+    reaches = max(0, risk_requests)
+    attempts = max(0, enforcements)
+    reached_distinct = max(0, blacklisted_distinct)
+
     if total <= 0:
-        score = 12
-        level = "LOW"
         reason = {
             "rule": "no_traffic",
+            "level": "LOW",
+            "score": NO_TRAFFIC_SCORE,
+            "floored": False,
+            "inputs": {
+                "totalRequests": total,
+                "riskRequests": reaches,
+                "blacklistedRequests": max(0, blacklisted_risk),
+                "blacklistedDistinct": reached_distinct,
+                "enforcements": attempts,
+                "reachCount": reaches,
+                "attemptCount": attempts,
+                "newestReachAgeMinutes": newest_reach_age_minutes,
+            },
+            "text": (
+                "No traffic in the window — score is the model's empty-window "
+                "baseline of 0, not a measurement."
+            ),
+        }
+        return {
+            "riskScore": NO_TRAFFIC_SCORE,
+            "riskLevel": "LOW",
+            "riskReason": reason,
+        }
+
+    # ── Volume term: more reaches grade higher, plateauing at saturation. ──
+    volume_reaches = min(reaches, REACH_HIT_SATURATION)
+    reach_volume = REACH_BASE + REACH_PER_HIT_WEIGHT * volume_reaches
+
+    # ── Breadth term: more DISTINCT destinations outrank repeats of one. ──
+    breadth = DISTINCT_DEST_WEIGHT * min(reached_distinct, DISTINCT_DEST_SATURATION)
+
+    # ── Recency: current behaviour is what the operator acts on. ──
+    recent = (
+        newest_reach_age_minutes is not None
+        and newest_reach_age_minutes <= RECENCY_WINDOW_MIN
+    )
+    recency = RECENCY_BONUS if recent else 0
+
+    # ── ATTEMPT term: bounded so it can never outrank a reach. ──
+    attempt_term = min(ATTEMPT_CAP, ATTEMPT_WEIGHT * attempts)
+
+    if reaches > 0:
+        score = _clamp(reach_volume + breadth + recency + attempt_term)
+        level = _level_for(score)
+        distinct_txt = (
+            f"{reached_distinct} distinct blacklisted destination(s)"
+            if reached_distinct
+            else "no blacklisted destinations"
+        )
+        age_txt = (
+            "no reach"
+            if newest_reach_age_minutes is None
+            else f"newest reach {newest_reach_age_minutes} min ago"
+        )
+        reason = {
+            "rule": "graded_reach",
             "level": level,
             "score": score,
             "floored": False,
             "inputs": {
                 "totalRequests": total,
-                "riskRequests": risk_requests,
-                "blacklistedRequests": blacklisted_risk,
+                "riskRequests": reaches,
+                "blacklistedRequests": max(0, blacklisted_risk),
+                "blacklistedDistinct": reached_distinct,
+                "enforcements": attempts,
+                "reachCount": reaches,
+                "attemptCount": attempts,
+                "newestReachAgeMinutes": newest_reach_age_minutes,
+                "riskShare": round(reaches / total, 4),
             },
             "text": (
-                "No traffic in the window — score is the model's empty-window "
-                "baseline, not a measurement."
+                f"Graded from {reaches} reach(es) (ALLOW, the client got "
+                f"through) over {total} request(s), {distinct_txt}, {age_txt}, "
+                f"and {attempts} enforcement(s) (DENY) → {level} {score}/100."
             ),
         }
         return {"riskScore": score, "riskLevel": level, "riskReason": reason}
-    share = risk_requests / total
-    if share > 0.5:
-        score = min(95, 72 + round((share - 0.5) * 40))
-        level = "HIGH"
-        rule = "share_above_0.5"
-    elif share > 0.2:
-        score = round(45 + ((share - 0.2) / 0.3) * 25)
-        level = "MEDIUM"
-        rule = "share_above_0.2"
-    else:
-        score = round(12 + (share / 0.2) * 32)
-        level = "LOW"
-        rule = "share_at_or_below_0.2"
+
+    # No reach: the only signal is ATTEMPT evidence, which is capped LOW.
+    score = _clamp(attempt_term)
+    level = _level_for(score)
     reason = {
-        "rule": rule,
+        "rule": "graded_attempt_only",
         "level": level,
         "score": score,
         "floored": False,
         "inputs": {
             "totalRequests": total,
-            "riskRequests": risk_requests,
-            "blacklistedRequests": blacklisted_risk,
-            "riskShare": round(share, 4),
+            "riskRequests": 0,
+            "blacklistedRequests": 0,
+            "blacklistedDistinct": 0,
+            "enforcements": attempts,
+            "reachCount": 0,
+            "attemptCount": attempts,
+            "newestReachAgeMinutes": None,
+            "riskShare": 0.0,
         },
         "text": (
-            f"{risk_requests} of {total} requests were risk (ALLOW matches) "
-            f"— {share:.1%} share → {level} bracket ({rule})."
+            f"No reach (nothing got through) but {attempts} enforcement(s) "
+            f"(DENY) — intent evidence only, capped at {ATTEMPT_CAP} so an "
+            f"attempt-only host always ranks below any host that reached a "
+            f"prohibited destination → {level} {score}/100."
         ),
     }
-    if blacklisted_risk > 0:
-        floored = max(92, score)
-        # The floor fires whenever a blacklisted destination was ALLOWed. It is
-        # a FLAT 92, not a graded measurement — say so, and keep the bracket
-        # the share alone would have produced so the two are comparable.
-        return {
-            "riskScore": floored,
-            "riskLevel": "HIGH",
-            "riskReason": {
-                "rule": "blacklisted_destination_floor",
-                "level": "HIGH",
-                "score": floored,
-                "floored": True,
-                "inputs": {
-                    "totalRequests": total,
-                    "riskRequests": risk_requests,
-                    "blacklistedRequests": blacklisted_risk,
-                    "riskShare": round(share, 4),
-                },
-                "text": (
-                    f"Escalated to HIGH by the blacklisted-destination rule: "
-                    f"{blacklisted_risk} risk (ALLOW) request(s) reached a "
-                    f"destination on the blacklist. Score is the flat "
-                    f"{floored} floor, not a graded measurement "
-                    f"(share-only bracket would be {level} {score})."
-                ),
-            },
-        }
     return {"riskScore": score, "riskLevel": level, "riskReason": reason}
 
 
@@ -259,6 +374,8 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
                 "riskRequests": 0,
                 "enforcements": 0,
                 "blacklistedRequests": 0,
+                "blacklistedDistinct": 0,
+                "newestReachAgeMinutes": None,
                 "es_online": True,
             }
 
@@ -270,27 +387,46 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
         total = int(len(df))
         if "action" in df.columns:
             actions = df["action"].fillna("").astype(str).str.strip().str.upper()
-            risk_requests = int(actions.isin(["ALLOW", ""]).sum())
+            reach_mask = actions.isin(["ALLOW", ""])
+            risk_requests = int(reach_mask.sum())
             enforcements = int(actions.isin(["DENY", "FLAG"]).sum())
-            blacklisted_requests = int(
-                (
-                    df["base_url"].astype(str).isin(blacklist_domains)
-                    & actions.isin(["ALLOW", ""])
-                ).sum()
-            )
+            blacklisted_mask = df["base_url"].astype(str).isin(blacklist_domains)
+            blacklisted_requests = int((blacklisted_mask & reach_mask).sum())
         else:
             # Legacy rows carry no action — every block-pattern hit was an
             # ALLOW risk by construction.
+            reach_mask = pd.Series(True, index=df.index)
             risk_requests = total
             enforcements = 0
-            blacklisted_requests = int(
-                df["base_url"].astype(str).isin(blacklist_domains).sum()
-            )
+            blacklisted_mask = df["base_url"].astype(str).isin(blacklist_domains)
+            blacklisted_requests = int(blacklisted_mask.sum())
+
+        # Breadth: how many DISTINCT blacklisted destinations were REACHed.
+        # `base_url` is a persisted field (not a proxy) — this is a real
+        # measurement of how many targets the host actually touched.
+        reach_base_urls = df.loc[blacklisted_mask & reach_mask, "base_url"]
+        blacklisted_distinct = int(reach_base_urls.astype(str).nunique())
+
+        # Recency: age (minutes) of the most recent REACH in the window. Uses
+        # the persisted @timestamp, never a synthesized figure. `None` when
+        # there was no reach — an explicit unavailable state, never a fake 0.
+        newest_reach_age_minutes: int | None = None
+        if risk_requests > 0 and "@timestamp" in df.columns:
+            reach_ts = pd.to_datetime(
+                df.loc[reach_mask, "@timestamp"], errors="coerce", utc=True
+            ).dropna()
+            if not reach_ts.empty:
+                newest = reach_ts.max()
+                age = (pd.Timestamp.now(tz="UTC") - newest).total_seconds() / 60.0
+                newest_reach_age_minutes = int(max(0, age))
+
         return {
             "totalRequests": total,
             "riskRequests": risk_requests,
             "enforcements": enforcements,
             "blacklistedRequests": blacklisted_requests,
+            "blacklistedDistinct": blacklisted_distinct,
+            "newestReachAgeMinutes": newest_reach_age_minutes,
             "es_online": True,
         }
     except Exception:
@@ -313,8 +449,9 @@ async def host_profile(
 
     Additive contract (2026-09-21): the risk sub-dict carries ``riskReason``
     (WHICH rule produced the level, and its inputs) and ``sources`` (which
-    store each figure came from, and over what window). Existing keys are
-    unchanged.
+    store each figure came from, and over what window). The score itself is now
+    GRADED (see ``_risk_from_shares``) rather than a flat blacklist floor.
+    Existing keys are unchanged.
     """
     settings = get_settings()
 
@@ -332,6 +469,8 @@ async def host_profile(
     total = (agg or {}).get("totalRequests", 0)
     risk_requests = (agg or {}).get("riskRequests", 0)
     blacklisted_requests = (agg or {}).get("blacklistedRequests", 0)
+    blacklisted_distinct = (agg or {}).get("blacklistedDistinct", 0)
+    newest_reach_age_minutes = (agg or {}).get("newestReachAgeMinutes")
     enforcements = (agg or {}).get("enforcements", 0)
     enforcements_pct = (enforcements / total) * 100 if total > 0 else 0
 
@@ -342,7 +481,14 @@ async def host_profile(
     bandwidth_download, bandwidth_upload = await _host_byte_totals(ip, minutes)
     bandwidth_never_measured = bandwidth_download is None
     if risk_available:
-        risk = _risk_from_shares(total, risk_requests, blacklisted_requests)
+        risk = _risk_from_shares(
+            total,
+            risk_requests,
+            blacklisted_requests,
+            blacklisted_distinct=blacklisted_distinct,
+            enforcements=enforcements,
+            newest_reach_age_minutes=newest_reach_age_minutes,
+        )
         risk_reason = risk["riskReason"]
     else:
         # ES unreachable / field mode UNKNOWN: the score itself is unknown.
@@ -378,6 +524,9 @@ async def host_profile(
             "riskRequests": risk_requests,
             "enforcements": enforcements,
             "blacklistedRequests": blacklisted_requests,
+            # Distinct blacklisted destinations REACHed (breadth) — a persisted
+            # `base_url` count, additive to the payload.
+            "blacklistedDistinct": blacklisted_distinct,
             "enforcementsPct": round(enforcements_pct, 1),
             # Real byte totals from persisted findings — `null` when nothing
             # was persisted, with bandwidthNeverMeasured marking that state.

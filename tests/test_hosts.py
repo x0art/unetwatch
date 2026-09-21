@@ -9,7 +9,8 @@ async def test_host_profile_offline_returns_zeroed_shape(client):
     assert data["ip"] == "10.0.0.7"
     assert data["primaryIp"] == "10.0.0.7"
     assert data["es_online"] is False
-    assert data["risk"]["riskScore"] == 12
+    # Graded model baseline is 0 (no evidence) — not the old magic 12.
+    assert data["risk"]["riskScore"] == 0
     assert data["risk"]["riskLevel"] == "LOW"
     assert data["risk"]["totalRequests"] == 0
     assert data["risk"]["riskRequests"] == 0
@@ -75,26 +76,31 @@ async def test_host_profile_bandwidth_sums_persisted_bytes(client, db_path):
     assert risk["bandwidthNeverMeasured"] is False
 
 
-async def test_risk_from_shares_blacklisted_allow_escalates_to_high():
-    """A blacklisted-but-ALLOWed request is the highest-risk signal — it
-    escalates the host to HIGH even when the raw ALLOW share would say LOW.
+def test_risk_from_shares_blacklisted_allow_grades_not_floors():
+    """A blacklisted-but-ALLOWed reach is the strongest signal, but the score
+    is now GRADED — more reaches score strictly higher, and nothing returns
+    the old flat 92 floor.
     (_aggregate_host needs live ES, so the pure risk helper is the testable
     path for the escalation rule.)"""
     from app.routes.hosts import _risk_from_shares
 
-    # LOW share but one blacklisted ALLOW request → HIGH, score floored at 92.
-    low_share = _risk_from_shares(total=100, risk_requests=5, blacklisted_risk=1)
-    assert low_share["riskLevel"] == "HIGH"
-    assert low_share["riskScore"] == 92
+    few = _risk_from_shares(
+        total=100, risk_requests=5, blacklisted_risk=1, blacklisted_distinct=1
+    )
+    # The old model returned a FLAT 92 here. The graded model must not.
+    assert few["riskScore"] != 92
+    assert few["riskReason"]["floored"] is False
 
-    # No blacklisted-ALLOW requests → normal share logic; no escalation.
-    deny_only = _risk_from_shares(total=100, risk_requests=0, blacklisted_risk=0)
+    # No reaches → no reach signal at all (intent-only, capped LOW).
+    deny_only = _risk_from_shares(total=100, risk_requests=0, enforcements=5)
     assert deny_only["riskLevel"] == "LOW"
 
-    # A high ALLOW share stays HIGH and keeps its (clamped) score.
-    high_share = _risk_from_shares(total=100, risk_requests=90, blacklisted_risk=2)
-    assert high_share["riskLevel"] == "HIGH"
-    assert high_share["riskScore"] == 92
+    # More reaches → strictly higher (graded, not flat).
+    more = _risk_from_shares(
+        total=100, risk_requests=50, blacklisted_risk=5, blacklisted_distinct=1
+    )
+    assert more["riskScore"] > few["riskScore"]
+    assert more["riskLevel"] == "HIGH"
 
 
 async def test_host_profile_ip_validation(client):
@@ -125,77 +131,151 @@ async def test_host_profile_accepts_90d_and_1y_labels(client):
     assert res.status_code == 200
 
 
-# ── Risk explanation (2026-09-21) ───────────────────────────────────────────
-# The operator saw "Risk Score: HIGH 92/100" with nothing saying WHY: a bare
-# score cannot distinguish a MEASURED 92 from the hardcoded blacklist floor,
-# nor a real LOW from ES simply being down. A score must never be presented
-# without its justification.
+# ── Risk explanation + GRADED model (2026-09-21) ────────────────────────────
+# The operator saw "Risk Score: HIGH 92/100" with nothing saying WHY, and the
+# 92 was a FLAT floor — one reach and five hundred reaches scored the same.
+# The model is now graded: the reason must state the graded inputs, and the
+# score must move with them. A score is never presented without its basis.
 
 
-def test_risk_reason_blacklisted_floor_carries_its_reason():
-    """(a) The operator's exact case: the blacklist floor names itself."""
+def test_risk_reason_graded_reach_states_its_inputs():
+    """(a) A reach-carrying host reports the graded rule and every input."""
     from app.routes.hosts import _risk_from_shares
 
-    risk = _risk_from_shares(total=10, risk_requests=10, blacklisted_risk=3)
+    risk = _risk_from_shares(
+        total=10,
+        risk_requests=10,
+        blacklisted_risk=3,
+        blacklisted_distinct=2,
+        enforcements=0,
+        newest_reach_age_minutes=10,
+    )
 
-    assert risk["riskScore"] == 92
-    assert risk["riskLevel"] == "HIGH"
     reason = risk["riskReason"]
-    assert reason["rule"] == "blacklisted_destination_floor"
-    assert reason["floored"] is True
-    assert reason["inputs"] == {
-        "totalRequests": 10,
-        "riskRequests": 10,
-        "blacklistedRequests": 3,
-        "riskShare": 1.0,
-    }
-    # The operator-facing sentence must state the rule, not just repeat "92".
-    assert "blacklisted-destination" in reason["text"]
-    assert "92" in reason["text"]
+    assert risk["riskLevel"] == "HIGH"
+    assert reason["rule"] == "graded_reach"
+    # The flat floor is gone; the flag survives but is always false now.
+    assert reason["floored"] is False
+    assert reason["inputs"]["totalRequests"] == 10
+    assert reason["inputs"]["riskRequests"] == 10
+    assert reason["inputs"]["blacklistedDistinct"] == 2
+    assert reason["inputs"]["reachCount"] == 10
+    assert reason["inputs"]["newestReachAgeMinutes"] == 10
+    # The operator-facing sentence states the graded basis.
+    assert "reach" in reason["text"]
+    assert "distinct blacklisted destination" in reason["text"]
 
 
-def test_risk_reason_share_bracket_carries_its_bracket():
-    """(c) A normal share bracket reports the bracket that produced it."""
+def test_risk_score_grades_with_reach_volume():
+    """More reaches to the same destination score strictly higher."""
     from app.routes.hosts import _risk_from_shares
 
-    # >0.5 → HIGH bracket.
-    high = _risk_from_shares(total=100, risk_requests=90)
-    assert high["riskLevel"] == "HIGH"
-    assert high["riskReason"]["rule"] == "share_above_0.5"
-    assert high["riskReason"]["floored"] is False
+    one = _risk_from_shares(total=100, risk_requests=1, blacklisted_distinct=1)
+    five = _risk_from_shares(total=100, risk_requests=5, blacklisted_distinct=1)
+    twenty = _risk_from_shares(total=100, risk_requests=20, blacklisted_distinct=1)
+    assert one["riskScore"] < five["riskScore"] < twenty["riskScore"]
 
-    # >0.2 → MEDIUM bracket.
-    medium = _risk_from_shares(total=100, risk_requests=30)
-    assert medium["riskLevel"] == "MEDIUM"
-    assert medium["riskReason"]["rule"] == "share_above_0.2"
-    assert medium["riskReason"]["inputs"]["riskShare"] == 0.3
 
-    # <=0.2 → LOW bracket.
-    low = _risk_from_shares(total=100, risk_requests=5)
-    assert low["riskLevel"] == "LOW"
-    assert low["riskReason"]["rule"] == "share_at_or_below_0.2"
+def test_risk_score_grades_with_distinct_destinations():
+    """Breadth beats repeats: 3 distinct destinations > 3 repeats of one."""
+    from app.routes.hosts import _risk_from_shares
+
+    distinct = _risk_from_shares(
+        total=3, risk_requests=3, blacklisted_distinct=3
+    )
+    repeats = _risk_from_shares(
+        total=3, risk_requests=3, blacklisted_distinct=1
+    )
+    assert distinct["riskScore"] > repeats["riskScore"]
+
+
+def test_risk_score_rewards_recency():
+    """A recent reach scores above a stale one (current behaviour matters)."""
+    from app.routes.hosts import _risk_from_shares
+
+    recent = _risk_from_shares(
+        total=1, risk_requests=1, blacklisted_distinct=1,
+        newest_reach_age_minutes=5,
+    )
+    stale = _risk_from_shares(
+        total=1, risk_requests=1, blacklisted_distinct=1,
+        newest_reach_age_minutes=10_000,
+    )
+    assert recent["riskScore"] > stale["riskScore"]
+
+
+def test_attempt_only_scores_below_any_reach_host():
+    """A DENY-only host (intent evidence) must rank below any REACH host."""
+    from app.routes.hosts import _risk_from_shares
+
+    attempt_only = _risk_from_shares(total=100, risk_requests=0, enforcements=500)
+    assert attempt_only["riskReason"]["rule"] == "graded_attempt_only"
+    assert attempt_only["riskLevel"] == "LOW"
+    # Compare against the weakest possible reach host (1 reach, no breadth,
+    # stale): the attempt-only score must still be strictly lower.
+    weakest_reach = _risk_from_shares(
+        total=100, risk_requests=1, blacklisted_distinct=0,
+        newest_reach_age_minutes=10_000,
+    )
+    assert attempt_only["riskScore"] < weakest_reach["riskScore"]
+    # Attempts still CONTRIBUTE (not ignored): more DENYs grade higher.
+    few = _risk_from_shares(total=100, risk_requests=0, enforcements=1)
+    more = _risk_from_shares(total=100, risk_requests=0, enforcements=5)
+    assert more["riskScore"] > few["riskScore"]
+
+
+def test_risk_score_is_monotonic_across_the_grid():
+    """1/5/20 reaches × 1/2/5 destinations: the score is non-decreasing in
+    both axes and strictly increasing wherever it is below the 100 ceiling."""
+    from app.routes.hosts import _risk_from_shares
+
+    grid = {
+        (r, d): _risk_from_shares(
+            total=r, risk_requests=r, blacklisted_distinct=d,
+            newest_reach_age_minutes=5,
+        )["riskScore"]
+        for r in (1, 5, 20)
+        for d in (1, 2, 5)
+    }
+    # Non-decreasing in both axes (a saturating ceiling is a legitimate tie).
+    for d in (1, 2, 5):
+        assert grid[(1, d)] <= grid[(5, d)] <= grid[(20, d)]
+    for r in (1, 5, 20):
+        assert grid[(r, 1)] <= grid[(r, 2)] <= grid[(r, 5)]
+    # Strictly increasing below the ceiling — the grading is real, not flat.
+    for d in (1, 2, 5):
+        assert grid[(1, d)] < grid[(5, d)]
+    assert grid[(1, 1)] < grid[(1, 2)] < grid[(1, 5)]
+    assert grid[(5, 1)] < grid[(5, 2)]
+    # Both axes can reach the ceiling, and nothing ever exceeds it.
+    assert grid[(20, 5)] == 100
+    assert all(v <= 100 for v in grid.values())
 
 
 def test_risk_reason_zero_traffic_is_labelled_a_baseline():
-    """The empty window is the model's baseline, and says so — not a
+    """The empty window is the model's 0 baseline, and says so — not a
     measured clean result."""
     from app.routes.hosts import _risk_from_shares
 
     risk = _risk_from_shares(total=0, risk_requests=0, blacklisted_risk=0)
-    assert risk["riskScore"] == 12
+    assert risk["riskScore"] == 0
     assert risk["riskReason"]["rule"] == "no_traffic"
     assert "baseline" in risk["riskReason"]["text"]
 
 
-def test_risk_reason_floored_flag_absent_when_not_floored():
-    """A share-bracket HIGH that already clears 92 is NOT marked floored."""
+def test_risk_reason_floored_flag_is_always_false():
+    """The flat floor is deleted: no input can set `floored` true again."""
     from app.routes.hosts import _risk_from_shares
 
-    # share 1.0 → 72 + 20 = 92 exactly; no blacklist → not the floor rule.
-    risk = _risk_from_shares(total=10, risk_requests=10, blacklisted_risk=0)
-    assert risk["riskScore"] == 92
-    assert risk["riskReason"]["floored"] is False
-    assert risk["riskReason"]["rule"] != "blacklisted_destination_floor"
+    for kwargs in (
+        {"total": 10, "risk_requests": 10, "blacklisted_risk": 10},
+        {"total": 100, "risk_requests": 1, "blacklisted_distinct": 5},
+        {"total": 100, "risk_requests": 0, "enforcements": 50},
+        {"total": 0, "risk_requests": 0},
+    ):
+        reason = _risk_from_shares(**kwargs)["riskReason"]
+        assert reason["floored"] is False
+        assert reason["rule"] != "blacklisted_destination_floor"
 
 
 async def test_host_profile_es_unavailable_is_not_a_bare_low_score(client):
@@ -221,8 +301,9 @@ async def test_host_profile_es_unavailable_is_not_a_bare_low_score(client):
     assert risk["sources"]["risk"]["source"] is None
     assert risk["sources"]["risk"]["window"] == "1d"
     assert "findings" in risk["sources"]["risk"]["persisted_detail"]
-    # Back-compat: the old fields survive unchanged.
-    assert risk["riskScore"] == 12
+    # Back-compat: the numeric fields still exist (unavailable must not raise);
+    # the baseline is now 0 — "no evidence", never a plausible 12.
+    assert risk["riskScore"] == 0
     assert risk["riskLevel"] == "LOW"
 
 
@@ -239,6 +320,8 @@ async def test_host_profile_carries_explained_reason_when_es_online(
             "riskRequests": 10,
             "enforcements": 0,
             "blacklistedRequests": 3,
+            "blacklistedDistinct": 2,
+            "newestReachAgeMinutes": 10,
             "es_online": True,
             "bandwidthDownload": None,
             "bandwidthUpload": None,
@@ -251,9 +334,13 @@ async def test_host_profile_carries_explained_reason_when_es_online(
     risk = res.json()["risk"]
 
     assert risk["riskScoreAvailable"] is True
-    assert risk["riskScore"] == 92
-    assert risk["riskReason"]["rule"] == "blacklisted_destination_floor"
-    assert risk["riskReason"]["floored"] is True
+    # Graded model: 10 reaches + 2 distinct destinations + recent → HIGH.
+    assert risk["riskScore"] == 74
+    assert risk["riskLevel"] == "HIGH"
+    assert risk["riskReason"]["rule"] == "graded_reach"
+    assert risk["riskReason"]["floored"] is False
+    # The additive breadth figure rides the payload.
+    assert risk["blacklistedDistinct"] == 2
     assert risk["sources"]["risk"]["available"] is True
     assert "Elasticsearch" in risk["sources"]["risk"]["source"]
     assert risk["sources"]["risk"]["window"] == "1d"

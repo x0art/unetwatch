@@ -119,11 +119,11 @@ function IndicatorTable<T>({
  *
  *  - unavailable: the reason carries `state: "unavailable"` (ES unreachable /
  *    field mode UNKNOWN). NO score is shown; an explicit marker says so,
- *    mirroring AttckPanel's "Elasticsearch unavailable" tone. A host that was
- *    not measured must never read as a clean one.
- *  - explained: the score is shown with the reason sentence and the rule that
- *    produced it; the blacklist floor is badged so it cannot pass as a
- *    measurement.
+ *    deliberately signalling "this was not measured" rather than "this is
+ *    clean". A host that was not measured must never read as a clean one.
+ *  - explained: the score is shown with the reason sentence, the rule that
+ *    produced it, and the graded inputs (reaches, distinct blacklisted
+ *    destinations) it was derived from.
  *  - no reason at all (a profile from an older backend): the score is still
  *    shown, with a notice that no justification was supplied — never a bare
  *    number pretending to explain itself.
@@ -194,15 +194,13 @@ function RiskSummaryBody({ profile }: { profile: HostProfile }) {
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">{explained.text}</p>
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant={explained.floored ? "destructive" : "secondary"}>
-                  {explained.floored ? "FLAT FLOOR — not a measurement" : "rule"}
-                </Badge>
+                <Badge variant="secondary">rule</Badge>
                 <span className="font-mono text-muted-foreground">{explained.rule}</span>
                 <span className="text-muted-foreground/50">·</span>
                 <span className="font-mono text-muted-foreground">
                   {explained.inputs.riskRequests}/{explained.inputs.totalRequests} risk (ALLOW)
-                  {explained.inputs.blacklistedRequests > 0
-                    ? `, ${explained.inputs.blacklistedRequests} to blacklisted destinations`
+                  {(explained.inputs.blacklistedDistinct ?? 0) > 0
+                    ? `, ${explained.inputs.blacklistedDistinct} distinct blacklisted destination${explained.inputs.blacklistedDistinct === 1 ? "" : "s"}`
                     : ""}
                 </span>
               </div>
