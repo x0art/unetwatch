@@ -521,16 +521,23 @@ def _interval_cv(ts: pd.Series) -> float | None:
     is the whole statistic:
 
     * a machine beat — 1 min, 5 min, 1 h, with or without jitter — has a small
-      CV (measured: 0.00 exact, 0.07 at 5 % jitter, 0.28 at 20 % jitter);
+      CV. Exact cadence scores exactly 0.00. With jitter defined as an
+      independent Gaussian offset on each timestamp (sd = 5 % / 20 % of the
+      cadence), a beat scores ≈ 0.07 / ≈ 0.29, essentially independent of
+      whether the cadence is 1 min, 5 min or 1 h. Under the interval-jitter
+      convention (each gap scaled by ``1 + U(-j, j)``) the same beat scores
+      ≈ 0.03 / ≈ 0.12 instead — the figure is convention-dependent, and both
+      stay far below the gate;
     * organic load is Poisson, whose inter-arrival gaps are exponential and
-      score ``CV ≈ 1.0`` (measured: 0.97).
+      score ``CV ≈ 1.0`` (measured ≈ 0.94–1.07 over 60 seeds at n = 1440,
+      mean ≈ 0.996, converging to ≈ 1.0 at larger n).
 
     An earlier version merged arrivals within 1 h into "bursts" before
     measuring. That was exactly backwards: on a dense stream (a 1-minute
     heartbeat produces 60 arrivals/hour) the merge collapsed the beat to one
     arrival per hour, and Poisson noise to the same, so the two became
-    indistinguishable — and slightly *inverted* (a jittered beat scored 0.005,
-    noise 0.014). The merge is deleted; the threshold below does the work.
+    indistinguishable, and the inverted statistic was meaningless — both sides
+    scored near zero. The merge is deleted; the threshold below does the work.
 
     Resolution is whole seconds. Intervals are taken between arrivals floored to
     the second, so a sub-second gap reads as a zero-second interval and is then
