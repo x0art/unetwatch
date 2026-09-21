@@ -11,6 +11,7 @@ import json
 from datetime import UTC, datetime, timedelta, timezone
 
 import aiosqlite
+import pytest
 
 
 def _now() -> str:
@@ -202,8 +203,6 @@ async def test_summary_blacklisted_allow_is_additive_risk(client, db_path):
     assert data["source"] == "findings"
     assert data["totalRisk"] == 2  # both ALLOW rows remain risk
     assert data["totalBlacklistedRisk"] == 1  # only the blacklisted one
-
-
 async def test_summary_blacklist_deny_not_risk(client, db_path):
     """A blacklisted destination that was DENYed is an enforcement, not risk —
     totalBlacklistedRisk stays 0 (the proxy already stopped it)."""
@@ -626,3 +625,379 @@ async def test_client_report_volume_unavailable_when_no_bytes_persisted(client, 
     csv_res = client.get("/api/client-report/1.1.1.1/export.csv")
     assert csv_res.status_code == 200
     assert "not recorded" in csv_res.text
+
+
+# ── Enforcement counts on the LIVE path (the patternless-DENY defect) ──────
+#
+# The live analytics helpers derived their enforcement numbers from ONE query
+# built with `build_logs_query` DEFAULTS, which appends a `url : <pattern>`
+# clause. The proxy records a DENY against the destination it refused, whose
+# URL need not contain any block pattern (a bare host, an IP, the SNI), so that
+# frame held NO DENY rows on ordinary traffic and the count read 0. The fix
+# runs a SECOND, action-filtered query (`actions=["DENY","FLAG"]`) whose result
+# is independent of the pattern clause — the same split `_aggregate_host` uses
+# (`app/routes/hosts.py`). These tests pin both halves: the count, and the
+# classification `allow` vs `deny`.
+
+# The seeded block pattern. A DENY whose URL is the SNI host of the refused
+# destination contains none of it — that is the whole point.
+_BLOCK_PATTERN = "*indoxxi*"
+
+
+# `_stub_es` below resolves the field mode through the REAL cache
+# (`fetch_field_inventory`), so the cache must not survive a test: other suites
+# assert it is empty in a unit context (e.g.
+# `test_attck_mapping.py::test_inventory_union_not_derivable_from_mode_only`).
+@pytest.fixture(autouse=True)
+def _clear_es_fields_cache():
+    from app.services import es_fields
+
+    es_fields._invalidate_cache()
+    yield
+    es_fields._invalidate_cache()
+
+
+async def _seed_block_pattern(pattern: str = _BLOCK_PATTERN) -> None:
+    """Configure one block pattern (the pattern query has something to match)."""
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES (?, 'block')",
+            (pattern,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def _stub_es(monkeypatch, *, pattern_hits, action_hits):
+    """Stub ES for the analytics helpers and record the queries they send.
+
+    Both helpers import ``es_client`` INSIDE the function (and bail out before
+    searching when ``get_mode()`` is UNKNOWN), so this helper:
+
+    (a) resolves the mode through the REAL public path
+        (``fetch_field_inventory`` over a sample doc) so the gate admits the
+        call, and
+    (b) patches the DEFINING module's ``es_client`` — what the in-function
+        import resolves through.
+
+    Each search is answered by its QUERY SHAPE: a body carrying a ``terms``
+    filter on ``action`` is the action query, anything else is a pattern query.
+    This mirrors ``tests/test_hosts.py::_stub_es``.
+    """
+    from app.services import es_fields
+
+    baseline = {
+        "@timestamp": "2026-09-21T07:00:00Z",
+        "url": "https://x/",
+        "client_ip": "10.0.0.5",
+        "server_ip": "57.144.192.3",
+        "duration_seconds": 0.01,
+        "action": "ALLOW",
+    }
+    es_fields._invalidate_cache()
+    await es_fields.fetch_field_inventory(
+        es=_SampleES(sample_doc=baseline, field_caps={k: {} for k in baseline})
+    )
+    assert es_fields.get_mode() != "UNKNOWN"
+
+    sent: list[dict] = []
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            body = kwargs["body"]
+            sent.append(body)
+            filters = body["query"]["bool"]["filter"]
+            if any("terms" in f for f in filters):
+                # The count-only action query (`size: 0`, `track_total_hits:
+                # true`) — real ES answers these with a `total` block, which
+                # `_es_summary` reads as its enforcement count.
+                return {
+                    "hits": {
+                        "total": {"value": len(action_hits), "relation": "eq"},
+                        "hits": action_hits,
+                    }
+                }
+            return {"hits": {"hits": pattern_hits}}
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("app.services.es_client.es_client", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(es_fields, "es_client", lambda *a, **k: _Ctx())
+    return sent
+
+
+class _SampleES:
+    """Minimal ES double for the field-inventory probe (sample + field_caps)."""
+
+    def __init__(self, *, sample_doc, field_caps):
+        self._sample = sample_doc
+        self._caps = field_caps
+
+    async def search(self, **kwargs):
+        return {"hits": {"hits": [{"_source": self._sample}]}}
+
+    async def field_caps(self, **kwargs):
+        return {"fields": self._caps}
+
+    async def close(self):
+        return None
+
+
+# One ALLOW row that DOES match the block pattern (so the pattern query is not
+# empty), and one DENY row whose URL matches NO pattern — a bare SNI host. The
+# pre-fix frame therefore contained the ALLOW and none of the DENY.
+_PATTERN_ALLOW_HIT = {
+    "_source": {
+        "@timestamp": "2026-09-21T07:00:00Z",
+        "url": "https://indoxxi.foo/watch",
+        "client_ip": "10.0.0.5",
+        "server_ip": "57.144.192.3",
+        "action": "ALLOW",
+    }
+}
+_PATTERNLESS_DENY_HIT = {
+    "_source": {
+        "@timestamp": "2026-09-21T09:30:00Z",
+        "url": "https://z-m-gateway.facebook.com/",
+        "client_ip": "10.0.0.5",
+        "server_ip": "57.144.192.3",
+        "action": "DENY",
+    }
+}
+
+
+async def test_patternless_deny_counted_in_deny_series(client, db_path, monkeypatch):
+    """A DENY whose URL matches NO block pattern is counted in ``deny``.
+
+    Pre-fix this read 0: the pattern query never returned the row.
+    """
+    await _seed_block_pattern()
+    sent = await _stub_es(
+        monkeypatch,
+        pattern_hits=[_PATTERN_ALLOW_HIT],
+        action_hits=[_PATTERNLESS_DENY_HIT],
+    )
+
+    data = client.get("/api/analytics/enforcements?range=7d").json()
+    by_day = {p["bucket"]: p for p in data["points"]}
+    assert by_day["2026-09-21"]["deny"] == 1
+
+    # The root-cause pin: two searches were issued and the one that measured
+    # the DENY carries a `terms` clause on `action` and NO `url : <pattern>`.
+    assert len(sent) == 2
+    action_queries = [
+        b for b in sent if any("terms" in f for f in b["query"]["bool"]["filter"])
+    ]
+    assert len(action_queries) == 1, "exactly one action-filtered query"
+    assert {"terms": {"action": ["DENY", "FLAG"]}} in action_queries[0]["query"]["bool"]["filter"]
+    assert not any(
+        "query_string" in f for f in action_queries[0]["query"]["bool"]["filter"]
+    ), "the DENY query must carry NO block-pattern clause — that clause hid the row"
+
+
+async def test_patternless_deny_not_counted_into_allow(client, db_path, monkeypatch):
+    """The two-way miscount: the DENY row must NOT also land in ``allow``.
+
+    Pre-fix the classifier was `deny if action in (DENY, FLAG) else allow`, so
+    a DENY that never reached the frame was counted as an ALLOW. After the
+    split, `allow` is exactly ``action == "ALLOW"``.
+    """
+    await _seed_block_pattern()
+    await _stub_es(
+        monkeypatch,
+        pattern_hits=[_PATTERN_ALLOW_HIT],
+        action_hits=[_PATTERNLESS_DENY_HIT],
+    )
+
+    data = client.get("/api/analytics/enforcements?range=7d").json()
+    by_day = {p["bucket"]: p for p in data["points"]}
+    # One ALLOW reached a block pattern; the DENY is separate and NOT an allow.
+    assert by_day["2026-09-21"]["allow"] == 1
+    assert by_day["2026-09-21"]["deny"] == 1
+
+
+async def test_summary_total_enforcements_reflects_patternless_deny(
+    client, db_path, monkeypatch
+):
+    """``totalEnforcements`` (the headline card) reflects patternless DENYs."""
+    await _seed_block_pattern()
+    await _stub_es(
+        monkeypatch,
+        pattern_hits=[_PATTERN_ALLOW_HIT],
+        action_hits=[_PATTERNLESS_DENY_HIT],
+    )
+
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["totalEnforcements"] == 1
+    assert data["totalBlocked"] == 1
+    # The risk card still comes from the pattern frame and is unaffected.
+    assert data["totalRisk"] == 1
+    assert data["enforcementsNeverMeasured"] is False
+
+
+async def test_summary_empty_window_enforcements_are_measured_not_assumed(
+    client, db_path, monkeypatch
+):
+    """An ES-reachable empty window reports a REAL enforcement count.
+
+    Pins the honesty branch: when both queries return nothing the risk series is
+    a genuine 0 AND ``enforcementsNeverMeasured`` accompanies it, so a future
+    change cannot silently restore a confident 0 that was never measured. When
+    the action query DOES answer (the second case), the empty pattern frame must
+    still surface the proxy's real DENY count instead of 0.
+    """
+    await _seed_block_pattern()
+
+    # (a) Genuinely empty window — both questions were asked and both are empty.
+    await _stub_es(monkeypatch, pattern_hits=[], action_hits=[])
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["totalEnforcements"] == 0
+    assert data["enforcementsNeverMeasured"] is False
+    assert data["totalRisk"] == 0
+
+    # (b) Empty PATTERN frame but real DENYs — the empty branch must not report 0.
+    monkeypatch.undo()
+    await _stub_es(
+        monkeypatch, pattern_hits=[], action_hits=[_PATTERNLESS_DENY_HIT]
+    )
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["totalEnforcements"] == 1
+    assert data["totalRisk"] == 0
+
+
+async def test_enforcements_empty_window_is_honestly_empty_es(
+    client, db_path, monkeypatch
+):
+    """A reachable-but-empty window returns ``[]`` and is honestly ``source: es``.
+
+    Pre-fix ``_es_enforcements`` returned ``[]`` on this path WITHOUT ever
+    asking the DENY question, and the endpoint advertised ``es_online: true`` —
+    a live enforcement measurement it had never made. Now the empty result is
+    the product of BOTH searches, so ``source: "es"`` is true. The persisted
+    ledger is still reachable on the paths that return ``None`` (ES offline).
+    """
+    await _seed_block_pattern()
+    sent = await _stub_es(monkeypatch, pattern_hits=[], action_hits=[])
+
+    data = client.get("/api/analytics/enforcements?range=7d").json()
+    assert data["points"] == []
+    assert data["source"] == "es"
+    assert data["es_online"] is True
+    # Both queries ran on the empty path — the DENY question was actually asked.
+    assert len(sent) == 2
+    assert any("terms" in f for f in sent[1]["query"]["bool"]["filter"])
+
+
+# One DENY row whose URL matches NO block pattern, carrying the PROXY's own
+# rule identity (`rule_name` / `rule_info`) — the fields a patternless DENY
+# actually has, unlike app-derived `matched_patterns`.
+_PATTERNLESS_DENY_HIT_WITH_RULE = {
+    "_source": {
+        "@timestamp": "2026-09-21T09:30:00Z",
+        "url": "https://z-m-gateway.facebook.com/",
+        "base_url": "z-m-gateway.facebook.com",
+        "client_ip": "10.0.0.5",
+        "server_ip": "57.144.192.3",
+        "action": "DENY",
+        "rule_name": "Block Social Media",
+        "rule_info": "RN190,SNI,BS",
+    }
+}
+
+
+async def test_top_enforced_counts_patternless_deny(client, db_path, monkeypatch):
+    """A DENY whose URL matches NO block pattern appears in ``top-enforced``.
+
+    Pre-fix the helper grouped the pattern-filtered frame, which never contains
+    a patternless-URL DENY, so this row was absent and the result was ``[]`` —
+    indistinguishable from "no enforcements occurred".
+    """
+    await _seed_block_pattern()
+    sent = await _stub_es(
+        monkeypatch,
+        pattern_hits=[_PATTERN_ALLOW_HIT],
+        action_hits=[_PATTERNLESS_DENY_HIT_WITH_RULE],
+    )
+
+    data = client.get("/api/analytics/top-enforced?range=7d").json()
+    assert data["source"] == "es"
+    by_domain = {it["domain"]: it for it in data["items"]}
+    assert "z-m-gateway.facebook.com" in by_domain
+    assert by_domain["z-m-gateway.facebook.com"]["enforcements"] == 1
+    # The pattern query is not needed for this endpoint's population: the one
+    # query that ran is the action query, and it carries NO block-pattern clause.
+    assert len(sent) == 1
+    assert {"terms": {"action": ["DENY", "FLAG"]}} in sent[0]["query"]["bool"]["filter"]
+    assert not any(
+        "query_string" in f for f in sent[0]["query"]["bool"]["filter"]
+    ), "the enforcement frame must carry NO block-pattern clause"
+
+
+async def test_top_enforced_primary_rule_reads_proxy_rule_fields(
+    client, db_path, monkeypatch
+):
+    """``primaryRule`` reads the proxy's ``rule_name``, not ``matched_patterns``.
+
+    A patternless DENY has no app-derived ``matched_patterns`` (it never matched
+    a pattern), so a ``matched_patterns``-sourced field would read empty for the
+    very rows this endpoint now returns. The proxy's own rule identity is the
+    correct source; ``rule_name`` wins over ``rule_info``.
+    """
+    await _seed_block_pattern()
+    await _stub_es(
+        monkeypatch,
+        pattern_hits=[],
+        action_hits=[_PATTERNLESS_DENY_HIT_WITH_RULE],
+    )
+
+    data = client.get("/api/analytics/top-enforced?range=7d").json()
+    by_domain = {it["domain"]: it for it in data["items"]}
+    assert by_domain["z-m-gateway.facebook.com"]["primaryRule"] == "Block Social Media"
+
+
+async def test_top_enforced_primary_rule_falls_back_to_rule_info(
+    client, db_path, monkeypatch
+):
+    """With no ``rule_name``, ``primaryRule`` falls back to ``rule_info``'s first code."""
+    await _seed_block_pattern()
+    hit = json.loads(json.dumps(_PATTERNLESS_DENY_HIT_WITH_RULE))
+    del hit["_source"]["rule_name"]
+    await _stub_es(monkeypatch, pattern_hits=[], action_hits=[hit])
+
+    data = client.get("/api/analytics/top-enforced?range=7d").json()
+    by_domain = {it["domain"]: it for it in data["items"]}
+    assert by_domain["z-m-gateway.facebook.com"]["primaryRule"] == "RN190"
+
+
+async def test_top_enforced_primary_rule_empty_when_no_rule_attributable(
+    client, db_path, monkeypatch
+):
+    """A patternless DENY with neither proxy rule field yields an empty marker.
+
+    ``""`` is the explicit "no rule attributable" state — the same honest empty
+    the findings fallback uses — never a literal that reads as a rule name.
+    """
+    await _seed_block_pattern()
+    hit = json.loads(json.dumps(_PATTERNLESS_DENY_HIT_WITH_RULE))
+    del hit["_source"]["rule_name"]
+    del hit["_source"]["rule_info"]
+    await _stub_es(monkeypatch, pattern_hits=[], action_hits=[hit])
+
+    data = client.get("/api/analytics/top-enforced?range=7d").json()
+    by_domain = {it["domain"]: it for it in data["items"]}
+    assert by_domain["z-m-gateway.facebook.com"]["primaryRule"] == ""
+    assert by_domain["z-m-gateway.facebook.com"]["enforcements"] == 1

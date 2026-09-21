@@ -29,7 +29,8 @@ Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
     GET /api/analytics/summary?range=7d&compare=previous&hostGroup=all
         { has_data, totalVolume: int | null, bandwidthNeverMeasured,
           totalRisk, totalBlacklistedRisk, totalEnforcements,
-          topBandwidthHost, peakTrafficTime, range, compare, hostGroup, es_online,
+          enforcementsNeverMeasured, topBandwidthHost, peakTrafficTime,
+          range, compare, hostGroup, es_online,
           previous: { totalVolume: int | null, totalEnforcements } | null,
           volumeDeltaPct, enforcementsDeltaPct }
 
@@ -62,6 +63,7 @@ and only when a non-UTC zone is configured.
 
 import json
 import re
+
 
 from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException as FastAPIHTTPException
@@ -485,8 +487,11 @@ async def _findings_top_clients(db, minutes: int, limit: int) -> list[dict]:
 async def _es_summary(minutes: int) -> dict | None:
     """Best-effort ES aggregation for the summary card.
 
-    Returns None when ES is offline or the block-pattern query is empty, so the
-    caller falls back to the findings table (or an empty payload).
+    Returns None when ES is offline, no block patterns are configured, or the
+    search itself fails, so the caller falls back to the findings table.
+    A reachable-but-empty window is NOT one of those cases and does not return
+    None: it returns a payload whose enforcement figure is the proxy's real
+    count (see the action query below), not a measured-looking 0.
     """
     # The startup field-inventory gate (app.main lifespan) already determined
     # whether ES is reachable. Skipping here when it's UNKNOWN keeps the
@@ -522,20 +527,64 @@ async def _es_summary(minutes: int) -> dict | None:
             return None
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
-        query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        # Two searches, because a reach and an enforcement are different
+        # questions over different row populations and one query cannot answer
+        # both (the same split as `_aggregate_host` in app/routes/hosts.py):
+        #   * the pattern query answers "what ALLOWed a block pattern?" — the
+        #     pattern clause is the point of it.
+        #   * the action query answers "what did the proxy DENY/FLAG?" — a
+        #     DENY is recorded against the destination the proxy refused, whose
+        #     URL need not contain any block pattern (a bare host, an IP, the
+        #     SNI). Deriving the count from the pattern frame returned zero on
+        #     ordinary traffic, so `totalEnforcements` (the headline card, the
+        #     CSV column and the compat `totalBlocked` alias) read a confident 0.
+        pattern_query = build_logs_query(
+            block_patterns, minutes, settings.es_query_size
+        )
+        # Count-only: no documents are needed to answer the enforcement
+        # question, so `size: 0` (`fields` left unset — an empty `_source`
+        # projection would be a no-op next to `size: 0`) keeps it cheap, and
+        # `track_total_hits` is opted back in because a count-only search
+        # returns a capped total otherwise.
+        enforcement_query = build_logs_query(
+            block_patterns, minutes, 0, actions=["DENY", "FLAG"]
+        )
+        enforcement_query["track_total_hits"] = True
 
         async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
-            res = await es.search(index=settings.elastic_index, body=query)
+            res = await es.search(index=settings.elastic_index, body=pattern_query)
+            enf_res = await es.search(
+                index=settings.elastic_index, body=enforcement_query
+            )
+
+        # The proxy's own count of DENY/FLAG rows in the window — a measurement
+        # over the enforcement population, independent of the pattern clause.
+        # Read defensively: if ES cannot answer it (a stub, or an index that
+        # predates the field) the count is unavailable, not 0.
+        enforcement_hits = enf_res.get("hits", {}) if isinstance(enf_res, dict) else {}
+        enforcement_total = enforcement_hits.get("total")
+        total_enforcements: int | None
+        if isinstance(enforcement_total, dict):
+            total_enforcements = int(enforcement_total.get("value", 0))
+        else:
+            total_enforcements = None
 
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
+            # No REACH matched a block pattern in the window. That is NOT
+            # "nothing happened": the proxy may still have DENIED requests —
+            # and `total_enforcements` above, from the action query, is that
+            # real count. The empty window is reported honestly: the risk
+            # series has no value (real 0) while the enforcement figure carries
+            # a marker so it is never read as a confident measurement.
             return {
                 "totalVolume": None,
                 "totalRisk": 0,
                 "totalBlacklistedRisk": 0,
-                "totalEnforcements": 0,
+                "totalEnforcements": total_enforcements,
                 "topBandwidthHost": "",
                 "bandwidthNeverMeasured": True,
+                "enforcementsNeverMeasured": total_enforcements is None,
                 "peakTrafficTime": "",
             }
 
@@ -545,33 +594,38 @@ async def _es_summary(minutes: int) -> dict | None:
             actions=None,
         )
         if df.empty:
+            # The pattern frame arrived but every row was filtered out (blank
+            # URL / whitelisted). Enforcements are unaffected by that filter —
+            # they were never in this frame to begin with — so the action-query
+            # count stands and the marker mirrors the branch above.
             return {
                 "totalVolume": None,
                 "totalRisk": 0,
                 "totalBlacklistedRisk": 0,
-                "totalEnforcements": 0,
+                "totalEnforcements": total_enforcements,
                 "topBandwidthHost": "",
                 "bandwidthNeverMeasured": True,
+                "enforcementsNeverMeasured": total_enforcements is None,
                 "peakTrafficTime": "",
             }
 
         # Real bytes summed from the flat logstash-proxy feed. A missing byte
-        # field is NOT a zero: with neither field projected we cannot say what
+        # field is NOT a zero: with neither field recorded we cannot say what
         # the volume was, so the total stays None (explicit unavailable) rather
         # than being estimated from duration_seconds or the request count.
-        has_bytes = "bytes_downloaded" in df.columns or "bytes_uploaded" in df.columns
-        if has_bytes:
-            total_volume = int(
-                df.get("bytes_downloaded", pd.Series(0, index=df.index))
-                .fillna(0)
-                .astype(int)
-                .sum()
-            ) + int(
-                df.get("bytes_uploaded", pd.Series(0, index=df.index))
-                .fillna(0)
-                .astype(int)
-                .sum()
-            )
+        # `apply_filters` default-fills an ABSENT byte column with "" (a string,
+        # not a number), so the parse coerces with `to_numeric` and keeps only
+        # recorded values: `.astype(int)` on those "" values would raise and
+        # collapse this whole summary (enforcements included) onto the findings
+        # fallback — the very silent loss this change removes. A persisted 0
+        # stays a real, measured 0.
+        byte_cols = [
+            pd.to_numeric(df[col], errors="coerce")
+            for col in ("bytes_downloaded", "bytes_uploaded")
+            if col in df.columns
+        ]
+        if byte_cols and any(col.notna().any() for col in byte_cols):
+            total_volume = int(sum(col.sum() for col in byte_cols))
         else:
             total_volume = None
 
@@ -581,7 +635,6 @@ async def _es_summary(minutes: int) -> dict | None:
         if "action" in df.columns:
             actions = df["action"].fillna("").astype(str).str.strip().str.upper()
             total_risk = int(actions.isin(["ALLOW"]).sum())
-            total_enforcements = int(actions.isin(["DENY", "FLAG"]).sum())
             # A blacklisted destination the proxy still ALLOWed is the highest
             # risk — an explicit operator flag the proxy failed to enforce.
             risk_rows = df[actions.isin(["ALLOW"])]
@@ -589,10 +642,16 @@ async def _es_summary(minutes: int) -> dict | None:
                 risk_rows["base_url"].astype(str).isin(blacklist_domains).sum()
             )
         else:
-            # Legacy/COLLAPSED docs carry no action — every block-pattern hit
-            # was a risk by construction.
+            # Legacy/COLLAPSED docs carry no `action` field at all, so this
+            # frame cannot separate a risk from an enforcement — every
+            # block-pattern hit is graded a risk by construction. Reachability
+            # on real data: the action field is part of the extended findings
+            # schema and the proxy feed carries it; this branch fires only on a
+            # pre-`action` frame. `total_enforcements` keeps the action query's
+            # real count (NOT a hardcoded 0): a DENY is an `action`, and the
+            # absence of the field from THIS frame says nothing about whether
+            # the proxy denied anyone in the window.
             total_risk = len(df)
-            total_enforcements = 0
             total_blacklisted_risk = int(
                 df["base_url"].astype(str).isin(blacklist_domains).sum()
             )
@@ -616,6 +675,7 @@ async def _es_summary(minutes: int) -> dict | None:
             "totalEnforcements": total_enforcements,
             "topBandwidthHost": top_host,
             "bandwidthNeverMeasured": total_volume is None,
+            "enforcementsNeverMeasured": total_enforcements is None,
             "peakTrafficTime": _fmt_peak(peak_hour) if peak_hour else "",
         }
     except Exception:
@@ -625,8 +685,17 @@ async def _es_summary(minutes: int) -> dict | None:
 async def _es_enforcements(minutes: int) -> list[dict] | None:
     """Daily ALLOW-vs-DENY buckets from live ES.
 
-    Returns None when ES is offline or the block-pattern query is empty, so the
-    caller falls back to the findings table (which also counts DENY rows).
+    Returns None when ES is offline, no block patterns are configured, or the
+    reach search itself fails. It does NOT return None for a
+    reachable-but-empty pattern frame: on that path the DENY series is still
+    measurable (the action query is the source of every deny count below), so
+    returning a value there keeps the caller from silently skipping the
+    persisted ledger on the one window where the DENY question matters most.
+
+    The ALLOW series means ``action == "ALLOW"`` specifically — the client got
+    through a block pattern (ADR 0001). It is *not* an ``else`` bucket: a row
+    whose action is empty or unknown is neither an allow nor a deny and is
+    counted in neither series (see the loop below).
     """
     from app.services.es_fields import get_mode
 
@@ -657,39 +726,95 @@ async def _es_enforcements(minutes: int) -> list[dict] | None:
             return None
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
-        query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        # Two searches over two row populations (the fix pattern from
+        # `_aggregate_host` in app/routes/hosts.py):
+        #   * the pattern query is the ALLOW series — a REACH is a block-pattern
+        #     match, so the pattern clause is the point of it. It never returns
+        #     a patternless DENY, which is why it cannot answer the DENY series.
+        #   * the action query answers "what did the proxy DENY/FLAG?" — a DENY
+        #     is recorded against the destination the proxy refused, whose URL
+        #     need not contain a block pattern. Broadening the single pattern
+        #     query instead would change what BOTH series mean, so the two are
+        #     kept separate.
+        pattern_query = build_logs_query(
+            block_patterns, minutes, settings.es_query_size
+        )
+        action_query = build_logs_query(
+            block_patterns, minutes, settings.es_query_size, actions=["DENY", "FLAG"]
+        )
 
         async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
-            res = await es.search(index=settings.elastic_index, body=query)
+            res = await es.search(index=settings.elastic_index, body=pattern_query)
+            deny_res = await es.search(
+                index=settings.elastic_index, body=action_query
+            )
 
         hits = res.get("hits", {}).get("hits", [])
-        if not hits:
-            return []
-
-        df = apply_filters(
-            pd.DataFrame([h["_source"] for h in hits]),
-            whitelist_regex,
-            actions=None,
+        deny_hits = deny_res.get("hits", {}).get("hits", [])
+        # The ALLOW series comes from the pattern frame, filtered for whitelist
+        # and blank URLs exactly as before.
+        df = (
+            apply_filters(
+                pd.DataFrame([h["_source"] for h in hits]),
+                whitelist_regex,
+                actions=None,
+            )
+            if hits
+            else pd.DataFrame()
         )
-        if df.empty:
-            return []
 
-        if "action" in df.columns:
-            actions = df["action"].fillna("").astype(str).str.strip().str.upper()
-        else:
-            actions = pd.Series("", index=df.index)
+        # The enforcement frame is NOT run through `apply_filters`: a DENY whose
+        # URL matched a whitelist entry is still an enforcement the proxy
+        # recorded, and dropping it would re-hide rows this fix exists to show.
+        df_deny = (
+            pd.DataFrame([h["_source"] for h in deny_hits])
+            if deny_hits
+            else pd.DataFrame()
+        )
 
         buckets: dict[str, dict[str, int]] = {}
-        ts = df["@timestamp"].astype(str)
-        for idx in df.index:
-            day = local_day(ts[idx])
+
+        # `allow` is exactly action == "ALLOW" — the client got through a block
+        # pattern (ADR 0001). It is deliberately NOT an `else`: an empty or
+        # unknown action is not an ALLOW, and counting it as one is half of the
+        # two-way miscount this fixes. Such a row lands in NEITHER series.
+        if "action" in df.columns and not df.empty:
+            allow_actions = (
+                df["action"].fillna("").astype(str).str.strip().str.upper()
+            )
+            allow_df = df[allow_actions == "ALLOW"]
+        else:
+            # No action field in the frame, or the frame is empty: there is no
+            # row we can honestly call an ALLOW.
+            allow_df = pd.DataFrame()
+
+        for idx in allow_df.index:
+            day = local_day(str(allow_df.at[idx, "@timestamp"]))
             if not day:
                 continue
             b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
-            if actions[idx] in ("DENY", "FLAG"):
+            b["allow"] += 1
+
+        # The DENY series comes from the action query, which by construction
+        # returns exactly the DENY/FLAG rows — including those whose URL matches
+        # no block pattern. That is the entire reason this second query exists.
+        if "action" in df_deny.columns and not df_deny.empty:
+            deny_actions = (
+                df_deny["action"].fillna("").astype(str).str.strip().str.upper()
+            )
+            deny_df = df_deny[deny_actions.isin(["DENY", "FLAG"])]
+            for idx in deny_df.index:
+                day = local_day(str(deny_df.at[idx, "@timestamp"]))
+                if not day:
+                    continue
+                b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
                 b["deny"] += 1
-            else:
-                b["allow"] += 1
+
+        # Both questions were actually asked. A genuinely empty window (no ALLOW
+        # reached a block pattern AND the proxy issued no DENY) is `[]`, and the
+        # caller may honestly call that live ES: the DENY part was measured, not
+        # assumed — unlike pre-fix, where `[]` came from a pattern query that had
+        # never looked for a DENY at all.
         return list(buckets.values())
     except Exception:
         return None
@@ -698,9 +823,11 @@ async def _es_enforcements(minutes: int) -> list[dict] | None:
 async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
     """Top enforced target domains from live ES (ADR 0001).
 
-    Aggregates the block-pattern window by domain, counting DENY/FLAG rows.
-    Returns None when ES is offline or the query is empty so the caller can
-    fall back to the findings table.
+    Groups the proxy's own DENY/FLAG rows by domain and counts them. Returns
+    None when ES is offline, no block patterns are configured, or the search
+    fails, so the caller can fall back to the findings table; a
+    reachable-but-empty window returns ``[]`` (an honestly measured "nothing
+    was enforced") rather than ``None``.
     """
     from app.services.es_fields import get_mode
 
@@ -712,26 +839,31 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
         from app.config import get_settings
         from app.database import get_db
         from app.services.es_client import es_client
-        from app.services.monitor import (
-            _build_pattern_regex,
-            build_logs_query,
-            get_block_patterns,
-            get_whitelist_patterns,
-        )
-        from app.services.result_processor import apply_filters
+        from app.services.monitor import build_logs_query, get_block_patterns
 
         settings = get_settings()
         db = await get_db()
         try:
             block_patterns = await get_block_patterns(db)
-            whitelist_patterns = await get_whitelist_patterns(db)
         finally:
             await db.close()
         if not block_patterns:
             return None
 
-        whitelist_regex = _build_pattern_regex(whitelist_patterns)
-        query = build_logs_query(block_patterns, minutes, settings.es_query_size)
+        # The enforcement frame IS the proxy's action population: an
+        # `actions=["DENY","FLAG"]` query omits the block-pattern clause
+        # entirely (see `build_logs_query`). This is the whole correctness
+        # point — a DENY is recorded against the destination the proxy
+        # refused, whose URL need not contain any block pattern (a bare host,
+        # an IP, the SNI), so the previous pattern-filtered query returned
+        # those rows only when the refused URL happened to match a pattern.
+        # With no matching row it returned `[]`, indistinguishable from "no
+        # enforcements occurred". Grouping the action frame alone is
+        # sufficient here: unlike the reaches/ALLOW series there is no second
+        # row population this endpoint reports, so no pattern query is needed.
+        query = build_logs_query(
+            block_patterns, minutes, settings.es_query_size, actions=["DENY", "FLAG"]
+        )
 
         async with es_client(settings, timeout=settings.es_timeout_seconds) as es:
             res = await es.search(index=settings.elastic_index, body=query)
@@ -740,11 +872,13 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
         if not hits:
             return []
 
-        df = apply_filters(
-            pd.DataFrame([h["_source"] for h in hits]),
-            whitelist_regex,
-            actions=None,
-        )
+        # NOT run through `apply_filters`: it drops whitelisted and blank-URL
+        # rows, and a DENY whose URL matched a whitelist entry is still an
+        # enforcement the proxy recorded. Dropping it would re-hide rows this
+        # fix exists to show. The action query already restricts the frame to
+        # DENY/FLAG, so the per-row action test below is a defensive re-check,
+        # not the filter that produces the set.
+        df = pd.DataFrame([h["_source"] for h in hits])
         if df.empty:
             return []
 
@@ -757,14 +891,23 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
         if enforced.empty:
             return []
 
-        # matched_patterns may be absent from the projection — degrade per row
-        # to "" (no rule information) rather than a literal that reads as a name.
-        def _first_rule(raw) -> str:
-            try:
-                pats = json.loads(raw) if raw else []
-            except (json.JSONDecodeError, TypeError):
-                return ""
-            return str(pats[0]) if pats else ""
+        # `primaryRule` reads the PROXY's own rule identity, not
+        # `matched_patterns`: the latter is computed by uNetWatch from its own
+        # block patterns and only exists on a pattern match, so a patternless
+        # DENY — the very rows this endpoint now returns — would always read
+        # empty. `rule_name` is the proxy's human-facing rule name and is the
+        # primary source; `rule_info` (comma-separated opaque rule codes,
+        # e.g. "RN190,SNI,BS") is the fallback, reduced to its first code.
+        # `""` means no rule is attributable on any row of the domain — an
+        # explicit "not attributable", never a literal that reads as a name.
+        def _first_rule(rule_name, rule_info) -> str:
+            if isinstance(rule_name, str) and rule_name.strip():
+                return rule_name.strip()
+            if isinstance(rule_info, str) and rule_info.strip():
+                first = rule_info.split(",", 1)[0].strip()
+                if first:
+                    return first
+            return ""
 
         by_domain: dict[str, dict] = {}
         for r in enforced.to_dict("records"):
@@ -775,7 +918,9 @@ async def _es_top_enforced(minutes: int, limit: int) -> list[dict] | None:
                     "domain": domain,
                     "count": 0,
                     "enforcements": 0,
-                    "primaryRule": _first_rule(r.get("matched_patterns")),
+                    "primaryRule": _first_rule(
+                        r.get("rule_name"), r.get("rule_info")
+                    ),
                 },
             )
             entry["count"] += 1
@@ -839,11 +984,12 @@ async def summary(
     agg["totalBlocked"] = agg.get("totalEnforcements", 0)
     if previous is not None:
         previous["totalBlocked"] = previous.get("totalEnforcements", 0)
-    # A null volume is "not recorded", not zero — and must not decide has_data.
+    # A null volume OR a null enforcement count is "not recorded", not zero —
+    # neither may decide has_data, and neither may raise a comparison here.
     has_data = (
         (agg.get("totalVolume") or 0) > 0
         or agg["totalRisk"] > 0
-        or agg["totalEnforcements"] > 0
+        or (agg.get("totalEnforcements") or 0) > 0
         or bool(agg["topBandwidthHost"])
     )
     return {
@@ -897,8 +1043,13 @@ async def enforcements(
 ):
     """Daily policy enforcements — stacked bar (ALLOW vs DENY).
 
-    Prefers live ES but falls back to the findings table, which now holds DENY
-    rows too — the fallback reports real enforcement counts.
+    Prefers live ES but falls back to the findings table, which holds DENY rows
+    too (added when the poll stores through ``apply_filters(actions=("ALLOW",
+    "DENY"))``). The fallback runs when ES is offline, when no block patterns
+    are configured, and when the search fails — every path that returns None.
+    A reachable-but-empty ES window does NOT take the fallback: ``_es_enforcements``
+    measured the DENY series with a second, action-filtered query on that path,
+    so an empty result is a real measurement and ``source`` reports ``"es"``.
     """
     _validate_range(range_)
     minutes = _minutes_for_range(range_)
@@ -946,10 +1097,14 @@ async def top_enforced(
     db=Depends(get_db_conn),
     limit: int = Query(10, ge=1, le=100),
 ):
-    """Top enforced target domains — DENY filter, terms agg, primary matched rule.
+    """Top enforced target domains — action query, primary proxy rule.
 
-    Prefers live ES but falls back to the findings table, which now holds DENY
-    rows too, so the offline fallback reports real enforcement counts.
+    The live path groups the proxy's own DENY/FLAG rows (an `actions=["DENY",
+    "FLAG"]` query, so a DENY recorded against a non-pattern URL is included),
+    and its ``primaryRule`` is the proxy's own rule identity (``rule_name`` /
+    ``rule_info``). Prefers live ES but falls back to the findings table, which
+    now holds DENY rows too, so the offline fallback reports real enforcement
+    counts (that fallback still attributes a rule from ``matched_patterns``).
     """
     _validate_range(range_)
     minutes = _minutes_for_range(range_)
