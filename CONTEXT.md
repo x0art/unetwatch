@@ -61,6 +61,6 @@ Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diag
 **No value displayed, exported, or placed in an alert may be synthesized, estimated, or derived through a proxy formula. Every value must come from a persisted field, or be shown explicitly as unavailable.** Two things make this non-obvious:
 
 - **`0` is ambiguous here.** The flat `bytes_downloaded` collapses the raw `-` NOT-RECORDED sentinel to `0` (spec §j.5, `app/services/logline.py` docstring), so a `0` must never be shown as a confident measured zero — "absent" and "measured zero" are different states and must be distinguishable.
-- **A placeholder is permitted ONLY when visibly flagged.** The established pattern is a `SYNTHETIC / DEMO DATA — not evidence` destructive badge (e.g. `ReportPage.tsx`). An unbadged placeholder is a violation, not an exception.
+- **There is no placeholder escape hatch.** An unbadged placeholder is a violation, not an exception, and no code path may invent one: a value that is not measured must be rendered as unavailable, not filled with a plausible figure.
 
 Known trap: this class has shipped four times — a flat 8192-bytes-per-request proxy derived from `duration_seconds` (see `client_report.py` `_volume_for_bytes`); a vacuous `upload/(upload+download)` share reading `1.0`; `synthesizeBandwidth` faking MB/GB from a request count; a hardcoded `"420 MB"` fallback. Treat it as a recurring defect, not a style preference.

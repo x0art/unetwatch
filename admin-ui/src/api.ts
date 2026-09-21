@@ -1589,9 +1589,6 @@ export interface HostRiskSources {
 export interface HostProfile extends HostIdentity {
   ip: string
   risk: HostRisk
-  /** True when this profile is a hardcoded wireframe placeholder (no real
-   * data existed for the entity). MUST NOT be treated as evidence. */
-  placeholder?: boolean
   /** Backend host endpoint only: mirrors `risk.riskScoreAvailable`. */
   es_online?: boolean
 }
@@ -1850,8 +1847,9 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
  *
  * Prefers GET /api/hosts/:ip when the backend exposes it; falls back to
  * client-side aggregation from findings / query so the UI works before the
- * backend task lands. The interim aggregation mirrors the wireframe numbers:
- * Total Requests 42,810 when no data, Risk HIGH 78/100 at ~>5% deny rate.
+ * backend task lands. When no source records traffic for the host, the
+ * fallback reports the model's 0 empty-window baseline, never a fabricated
+ * figure.
  */
 export async function getHostProfile(ip: string, timeRange: string): Promise<HostProfile> {
   const cleanIp = ip.trim()

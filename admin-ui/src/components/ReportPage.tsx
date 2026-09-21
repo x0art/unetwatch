@@ -162,9 +162,6 @@ function RiskSummaryBody({ profile }: { profile: HostProfile }) {
     reason && "rule" in reason ? reason : null
   return (
     <div className="space-y-3">
-      {profile.placeholder && (
-        <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
-      )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={FileText}
@@ -348,11 +345,6 @@ export function ReportPage({ kind, value, onBack }: Props) {
           <Field label="generated_at" value={generatedAt} />
           <Field label="es_online" value={esOnline} />
           <Field label="sources" value={sourcesUsed} />
-          {kind === "host" && profile.data?.placeholder && (
-            <div className="mt-3">
-              <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
-            </div>
-          )}
         </dl>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>Profile</span>
