@@ -502,3 +502,127 @@ async def test_client_report_buckets_by_local_day(client, db_path, monkeypatch):
         assert "EST" not in data["peak_hour"]
     finally:
         get_settings.cache_clear()
+
+
+# ── Volume honesty ────────────────────────────────────────────────────────
+#
+# Product rule (CONTEXT.md, *No synthesized measurements*): a shown number is
+# a persisted field or explicitly unavailable. Volume used to fall back to
+# ``duration_seconds x 8192`` (or a flat 8 KiB per request) when the feed
+# carried no byte counter. That is deleted: volume is the SUM of the persisted
+# ``bytes_downloaded``/``bytes_uploaded`` columns, and when none is persisted
+# the API reports it unavailable (``totalVolume: null`` +
+# ``bandwidthNeverMeasured: true``) rather than inventing a total.
+
+
+async def test_volume_for_bytes_is_gone():
+    """The per-request/duration byte proxy must not come back."""
+    import app.routes.analytics as analytics_mod
+
+    assert not hasattr(analytics_mod, "DEFAULT_BYTES_PER_REQUEST")
+
+
+async def test_volume_unavailable_when_no_bytes_persisted(client, db_path):
+    """Rows with NO byte fields → volume is unavailable, never a nonzero number.
+
+    The seeded rows carry a ``duration_seconds`` value precisely so the old
+    proxy would have produced a large fabricated total; the honest answer is
+    null with an explicit "never measured" marker.
+    """
+    db = await aiosqlite.connect(db_path)
+    try:
+        await db.execute(
+            "INSERT INTO findings (client_ip, server_ip, url, base_url,"
+            " log_timestamp, matched_patterns, duration_seconds)"
+            " VALUES ('1.1.1.1', '', 'http://evil.example/a', 'evil.example',"
+            " strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), '[]', '30')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["source"] == "findings"
+    assert data["totalVolume"] is None          # not 0, and not 30*8192
+    assert data["bandwidthNeverMeasured"] is True
+    # This row matches no block pattern, so it is not risk and carries no real
+    # byte counter: nothing on the card is measured, so ``has_data`` is False.
+    # The point under test is that the served volume is ``None`` — never a
+    # fabricated 30 * 8192.
+    assert data["has_data"] is False
+
+
+async def test_volume_sums_real_persisted_bytes(client, db_path):
+    """Rows WITH real byte counters still sum them — ``totalVolume`` is real."""
+    db = await aiosqlite.connect(db_path)
+    try:
+        await db.executemany(
+            "INSERT INTO findings (client_ip, server_ip, url, base_url,"
+            " log_timestamp, matched_patterns, bytes_downloaded, bytes_uploaded)"
+            " VALUES (?, '', ?, 'evil.example',"
+            " strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), '[]', ?, ?)",
+            [
+                ("1.1.1.1", "http://evil.example/a", "2048", "1024"),
+                ("1.1.1.1", "http://evil.example/b", "4096", "0"),
+            ],
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    data = client.get("/api/analytics/summary?range=7d").json()
+    assert data["totalVolume"] == 2048 + 1024 + 4096 + 0
+    assert data["bandwidthNeverMeasured"] is False
+
+
+async def test_previous_period_volume_unavailable_when_not_persisted(client, db_path):
+    """A byte-less current AND previous window yield ``volumeDeltaPct: null``.
+
+    Both windows must be non-empty so ``previous`` is not ``None``; the delta
+    may not divide by an absent volume (no ``NaN``/``Infinity``).
+    """
+    now = datetime.now(UTC)
+    recent = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Inside the previous 7d slice ([now-14d, now-7d)).
+    prev = (now - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pats = json.dumps(["*evil*"])
+    await _seed(
+        client,
+        db_path,
+        [
+            ("1.1.1.1", "", "http://evil.example/a", "evil.example", recent, pats, "ALLOW"),
+            ("1.1.1.1", "", "http://evil.example/b", "evil.example", prev, pats, "ALLOW"),
+        ],
+        add_action_col=True,
+    )
+
+    data = client.get("/api/analytics/summary?range=7d&compare=previous").json()
+    assert data["totalVolume"] is None
+    assert data["bandwidthNeverMeasured"] is True
+    assert data["previous"] is not None
+    assert data["previous"]["totalVolume"] is None
+    assert data["volumeDeltaPct"] is None
+
+
+async def test_client_report_volume_unavailable_when_no_bytes_persisted(client, db_path):
+    """The client report (and its CSV export) report volume honestly too."""
+    await _seed(
+        client,
+        db_path,
+        [
+            (
+                "1.1.1.1", "", "http://evil.example/a", "evil.example",
+                _now(), json.dumps(["*evil*"]), "ALLOW",
+            ),
+        ],
+        add_action_col=True,
+    )
+
+    data = client.get("/api/client-report/1.1.1.1").json()
+    assert data["total_volume"] is None
+    assert data["bandwidthNeverMeasured"] is True
+    assert all(p["inbound"] == 0 and p["outbound"] == 0 for p in data["bandwidth"]["points"])
+
+    csv_res = client.get("/api/client-report/1.1.1.1/export.csv")
+    assert csv_res.status_code == 200
+    assert "not recorded" in csv_res.text

@@ -18,16 +18,19 @@ Every endpoint accepts the same three query params the Analytics page passes
   findings table, which now holds DENY rows too — both sources can report real
   enforcement counts; the fallback sets ``es_online: False`` but no longer
   forces ``enforcements = 0``.
-- Volume/direction come from real bytes where the feed carries them, falling
-  back to a documented per-request heuristic (8 KiB) that keeps relative
-  rankings real.
+- Volume is the SUM of the persisted ``bytes_downloaded``/``bytes_uploaded``
+  counters only. Where the feed carries no byte counter the volume is reported
+  as **unavailable** (``totalVolume: null`` with ``bandwidthNeverMeasured:
+  true``) — never estimated from ``duration_seconds`` or a request count
+  (CONTEXT.md, *No synthesized measurements*).
 
 Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
 
     GET /api/analytics/summary?range=7d&compare=previous&hostGroup=all
-        { has_data, totalVolume, totalRisk, totalBlacklistedRisk, totalEnforcements,
+        { has_data, totalVolume: int | null, bandwidthNeverMeasured,
+          totalRisk, totalBlacklistedRisk, totalEnforcements,
           topBandwidthHost, peakTrafficTime, range, compare, hostGroup, es_online,
-          previous: { totalVolume, totalEnforcements } | null,
+          previous: { totalVolume: int | null, totalEnforcements } | null,
           volumeDeltaPct, enforcementsDeltaPct }
 
     GET /api/analytics/bandwidth?range=7d&compare=previous&hostGroup=all
@@ -37,7 +40,8 @@ Response shapes (all camelCase — consumed by ``api.ts`` helpers verbatim):
         { points: [{ bucket, allow, deny }], range, hostGroup, es_online }
 
     GET /api/analytics/top-domains?range=7d&compare=previous&hostGroup=all
-        { items: [{ domain, volume, pct }], range, hostGroup, es_online }
+        { items: [{ domain, count, volume, pct: number | null }],
+          range, hostGroup, es_online }
 
     GET /api/analytics/top-enforced?range=7d&compare=previous&hostGroup=all
         { items: [{ domain, enforcements, primaryRule }], range, hostGroup, es_online }
@@ -73,10 +77,10 @@ router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 # 1h added so the Analytics presets match the app-wide FilterContext ranges.
 SUPPORTED_RANGES = {"1h", "24h", "3d", "7d", "30d", "90d", "1y"}
 
-# Per-request byte heuristic used when the feed carries no byte accounting
-# (documented fallback — see module docstring).
-DEFAULT_BYTES_PER_REQUEST = 8192  # 8 KiB
-
+# NOTE: there is deliberately no per-request byte constant here. Volume is the
+# SUM of the persisted ``bytes_downloaded``/``bytes_uploaded`` columns or an
+# explicit "not recorded" — never a per-request or per-duration estimate
+# (CONTEXT.md, *No synthesized measurements*).
 
 def _minutes_for_range(range_: str) -> int:
     return {
@@ -176,38 +180,47 @@ def _domain_of_base(base_url: str) -> str:
     host = m.group(1) if m else (base_url or "unknown")
     # Strip trailing port and leading www. so 'a.example' and 'a.example:443'
     # aggregate into the same bucket.
-    host = re.sub(r":\d+$", "", host)
     return host or "unknown"
 
 
-def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
-    """Sum bytes per row — real feed bytes first, duration proxy as fallback.
+def _persisted_bytes(value) -> int | None:
+    """The persisted byte figure for one row, or ``None`` when not recorded.
 
-    The flat logstash-proxy index now persists ``bytes_downloaded`` and
-    ``bytes_uploaded``; when either is present they sum to the true transfer
-    size. Otherwise (legacy/COLLAPSED rows) the duration is used as a proxy
-    (1s ≈ 8 KiB) or a flat 8 KiB per request is assumed — monotonic in
-    request volume, so the rankings stay honest.
+    ``None`` and ``""`` are NOT-RECORDED (absent), and are deliberately
+    distinct from a stored ``0``: the flat ``bytes_downloaded`` column
+    collapses the raw line's ``-`` sentinel to ``0``, so a ``0`` must never be
+    *shown* as a confident measured zero — but it is still a persisted value
+    and must not be replaced by an estimate.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _volume_for_bytes(rows: list[dict]) -> int | None:
+    """SUM the persisted byte counters — never a proxy, or ``None``.
+
+    Returns the summed ``bytes_downloaded`` + ``bytes_uploaded`` when at least
+    one row carried a byte counter, and ``None`` when no row did. There is no
+    duration or per-request fallback: a fabricated total that happened to
+    preserve the ranking order would still be a fabricated absolute figure, so
+    an unknown volume is reported as unavailable rather than estimated
+    (CONTEXT.md, *No synthesized measurements*). Callers surface ``None`` as
+    an explicit unavailable marker.
     """
     total = 0
+    seen = False
     for r in rows:
-        dn = r.get("bytes_downloaded")
-        up = r.get("bytes_uploaded")
-        try:
-            if dn not in (None, "") or up not in (None, ""):
-                total += int(dn or 0) + int(up or 0)
-                continue
-        except (TypeError, ValueError):
-            pass
-        if has_duration:
-            dur = r.get("duration_seconds") or 0
-            try:
-                total += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-            except (TypeError, ValueError):
-                total += DEFAULT_BYTES_PER_REQUEST
-        else:
-            total += DEFAULT_BYTES_PER_REQUEST
-    return total
+        dn = _persisted_bytes(r.get("bytes_downloaded"))
+        up = _persisted_bytes(r.get("bytes_uploaded"))
+        if dn is None and up is None:
+            continue
+        seen = True
+        total += (dn or 0) + (up or 0)
+    return total if seen else None
 
 
 def _fmt_peak(ts: str) -> str:
@@ -235,7 +248,6 @@ async def _load_blacklist_sets(db) -> tuple[set[str], set[str]]:
 async def _findings_summary(db, minutes: int) -> dict:
     """Aggregate the persisted findings table into the summary shape."""
     columns = await _column_names(db)
-    has_duration = _has_column(columns, "duration_seconds")
     has_action = _has_column(columns, "action")
 
     params: list = []
@@ -250,7 +262,9 @@ async def _findings_summary(db, minutes: int) -> dict:
     blacklist_urls, blacklist_ips = await _load_blacklist_sets(db)
     blacklist_domains = blacklist_urls | blacklist_ips
 
-    total_volume = 0
+    # ``None`` until a byte counter is seen: an unknown volume is reported as
+    # unavailable, never estimated from a duration or a request count.
+    total_volume: int | None = None
     total_risk = 0
     total_blacklisted_risk = 0
     total_enforcements = 0
@@ -262,7 +276,7 @@ async def _findings_summary(db, minutes: int) -> dict:
         )
         rows = [dict(r) for r in await cursor.fetchall()]
 
-        total_volume = _volume_for_bytes(rows, has_duration)
+        total_volume = _volume_for_bytes(rows)
         total_risk = sum(1 for r in rows if _row_is_risk(r, has_action))
         total_blacklisted_risk = sum(
             1
@@ -275,6 +289,10 @@ async def _findings_summary(db, minutes: int) -> dict:
         by_host: dict[str, int] = {}
         for r in rows:
             by_host[r["client_ip"]] = by_host.get(r["client_ip"], 0) + 1
+        # NOTE: ``top_host`` stays "" here. "Top bandwidth host" cannot be
+        # answered from this fallback: it would have to be ranked by the
+        # synthesized volume this module no longer invents. ES answers it from
+        # the real feed (see ``_es_summary``/``_es_top_domains``).
         # Peak hour = the operator-local hour with the most rows (best-effort;
         # the UI shows the weekday + hour + zone label verbatim).
         by_hour: dict[str, int] = {}
@@ -291,6 +309,7 @@ async def _findings_summary(db, minutes: int) -> dict:
         "totalBlacklistedRisk": total_blacklisted_risk,
         "totalEnforcements": total_enforcements,
         "topBandwidthHost": top_host,
+        "bandwidthNeverMeasured": total_volume is None,
         "peakTrafficTime": _fmt_peak(peak_ts) if peak_ts else "",
     }
 
@@ -330,24 +349,30 @@ async def _previous_period_summary(db, minutes: int) -> dict | None:
         return None
 
     columns = await _column_names(db)
-    has_duration = _has_column(columns, "duration_seconds")
     has_action = _has_column(columns, "action")
-    total_volume = _volume_for_bytes(rows, has_duration)
+    total_volume = _volume_for_bytes(rows)
     total_enforcements = sum(1 for r in rows if _row_is_enforced(r, has_action))
     return {"totalVolume": total_volume, "totalEnforcements": total_enforcements}
 
 
-def _pct_delta(current: int, previous: int | None) -> float | None:
-    if previous is None or previous <= 0:
+def _pct_delta(current: int | None, previous: int | None) -> float | None:
+    """Percent change, or ``None`` when it is undefined.
+
+    ``None`` on either side means "not recorded" (see ``_volume_for_bytes``),
+    and a non-positive baseline has no defined percent change — neither may
+    produce a number, and neither may divide by zero.
+    """
+    if current is None or previous is None or previous <= 0:
         return None
     return round(((current - previous) / previous) * 100, 1)
 
 
 async def _findings_bandwidth(db, minutes: int) -> list[dict]:
-    """Daily buckets summing bytes (outbound only; feed has no direction)."""
-    columns = await _column_names(db)
-    has_duration = _has_column(columns, "duration_seconds")
+    """Daily buckets summing the real persisted byte counters.
 
+    Rows with no byte counter contribute nothing — the day is present with a
+    real (possibly 0) sum, never a per-request estimate.
+    """
     params: list = []
     where = _window_clause(minutes, params)
     cursor = await db.execute(
@@ -355,31 +380,19 @@ async def _findings_bandwidth(db, minutes: int) -> list[dict]:
     )
     rows = [dict(r) for r in await cursor.fetchall()]
 
-    buckets: dict[str, dict[str, int]] = {}
+    buckets: dict[str, dict] = {}
     for r in rows:
         day = local_day(r.get("log_timestamp") or "")
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
         # Real bytes from the flat feed: download → inbound, upload → outbound.
-        dn = r.get("bytes_downloaded")
-        up = r.get("bytes_uploaded")
-        try:
-            if dn not in (None, ""):
-                b["inbound"] += int(dn)
-            if up not in (None, ""):
-                b["outbound"] += int(up)
-            if (dn in (None, "") and up in (None, "")) or (int(dn or 0) == 0 and int(up or 0) == 0):
-                if has_duration:
-                    dur = r.get("duration_seconds") or 0
-                    try:
-                        b["outbound"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-                    except (TypeError, ValueError):
-                        b["outbound"] += DEFAULT_BYTES_PER_REQUEST
-                else:
-                    b["outbound"] += DEFAULT_BYTES_PER_REQUEST
-        except (TypeError, ValueError):
-            b["outbound"] += DEFAULT_BYTES_PER_REQUEST
+        dn = _persisted_bytes(r.get("bytes_downloaded"))
+        up = _persisted_bytes(r.get("bytes_uploaded"))
+        if dn is not None:
+            b["inbound"] += dn
+        if up is not None:
+            b["outbound"] += up
     return list(buckets.values())
 
 
@@ -409,10 +422,13 @@ async def _findings_enforcements(db, minutes: int) -> list[dict]:
 
 
 async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:
-    """Terms aggregation on base_url by summed bytes, with % of window total."""
-    columns = await _column_names(db)
-    has_duration = _has_column(columns, "duration_seconds")
+    """Terms aggregation on base_url by summed real bytes, with % of total.
 
+    ``volume`` is the summed persisted byte counter per domain; a domain whose
+    rows carry no byte counter sums to a real ``0`` and is sorted last. The
+    window ``pct`` is ``null`` while the window total is 0 — a 0/0 share is
+    undefined, not 0%.
+    """
     params: list = []
     where = _window_clause(minutes, params)
     cursor = await db.execute(
@@ -425,31 +441,18 @@ async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:
         domain = _domain_of_base(r.get("base_url") or "")
         entry = by_domain.setdefault(domain, {"count": 0, "volume": 0})
         entry["count"] += 1
-        # Prefer real bytes when present, matching _volume_for_bytes / _es_summary.
-        dn = r.get("bytes_downloaded")
-        up = r.get("bytes_uploaded")
-        try:
-            if dn not in (None, "") or up not in (None, ""):
-                entry["volume"] += int(dn or 0) + int(up or 0)
-                continue
-        except (TypeError, ValueError):
-            pass
-        if has_duration:
-            dur = r.get("duration_seconds") or 0
-            try:
-                entry["volume"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-            except (TypeError, ValueError):
-                entry["volume"] += DEFAULT_BYTES_PER_REQUEST
-        else:
-            entry["volume"] += DEFAULT_BYTES_PER_REQUEST
+        # Real bytes only; no byte counter contributes nothing (never estimated).
+        dn = _persisted_bytes(r.get("bytes_downloaded"))
+        up = _persisted_bytes(r.get("bytes_uploaded"))
+        entry["volume"] += (dn or 0) + (up or 0)
 
-    total = sum(d["volume"] for d in by_domain.values()) or 1
+    total = sum(d["volume"] for d in by_domain.values())
     items = [
         {
             "domain": domain,
             "count": entry["count"],
             "volume": entry["volume"],
-            "pct": round((entry["volume"] / total) * 100, 1),
+            "pct": round((entry["volume"] / total) * 100, 1) if total else None,
         }
         for domain, entry in sorted(by_domain.items(), key=lambda kv: (-kv[1]["volume"], kv[0]))
     ]
@@ -558,11 +561,12 @@ async def _es_summary(minutes: int) -> dict | None:
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
             return {
-                "totalVolume": 0,
+                "totalVolume": None,
                 "totalRisk": 0,
                 "totalBlacklistedRisk": 0,
                 "totalEnforcements": 0,
                 "topBandwidthHost": "",
+                "bandwidthNeverMeasured": True,
                 "peakTrafficTime": "",
             }
 
@@ -573,18 +577,21 @@ async def _es_summary(minutes: int) -> dict | None:
         )
         if df.empty:
             return {
-                "totalVolume": 0,
+                "totalVolume": None,
                 "totalRisk": 0,
                 "totalBlacklistedRisk": 0,
                 "totalEnforcements": 0,
                 "topBandwidthHost": "",
+                "bandwidthNeverMeasured": True,
                 "peakTrafficTime": "",
             }
 
-        # Real bytes from the flat logstash-proxy feed (bytes_downloaded +
-        # bytes_uploaded) take priority over the duration×8192 proxy.
-        has_duration = "duration_seconds" in df.columns
-        if "bytes_downloaded" in df.columns or "bytes_uploaded" in df.columns:
+        # Real bytes summed from the flat logstash-proxy feed. A missing byte
+        # field is NOT a zero: with neither field projected we cannot say what
+        # the volume was, so the total stays None (explicit unavailable) rather
+        # than being estimated from duration_seconds or the request count.
+        has_bytes = "bytes_downloaded" in df.columns or "bytes_uploaded" in df.columns
+        if has_bytes:
             total_volume = int(
                 df.get("bytes_downloaded", pd.Series(0, index=df.index))
                 .fillna(0)
@@ -596,11 +603,8 @@ async def _es_summary(minutes: int) -> dict | None:
                 .astype(int)
                 .sum()
             )
-        elif has_duration:
-            durations = df["duration_seconds"].fillna(0).apply(lambda d: max(1, int(d)))
-            total_volume = int(durations.sum()) * DEFAULT_BYTES_PER_REQUEST
         else:
-            total_volume = len(df) * DEFAULT_BYTES_PER_REQUEST
+            total_volume = None
 
         # ADR 0001: risk = ALLOW pattern-matches; enforcements = DENY/FLAG
         # (the proxy already handled those). Risk is what needs action.
@@ -642,6 +646,7 @@ async def _es_summary(minutes: int) -> dict | None:
             "totalBlacklistedRisk": total_blacklisted_risk,
             "totalEnforcements": total_enforcements,
             "topBandwidthHost": top_host,
+            "bandwidthNeverMeasured": total_volume is None,
             "peakTrafficTime": _fmt_peak(peak_hour) if peak_hour else "",
         }
     except Exception:
@@ -833,6 +838,12 @@ async def summary(
     table. The previous-period numbers are computed over the fixed slice before
     the current window (see ``_previous_period_summary``) — the deltas are the
     honest percent change between the two windows.
+
+    ``totalVolume`` is the summed persisted bytes, or ``null`` with
+    ``bandwidthNeverMeasured: true`` when no byte counter was recorded for the
+    window — an unknown volume is reported as unavailable, never estimated.
+    ``volumeDeltaPct`` is ``null`` whenever either window's volume is unknown
+    (it never divides by an absent total).
     """
     _validate_range(range_)
     minutes = _minutes_for_range(range_)
@@ -859,8 +870,9 @@ async def summary(
     agg["totalBlocked"] = agg.get("totalEnforcements", 0)
     if previous is not None:
         previous["totalBlocked"] = previous.get("totalEnforcements", 0)
+    # A null volume is "not recorded", not zero — and must not decide has_data.
     has_data = (
-        agg["totalVolume"] > 0
+        (agg.get("totalVolume") or 0) > 0
         or agg["totalRisk"] > 0
         or agg["totalEnforcements"] > 0
         or bool(agg["topBandwidthHost"])

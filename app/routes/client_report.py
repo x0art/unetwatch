@@ -33,7 +33,6 @@ from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
 router = APIRouter(prefix="/api/client-report", tags=["client-report"])
 
-DEFAULT_BYTES_PER_REQUEST = 8192
 WINDOW_LABEL = "all time"
 
 
@@ -96,26 +95,38 @@ def _domain_of_base(base_url: str) -> str:
     return host or "unknown"
 
 
-def _volume_for_bytes(rows: list[dict], has_duration: bool) -> int:
+def _persisted_bytes(value) -> int | None:
+    """The persisted byte figure for one row, or ``None`` when not recorded.
+
+    ``None``/``""`` are NOT-RECORDED (absent); a stored ``0`` is a persisted
+    value and must never be replaced by an estimate.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _volume_for_bytes(rows: list[dict]) -> int | None:
+    """SUM the persisted byte counters — never a proxy, or ``None``.
+
+    Returns ``None`` when no row carried a byte counter: an unknown volume is
+    reported as unavailable, never estimated from ``duration_seconds`` or a
+    request count (CONTEXT.md, *No synthesized measurements*). The caller
+    surfaces this in ``total_volume`` / ``bandwidthNeverMeasured``.
+    """
     total = 0
+    seen = False
     for r in rows:
-        dn = r.get("bytes_downloaded")
-        up = r.get("bytes_uploaded")
-        try:
-            if dn not in (None, "") or up not in (None, ""):
-                total += int(dn or 0) + int(up or 0)
-                continue
-        except (TypeError, ValueError):
-            pass
-        if has_duration:
-            dur = r.get("duration_seconds") or 0
-            try:
-                total += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-            except (TypeError, ValueError):
-                total += DEFAULT_BYTES_PER_REQUEST
-        else:
-            total += DEFAULT_BYTES_PER_REQUEST
-    return total
+        dn = _persisted_bytes(r.get("bytes_downloaded"))
+        up = _persisted_bytes(r.get("bytes_uploaded"))
+        if dn is None and up is None:
+            continue
+        seen = True
+        total += (dn or 0) + (up or 0)
+    return total if seen else None
 
 
 def _fmt_peak(ts: str) -> str:
@@ -193,14 +204,13 @@ async def _fetch_client_rows(db, client_ip: str, patterns, regex: str, clauses: 
 
 
 def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) -> dict:
-    has_duration = _has_column(columns, "duration_seconds")
     has_action = _has_column(columns, "action")
     has_data = len(rows) > 0
 
     total_requests = len(rows)
     total_risk = sum(1 for r in rows if _row_is_risk(r, has_action))
     total_enforcements = sum(1 for r in rows if _row_is_enforced(r, has_action))
-    total_volume = _volume_for_bytes(rows, has_duration) if rows else 0
+    total_volume = _volume_for_bytes(rows) if rows else None
     distinct_urls = len({r.get("url") for r in rows}) if rows else 0
     distinct_domains = len({_domain_of_base(r.get("base_url") or "") for r in rows}) if rows else 0
 
@@ -249,26 +259,14 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
             if not day:
                 continue
             b = bw_buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
-            dn = r.get("bytes_downloaded")
-            up = r.get("bytes_uploaded")
-            try:
-                has_bytes = dn not in (None, "") or up not in (None, "")
-                if has_bytes:
-                    if dn not in (None, ""):
-                        b["inbound"] += int(dn)
-                    if up not in (None, ""):
-                        b["outbound"] += int(up)
-                else:
-                    if has_duration:
-                        dur = r.get("duration_seconds") or 0
-                        try:
-                            b["outbound"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-                        except (TypeError, ValueError):
-                            b["outbound"] += DEFAULT_BYTES_PER_REQUEST
-                    else:
-                        b["outbound"] += DEFAULT_BYTES_PER_REQUEST
-            except (TypeError, ValueError):
-                b["outbound"] += DEFAULT_BYTES_PER_REQUEST
+            # Real bytes only; a row with no byte counter contributes nothing
+            # (never an estimate).
+            dn = _persisted_bytes(r.get("bytes_downloaded"))
+            up = _persisted_bytes(r.get("bytes_uploaded"))
+            if dn is not None:
+                b["inbound"] += dn
+            if up is not None:
+                b["outbound"] += up
 
             e = enf_buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
             if _row_is_enforced(r, has_action):
@@ -288,25 +286,18 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
             domain = _domain_of_base(r.get("base_url") or "")
             entry = by_domain.setdefault(domain, {"count": 0, "volume": 0})
             entry["count"] += 1
-            dn = r.get("bytes_downloaded")
-            up = r.get("bytes_uploaded")
-            try:
-                if dn not in (None, "") or up not in (None, ""):
-                    entry["volume"] += int(dn or 0) + int(up or 0)
-                    continue
-            except (TypeError, ValueError):
-                pass
-            if has_duration:
-                dur = r.get("duration_seconds") or 0
-                try:
-                    entry["volume"] += max(1, int(dur)) * DEFAULT_BYTES_PER_REQUEST
-                except (TypeError, ValueError):
-                    entry["volume"] += DEFAULT_BYTES_PER_REQUEST
-            else:
-                entry["volume"] += DEFAULT_BYTES_PER_REQUEST
-        total_vol = sum(d["volume"] for d in by_domain.values()) or 1
+            dn = _persisted_bytes(r.get("bytes_downloaded"))
+            up = _persisted_bytes(r.get("bytes_uploaded"))
+            entry["volume"] += (dn or 0) + (up or 0)
+        total_vol = sum(d["volume"] for d in by_domain.values())
         top_domains = [
-            {"domain": d, "count": v["count"], "volume": v["volume"], "pct": round((v["volume"] / total_vol) * 100, 1)}
+            {
+                "domain": d,
+                "count": v["count"],
+                "volume": v["volume"],
+                # A 0/0 share is undefined, not 0%.
+                "pct": round((v["volume"] / total_vol) * 100, 1) if total_vol else None,
+            }
             for d, v in sorted(by_domain.items(), key=lambda kv: (-kv[1]["volume"], kv[0]))
         ][:10]
 
@@ -353,6 +344,7 @@ def _build_report_payload(client_ip: str, rows: list[dict], columns: list[str]) 
         "total_risk": total_risk,
         "total_enforcements": total_enforcements,
         "total_volume": total_volume,
+        "bandwidthNeverMeasured": total_volume is None,
         "distinct_urls": distinct_urls,
         "distinct_domains": distinct_domains,
         "top_pattern": top_pattern,
@@ -415,7 +407,6 @@ async def client_report_export_csv(
 ):
     ip = _validate_ip(client_ip)
     columns = await _column_names(db)
-    has_duration = _has_column(columns, "duration_seconds")
     patterns, regex, clauses = await _load_whitelist(db)
     rows = await _fetch_client_rows(db, ip, patterns, regex, clauses)
     payload = _build_report_payload(ip, rows, columns)
@@ -432,7 +423,10 @@ async def client_report_export_csv(
     w.writerow(["Total requests", payload["total_requests"]])
     w.writerow(["Risks (ALLOW)", payload["total_risk"]])
     w.writerow(["Enforcements (DENY)", payload["total_enforcements"]])
-    w.writerow(["Total volume (bytes)", payload["total_volume"]])
+    w.writerow([
+        "Total volume (bytes)",
+        payload["total_volume"] if payload["total_volume"] is not None else "not recorded",
+    ])
     w.writerow(["Distinct URLs", payload["distinct_urls"]])
     w.writerow(["Distinct domains", payload["distinct_domains"]])
     w.writerow(["Top pattern", payload["top_pattern"] or ""])
