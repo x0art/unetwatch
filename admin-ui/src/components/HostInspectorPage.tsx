@@ -69,8 +69,6 @@ const ACTION_FILTER_OPTIONS = [
   { value: "FLAG", label: "FLAG" },
 ]
 
-const DEMO_IP = "192.168.1.45"
-
 /* ── Section data (timeline + top tables + host log rows) ────────────── */
 
 interface HostSectionData {
@@ -82,8 +80,6 @@ interface HostSectionData {
   logs: LogRow[]
   logTotal: number
   window: string
-  /** Demo-only paging metadata so the 42,810-count pagination is fully wired. */
-  demoMeta?: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[]; baseNow: number }
 }
 
 const EMPTY_SECTIONS: HostSectionData = {
@@ -211,15 +207,13 @@ async function fetchHostSectionsFindings(ip: string, timeRange: string): Promise
 
 async function fetchHostSections(ip: string, timeRange: string, source: HostSource = "live"): Promise<HostSectionData> {
   const minutes = timeRangeToMinutesLive(timeRange)
-  const isDemo = ip.trim() === DEMO_IP
   if (source === "findings") {
     try { const data = await fetchHostSectionsFindings(ip, timeRange); if (data.logs.length > 0) return data } catch { /* fallback below */ }
-    if (isDemo) return buildDemoSections(timeRange)
     return { ...EMPTY_SECTIONS, window: timeRange }
   }
   // Prefer live ES rows filtered to this host — richest source (action-aware,
   // pattern matches, durations). Backend caps items at 500; total_requests is
-  // the real window total and drives the "Showing 1-50 of 42,810" summary.
+  // the real window total and drives the request-log count summary.
   // The `ip` param uses an exact ES term filter so risk rows are found even
   // when the generic substring search would miss them.
   try {
@@ -244,145 +238,9 @@ async function fetchHostSections(ip: string, timeRange: string, source: HostSour
   } catch {
     /* fall through to findings fallback */
   }
-  // Live found nothing — try findings before demo/empty
+  // Live found nothing — try findings before the honest empty state.
   try { const fb = await fetchHostSectionsFindings(ip, timeRange); if (fb.logs.length > 0) return fb } catch { /* ignore */ }
-  if (isDemo) return buildDemoSections(timeRange)
   return { ...EMPTY_SECTIONS, window: timeRange }
-}
-
-function buildDemoSections(timeRange: string): HostSectionData {
-  const hours = Array.from({ length: 24 }, (_, i) => i)
-  const timeline: TimelinePoint[] = hours.map((h) => ({
-    hour: `${String(h).padStart(2, "0")}:00`,
-    // 12:00 spike mirrors the spec annotation ("Spike: 1,400 Denied reqs at 12:00")
-    volume: h === 12 ? 1400 : 40 + Math.round(Math.abs(Math.sin(h * 1.7)) * 160),
-  }))
-
-  const domains: TopDomain[] = [
-    { domain: "api.internal.corp", count: 19264, pct: 45 },
-    { domain: "s3.amazonaws.com", count: 8562, pct: 20 },
-    { domain: "zoom.us", count: 5140, pct: 12 },
-    { domain: "msteams.microsoft.com", count: 3425, pct: 8 },
-    { domain: "github.com", count: 2140, pct: 5 },
-  ]
-
-  const patterns: TriggeredPattern[] = [
-    { pattern: "*/admin/*", hits: 3214 },
-    { pattern: "*.exe download*", hits: 1832 },
-    { pattern: "*/wp-admin/*", hits: 1120 },
-    { pattern: "*paypal*", hits: 940 },
-    { pattern: "*/login*", hits: 512 },
-  ]
-
-  const topUrls = [
-    { url: "https://api.internal.corp/v1/data/pull?token=abc", count: 19264 },
-    { url: "https://s3.amazonaws.com/releases/client-installer.exe", count: 8562 },
-    { url: "https://zoom.us/j/82461730291", count: 5140 },
-  ]
-
-  // Demo window is synthesize-only; keep logs deterministic via a single
-  // factory so pagination can materialize lazily across the full 42,810 count.
-  const demoBaseNow = Date.now()
-  const demoMeta = {
-    destIps: ["10.0.0.21", "52.218.64.11", "162.159.128.61", "13.107.42.12", "140.82.112.3"],
-    patterns,
-    urls: [
-      "https://api.internal.corp/v1/data/pull?token=abc",
-      "https://s3.amazonaws.com/releases/client-installer.exe",
-      "https://zoom.us/j/82461730291",
-      "https://msteams.microsoft.com/share/threads/19:abc",
-      "https://github.com/acme/monitor/releases/download/v2/agent.exe",
-    ],
-    baseNow: demoBaseNow,
-  } satisfies HostSectionData["demoMeta"]
-  const DEMO_TOTAL = 42810
-  const firstPageLogs: LogRow[] = buildDemoRows(0, 50, demoBaseNow, demoMeta)
-
-  return {
-    timeline,
-    anomaly: detectSpike(timeline),
-    topDomains: domains,
-    triggeredPatterns: patterns,
-    topUrls,
-    logs: firstPageLogs,
-    logTotal: DEMO_TOTAL,
-    window: timeRange,
-    demoMeta,
-  }
-}
-
-/** Demo row action — must stay in sync with buildDemoRow below. */
-function demoActionForIndex(i: number): "ALLOW" | "DENY" | "FLAG" {
-  if (i % 7 === 0) return "DENY"
-  if (i % 5 === 0) return "FLAG"
-  return "ALLOW"
-}
-
-function buildDemoRow(
-  i: number,
-  baseNow: number,
-  meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
-): LogRow {
-  const action = demoActionForIndex(i)
-  const matched = action === "ALLOW" ? null : meta.patterns[i % meta.patterns.length].pattern
-  const dip = meta.destIps[i % meta.destIps.length]
-  const u = meta.urls[i % meta.urls.length]
-  return {
-    id: i,
-    timestamp: new Date(baseNow - i * 13 * 60 * 1000).toISOString(),
-    client_ip: DEMO_IP,
-    src_ip: DEMO_IP,
-    server_ip: dip,
-    dest_ip: dip,
-    url: u,
-    base_url: u.split("/").slice(0, 3).join("/"),
-    duration_seconds: 0.02 + (i % 9) * 0.11,
-    duration_ms: 20 + (i % 9) * 110,
-    action,
-    blocked_by: matched ? [matched] : [],
-    matched_pattern_name: matched,
-    whitelisted: false,
-    blacklisted: false,
-    blacklist_source: null,
-  }
-}
-
-function buildDemoRows(
-  offset: number,
-  count: number,
-  baseNow: number,
-  meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
-): LogRow[] {
-  return Array.from({ length: count }, (_, k) => buildDemoRow(offset + k, baseNow, meta))
-}
-
-/** Honest filtered total: walk the virtual demo dataset and count rows whose
- * action matches. Deterministic (no allocation), matches the row formula. */
-function demoActionTotal(action: string, total: number): number {
-  let n = 0
-  for (let i = 0; i < total; i++) if (demoActionForIndex(i) === action) n++
-  return n
-}
-
-/** Lazy page over the *filtered* demo set: walks indices from 0 collecting
- * `startOrdinal`-th matching row onward, materializing at most `count` rows.
- * Keeps the demo window allocation-free at any page/filter combination. */
-function buildDemoRowsFiltered(
-  action: string,
-  startOrdinal: number,
-  count: number,
-  total: number,
-  baseNow: number,
-  meta: { destIps: string[]; patterns: TriggeredPattern[]; urls: string[] },
-): LogRow[] {
-  const rows: LogRow[] = []
-  let seen = 0
-  for (let i = 0; i < total && rows.length < count; i++) {
-    if (demoActionForIndex(i) !== action) continue
-    if (seen >= startOrdinal) rows.push(buildDemoRow(i, baseNow, meta))
-    seen++
-  }
-  return rows
 }
 
 /* ── Page ────────────────────────────────────────────────────────────── */
@@ -729,42 +587,17 @@ export function HostInspectorPage({
     })
   }, [filteredLogs])
 
-  // Materialize the current page. Real data is already sliced; the demo window
-  // (42,810 virtual rows) generates each page lazily from demoMeta so the full
-  // pagination range works without allocating the dataset.
+  // Materialize the current page from the fetched (real) rows.
   const pageRows = useMemo(() => {
-    if (sections?.demoMeta) {
-      if (actionFilter === "All") {
-        return buildDemoRows(page * pageSize, pageSize, sections.demoMeta.baseNow, sections.demoMeta)
-      }
-      // Filtered demo page: walk the virtual set and materialize only the
-      // `page`-th slice of matching rows (honest "of N" total, still lazy).
-      return buildDemoRowsFiltered(
-        actionFilter,
-        page * pageSize,
-        pageSize,
-        sections.logTotal,
-        sections.demoMeta.baseNow,
-        sections.demoMeta,
-      )
-    }
     return filteredLogs.slice(page * pageSize, (page + 1) * pageSize)
-  }, [sections, filteredLogs, actionFilter, page, pageSize])
+  }, [filteredLogs, page, pageSize])
 
-  // Pagination total. The demo window has a fully-lazy dataset so it reports
-  // the full wireframe count (42,810) unfiltered, and the exact filtered
-  // subset count (e.g. 6,116 DENY rows) when an action filter is active. Live
-  // rows are capped by the backend (~500 items) so their total is bounded to
-  // what we actually fetched — otherwise paging past the fetched rows would
-  // show "501-550 of 42,810" with empty rows.
+  // Pagination total. Live rows are capped by the backend (~500 items) so the
+  // total is bounded to what we actually fetched — otherwise paging past the
+  // fetched rows would show a page range beyond the data with empty rows.
   const displayTotal = useMemo(() => {
-    if (!sections) return 0
-    if (sections.demoMeta) {
-      if (actionFilter === "All") return sections.logTotal
-      return demoActionTotal(actionFilter, sections.logTotal)
-    }
     return filteredLogs.length
-  }, [sections, actionFilter, filteredLogs])
+  }, [filteredLogs])
 
   const logColumns: DataTableColumn<LogRow>[] = useMemo(
     () => [
@@ -1012,7 +845,7 @@ export function HostInspectorPage({
       <div className="rounded-md border border-border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="Host / IP Search: 192.168.1.45"
+            placeholder="Host / IP Search"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
             onKeyDown={onKeyDown}
@@ -1068,21 +901,12 @@ export function HostInspectorPage({
       )}
 
       {!loading && !error && !host && !hasSearched && (
-        <EmptyState icon={SearchX} title="Host Investigation" description="Enter a host or IP (e.g. 192.168.1.45) and run Lookup. Live shows the live ES window; Findings shows all-time analytics." action={<Button variant="outline" size="sm" onClick={() => void lookup("192.168.1.45")}>Try 192.168.1.45</Button>} />
+        <EmptyState icon={SearchX} title="Host Investigation" description="Enter a host or IP and run Lookup. Live shows the live ES window; Findings shows all-time analytics." />
       )}
 
       {/* ── LIVE branch — Spec §3.2 sections (render only once a host is resolved) ── */}
       {showSections && (
         <>
-          {/* The demo host (192.168.1.45) is synthesize-only — nothing below is
-              evidence. Flag it exactly like ReportPage so fabricated counts can
-              never be mistaken for measured data. `demoMeta` is set only by
-              buildDemoSections, so it is the honest marker for this path. */}
-          {sections?.demoMeta && (
-            <div>
-              <Badge variant="destructive">SYNTHETIC / DEMO DATA — not evidence</Badge>
-            </div>
-          )}
           {sectionsError && (
             <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
               <span>{sectionsError}</span>

@@ -1920,38 +1920,13 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
     return hostProfileFromFindings(cleanIp, findings.items, findings.total)
   }
 
-  // 4) No data yet — return wireframe-shaped placeholder so the card still
-  // demonstrates the layout (matches spec §3.2 numbers when demo IP matches).
-  const isWireframeIp = cleanIp === "192.168.1.45"
-  if (isWireframeIp) {
-    return {
-      placeholder: true,
-      hostname: "Dev-Workstation-04",
-      primaryIp: "192.168.1.45",
-      ip: cleanIp,
-      risk: {
-        riskScore: 78,
-        riskLevel: "HIGH",
-        totalRequests: 42810,
-        riskRequests: 42118,
-        enforcements: 692,
-        enforcementsPct: 1.6,
-        // Wireframe demo entity — carries no measured bytes. Explicitly
-        // unavailable (the whole card is flagged `placeholder` above).
-        bandwidthDownload: null,
-        bandwidthUpload: null,
-        bandwidthNeverMeasured: true,
-      },
-    }
-  }
-
   // Generic empty host
   return {
     hostname: `Host-${cleanIp.split(".").pop() ?? cleanIp.slice(-4)}`,
     primaryIp: cleanIp,
     ip: cleanIp,
     risk: {
-      riskScore: 12,
+      riskScore: NO_TRAFFIC_SCORE,
       riskLevel: "LOW",
       totalRequests: 0,
       riskRequests: 0,
