@@ -1406,10 +1406,29 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
             client_ip=ip,
             fields=QUERY_SOURCE_FIELDS,
         )
+        # Two searches (the split from `_aggregate_host` in
+        # app/routes/hosts.py): the pattern query above is the REACH frame —
+        # what this host got through — and the count-only action query below
+        # is the proxy's own ENFORCEMENT population. The proxy records a DENY
+        # against the destination it refused, whose URL need not contain any
+        # block pattern, so a DENY count taken off the pattern frame read 0 on
+        # ordinary traffic. `actions=["DENY","FLAG"]` omits the pattern clause
+        # entirely; `track_total_hits` is opted back in so the count is exact.
+        enforcement_query = build_logs_query(
+            block_patterns,
+            minutes,
+            0,
+            client_ip=ip,
+            actions=["DENY", "FLAG"],
+        )
+        enforcement_query["track_total_hits"] = True
 
         async with es_client(settings, timeout=30) as es:
             try:
                 res = await es.search(index=settings.elastic_index, body=query)
+                enf_res = await es.search(
+                    index=settings.elastic_index, body=enforcement_query
+                )
             except Exception:
                 signals.es_online = False
                 return AttckMapping(
@@ -1421,6 +1440,29 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
                     techniques=[],
                     summary="Elasticsearch unavailable.",
                 )
+
+        # The proxy's own count of DENY/FLAG rows for this host, independent of
+        # whether any of those rows matched a block pattern. Read defensively:
+        # a response with no `total` (e.g. a stub, or an index that predates
+        # `track_total_hits`) leaves it None — unavailable, not 0.
+        enforcement_total = (
+            enf_res.get("hits", {}).get("total") if isinstance(enf_res, dict) else None
+        )
+        enforcements: int | None
+        if isinstance(enforcement_total, dict):
+            enforcements = int(enforcement_total.get("value", 0))
+        else:
+            enforcements = None
+
+        # Apply the proxy's own enforcement count to the signal before any
+        # early return, so a host that was DENIED repeatedly but reached no
+        # block pattern still reports its real enforcements instead of a bare
+        # 0 that reads as "never enforced". `_aggregate_host_signals` below
+        # re-derives `enforcements` from the pattern frame, so the same
+        # override is re-applied after it runs (and only when the action query
+        # actually answered — an unavailable count never overwrites with 0).
+        if enforcements is not None:
+            signals.enforcements = enforcements
 
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
@@ -1455,6 +1497,14 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
             )
 
         _aggregate_host_signals(signals, df, avail, blacklist_set, minutes)
+
+        # Re-apply the measured enforcement count over the pattern-frame value
+        # `_aggregate_host_signals` just set: that value counts only DENYs whose
+        # URL matched a block pattern, which is the undercount this fixes. Only
+        # applied when the action query answered, so an unavailable count never
+        # replaces a computed one with an assumed 0.
+        if enforcements is not None:
+            signals.enforcements = enforcements
 
         # Run the gated host catalogue.
         techniques, suppressed = _run_host_heuristics(signals, avail)
@@ -1845,10 +1895,28 @@ async def map_url(url: str, source: str = "live", limit: int = 50) -> AttckMappi
             search=url,
             fields=QUERY_SOURCE_FIELDS,
         )
+        # The URL-side twin of the split in `map_host`: the pattern query above
+        # is the REACH frame, and this count-only action query is the proxy's
+        # own ENFORCEMENT population for the same URL token. A DENY is recorded
+        # against the destination the proxy refused, whose URL need not match a
+        # block pattern, so a DENY count taken off the pattern frame read 0.
+        # `actions=["DENY","FLAG"]` omits the pattern clause;
+        # `track_total_hits` is opted back in so the count is exact.
+        enforcement_query = build_logs_query(
+            block_patterns,
+            1440,
+            0,
+            search=url,
+            actions=["DENY", "FLAG"],
+        )
+        enforcement_query["track_total_hits"] = True
 
         async with es_client(settings, timeout=30) as es:
             try:
                 res = await es.search(index=settings.elastic_index, body=query)
+                enf_res = await es.search(
+                    index=settings.elastic_index, body=enforcement_query
+                )
             except Exception:
                 signals.es_online = False
                 return AttckMapping(
@@ -1860,6 +1928,24 @@ async def map_url(url: str, source: str = "live", limit: int = 50) -> AttckMappi
                     techniques=[],
                     summary="Elasticsearch unavailable.",
                 )
+
+        # The proxy's own count of DENY/FLAG rows for this URL token. Read
+        # defensively: no `total` block leaves it unavailable (None), not 0.
+        enforcement_total = (
+            enf_res.get("hits", {}).get("total") if isinstance(enf_res, dict) else None
+        )
+        enforcements: int | None
+        if isinstance(enforcement_total, dict):
+            enforcements = int(enforcement_total.get("value", 0))
+        else:
+            enforcements = None
+
+        # Apply the measured count before any early return, so a URL DENIED
+        # repeatedly but never matched by a block pattern still reports its real
+        # enforcements instead of a bare 0. Only applied when the action query
+        # answered — an unavailable count never becomes an assumed 0.
+        if enforcements is not None:
+            signals.enforcements = enforcements
 
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
@@ -1894,6 +1980,13 @@ async def map_url(url: str, source: str = "live", limit: int = 50) -> AttckMappi
             )
 
         _aggregate_url_signals(signals, df, avail)
+
+        # `_aggregate_url_signals` does not set `enforcements` at all, so this
+        # is the only source of the value on the main path. Re-applied after it
+        # for symmetry with `map_host` and to keep the measured count the final
+        # word if that function ever starts deriving one.
+        if enforcements is not None:
+            signals.enforcements = enforcements
 
         techniques, suppressed = _run_url_heuristics(signals, avail)
         summary = _with_suppressed(_build_url_summary(url, signals, techniques), suppressed)

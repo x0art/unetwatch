@@ -1240,3 +1240,202 @@ async def test_line_tz_note_surfaces_only_on_mismatch(monkeypatch):
         monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0000")
     )
     assert "note:" not in matching.summary
+
+
+# ── Enforcement count — the proxy's own DENY population, not the pattern frame ─
+#
+# `signals.enforcements` used to be derived from the pattern-filtered frame, so
+# a DENY recorded against a non-pattern URL never appeared and the count read 0.
+# That wrong 0 is a GATE in three host predicates, so it silently WITHHELD
+# techniques. The fix issues a count-only action query
+# (`actions=["DENY","FLAG"]`, `track_total_hits: true`) alongside the pattern
+# query; the stub below answers it with a real `total` block.
+
+
+def _patternless_deny_hits(
+    n: int = 1, client_ip: str = "10.0.0.1"
+) -> list[dict]:
+    """DENY rows whose URL matches NO block pattern (a bare SNI host).
+
+    `_operator_hits` already uses such a URL, but these pin the shape for the
+    enforcement test: the URL carries no `*evil*`, so the pattern query can
+    never return them.
+    """
+    now = datetime.now(UTC)
+    return [
+        {
+            "_source": {
+                "@timestamp": (now - timedelta(minutes=i)).isoformat(),
+                "url": "https://z-m-gateway.facebook.com/",
+                "client_ip": client_ip,
+                "server_ip": "57.144.192.3",
+                "duration_seconds": 0.01,
+                "action": "DENY",
+                "rule_info": "RN190,SNI,BS",
+            }
+        }
+        for i in range(n)
+    ]
+
+
+async def _map_host_with_actions(
+    monkeypatch, *, pattern_hits, action_total
+):
+    """Run `map_host` with a stub that answers pattern and action queries apart.
+
+    The action query is the body carrying a `terms` filter on `action`; it is
+    answered with a `total` block (a count-only search returns no documents).
+    """
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*evil*','block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            filters = kwargs["body"]["query"]["bool"]["filter"]
+            if any("terms" in f for f in filters):
+                return {
+                    "hits": {
+                        "total": {"value": action_total, "relation": "eq"},
+                        "hits": [],
+                    }
+                }
+            return {"hits": {"hits": pattern_hits}}
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(am, "es_client", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(
+        am,
+        "resolve_availability",
+        lambda **kw: resolve_availability(
+            mode="COLLAPSED",
+            inventory_names=set(_REAL_DOC.keys()),
+            es_online=True,
+        ),
+    )
+    return await am.map_host("10.0.0.1", 1440)
+
+
+async def test_map_host_enforcements_reflect_a_patternless_deny(monkeypatch):
+    """`signals.enforcements` reflects DENYs the pattern frame cannot see.
+
+    The pattern frame holds one ALLOW row that matches `*evil*`; the proxy's
+    own enforcement population is 5 DENYs recorded against a non-pattern URL.
+    Pre-fix `enforcements` was derived from the pattern frame and read 0.
+    """
+    pattern_hits = _operator_hits(n=1, response_sizes=["1"])
+    # Make the pattern row an ALLOW so it is not itself an enforcement.
+    for h in pattern_hits:
+        h["_source"]["action"] = "ALLOW"
+
+    result = await _map_host_with_actions(
+        monkeypatch, pattern_hits=pattern_hits, action_total=5
+    )
+    assert result.signals.enforcements == 5
+
+
+async def test_map_host_enforcements_measured_with_empty_pattern_frame(monkeypatch):
+    """A host with DENYs but NO pattern reach still reports its enforcements.
+
+    The pattern frame is empty (no block-pattern match), so pre-fix the early
+    return left `enforcements = 0` — reading as "never enforced" for a host the
+    proxy denied repeatedly.
+    """
+    result = await _map_host_with_actions(
+        monkeypatch, pattern_hits=[], action_total=3
+    )
+    assert result.signals.enforcements == 3
+    assert result.signals.total_requests == 0
+
+
+async def test_map_host_gate_flips_on_measured_patternless_deny(monkeypatch):
+    """The wrong 0 withheld T1078; the measured count now rejects it.
+
+    T1078 requires `enforcements == 0`. With the DENY population measured as
+    nonzero, a host whose pattern frame shows no enforcement must no longer
+    emit T1078 — the silent withholding this fix reverses.
+    """
+    pattern_hits = _operator_hits(n=30, response_sizes=["1"] * 30)
+    for h in pattern_hits:
+        h["_source"]["action"] = "ALLOW"
+
+    # An ALLOW-heavy pattern frame would pass T1078's other legs; the measured
+    # enforcements are what must now suppress it.
+    result = await _map_host_with_actions(
+        monkeypatch, pattern_hits=pattern_hits, action_total=4
+    )
+    assert result.signals.enforcements == 4
+    assert "T1078" not in {t.technique_id for t in result.techniques}
+
+
+async def test_map_url_enforcements_reflect_a_patternless_deny(monkeypatch):
+    """The URL-side twin: a patternless DENY is reflected in `enforcements`.
+
+    No URL heuristic gates on `enforcements`, so this pins the reported signal
+    value rather than a technique emission.
+    """
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*evil*','block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            filters = kwargs["body"]["query"]["bool"]["filter"]
+            if any("terms" in f for f in filters):
+                return {
+                    "hits": {
+                        "total": {"value": 7, "relation": "eq"},
+                        "hits": [],
+                    }
+                }
+            return {"hits": {"hits": [{"_source": _REAL_DOC}]}}
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(am, "es_client", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(
+        am,
+        "resolve_availability",
+        lambda **kw: resolve_availability(
+            mode="COLLAPSED",
+            inventory_names=set(_REAL_DOC.keys()),
+            es_online=True,
+        ),
+    )
+    result = await am.map_url("https://z-m-gateway.facebook.com/")
+    assert result.signals.enforcements == 7
