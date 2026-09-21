@@ -67,7 +67,20 @@ from fastapi import APIRouter, Depends, Query
 from fastapi import HTTPException as FastAPIHTTPException
 
 from app.database import get_db_conn
+from app.services.result_processor import (
+    _parse_matched_patterns,
+    _row_is_blocked,
+    _row_is_enforced,
+    _row_is_risk,
+)
 from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
+
+# ADR 0001 row semantics are canonical in ``app/services/result_processor.py``.
+# ``_row_is_enforced`` / ``_row_is_risk`` / ``_row_is_blocked``
+# (``_row_is_blocked`` is the back-compat alias for the enforcement test) are
+# imported above and re-exported so this module keeps answering those names for
+# any older caller — the rule itself is not restated here.
+__all__ = ["_row_is_blocked", "_row_is_enforced", "_row_is_risk"]
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -117,18 +130,6 @@ def _has_column(columns: list[str], name: str) -> bool:
     return name in columns
 
 
-def _parse_matched_patterns(raw) -> list:
-    """Safely parse the stored ``matched_patterns`` JSON column.
-
-    A corrupted or non-JSON row must never 500 the analytics endpoints — a
-    garbage row is treated as an empty match list.
-    """
-    try:
-        return json.loads(raw) if raw else []
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-
 def _primary_rule(matched_patterns: str | None) -> str:
     """First matched pattern, or ``""`` when there is no rule information.
 
@@ -140,38 +141,6 @@ def _primary_rule(matched_patterns: str | None) -> str:
     if isinstance(pats, list) and pats:
         return str(pats[0])
     return ""
-
-
-def _row_is_enforced(row: dict, has_action: bool) -> bool:
-    """Whether a row is an enforcement — the proxy already denied it (ADR 0001).
-
-    Only an explicit ``DENY``/``FLAG`` action counts. Legacy rows with an empty
-    ``action`` were persisted as ALLOW risks, so they are never enforcements
-    even when ``matched_patterns`` is non-empty.
-    """
-    action = (row.get("action") or "").strip().upper()
-    if has_action and action:
-        return action in ("DENY", "FLAG")
-    return False
-
-
-def _row_is_risk(row: dict, has_action: bool) -> bool:
-    """Whether a row is a risk — pattern match + ALLOW + not whitelisted (ADR 0001).
-
-    Enforcements are never risks. An explicit ``ALLOW`` is a risk; a legacy row
-    with an empty ``action`` but a non-empty ``matched_patterns`` was stored as
-    an ALLOW risk, so it counts too.
-    """
-    if _row_is_enforced(row, has_action):
-        return False
-    action = (row.get("action") or "").strip().upper()
-    if has_action and action:
-        return action == "ALLOW"
-    return bool(_parse_matched_patterns(row.get("matched_patterns")))
-
-
-# Back-compat alias — tests and older callers import this name.
-_row_is_blocked = _row_is_enforced
 
 
 def _domain_of_base(base_url: str) -> str:

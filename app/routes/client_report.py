@@ -19,7 +19,6 @@ Endpoints:
 
 import csv
 import io
-import json
 import re
 from collections import Counter
 from datetime import UTC, datetime
@@ -29,6 +28,11 @@ from fastapi import HTTPException as FastAPIHTTPException
 from fastapi.responses import PlainTextResponse
 
 from app.database import get_db_conn
+from app.services.result_processor import (
+    _parse_matched_patterns,
+    _row_is_enforced,
+    _row_is_risk,
+)
 from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
 
 router = APIRouter(prefix="/api/client-report", tags=["client-report"])
@@ -52,13 +56,6 @@ def _has_column(columns: list[str], name: str) -> bool:
     return name in columns
 
 
-def _parse_matched_patterns(raw) -> list:
-    try:
-        return json.loads(raw) if raw else []
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-
 def _primary_rule(matched_patterns: str | None) -> str:
     """First matched pattern, or ``""`` when there is no rule information.
 
@@ -70,22 +67,6 @@ def _primary_rule(matched_patterns: str | None) -> str:
     if isinstance(pats, list) and pats:
         return str(pats[0])
     return ""
-
-
-def _row_is_enforced(row: dict, has_action: bool) -> bool:
-    action = (row.get("action") or "").strip().upper()
-    if has_action and action:
-        return action in ("DENY", "FLAG")
-    return False
-
-
-def _row_is_risk(row: dict, has_action: bool) -> bool:
-    if _row_is_enforced(row, has_action):
-        return False
-    action = (row.get("action") or "").strip().upper()
-    if has_action and action:
-        return action == "ALLOW"
-    return bool(_parse_matched_patterns(row.get("matched_patterns")))
 
 
 def _domain_of_base(base_url: str) -> str:

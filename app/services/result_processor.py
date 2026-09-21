@@ -16,6 +16,65 @@ import pandas as pd
 from app.services.es_fields import mode_has_extended_findings
 from app.services.query_builder import glob_to_regex
 
+# ── ADR 0001 row semantics (canonical) ─────────────────────────────────────
+#
+# The product's definition of risk, stated once. Every consumer that decides
+# whether a persisted ``findings`` row is a risk or an enforcement calls these
+# two helpers — ``app/routes/analytics.py``, ``app/routes/client_report.py``
+# and the persisted-findings fallback in ``app/routes/hosts.py``. They live in
+# this service (not in a route module) because they are a domain rule, not an
+# endpoint concern, and they sit beside ``intent_for_action`` below: the two
+# together classify ALL findings rows — these by the ADR 0001 risk/enforcement
+# rule, ``intent_for_action`` by the display intent (REACH/ATTEMPT).
+#
+# ``_parse_matched_patterns`` is the permissive JSON reader the legacy branch
+# needs; it lives here so a route never has to import analytics to classify a
+# row.
+
+
+def _parse_matched_patterns(raw) -> list:
+    """Safely parse the stored ``matched_patterns`` JSON column.
+
+    A corrupted or non-JSON row must never 500 an endpoint — a garbage row is
+    treated as an empty match list.
+    """
+    try:
+        return json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _row_is_enforced(row: dict, has_action: bool) -> bool:
+    """Whether a row is an enforcement — the proxy already denied it (ADR 0001).
+
+    Only an explicit ``DENY``/``FLAG`` action counts. Legacy rows with an empty
+    ``action`` were persisted as ALLOW risks, so they are never enforcements
+    even when ``matched_patterns`` is non-empty.
+    """
+    action = (row.get("action") or "").strip().upper()
+    if has_action and action:
+        return action in ("DENY", "FLAG")
+    return False
+
+
+def _row_is_risk(row: dict, has_action: bool) -> bool:
+    """Whether a row is a risk — pattern match + ALLOW + not whitelisted (ADR 0001).
+
+    Enforcements are never risks. An explicit ``ALLOW`` is a risk; a legacy row
+    with an empty ``action`` but a non-empty ``matched_patterns`` was stored as
+    an ALLOW risk, so it counts too.
+    """
+    if _row_is_enforced(row, has_action):
+        return False
+    action = (row.get("action") or "").strip().upper()
+    if has_action and action:
+        return action == "ALLOW"
+    return bool(_parse_matched_patterns(row.get("matched_patterns")))
+
+
+# Back-compat alias — older callers import this name for the enforcement test.
+_row_is_blocked = _row_is_enforced
+
 
 def normalize_timestamp(ts, fallback: str) -> str:
     """Return a usable ISO-8601 timestamp for a finding.
