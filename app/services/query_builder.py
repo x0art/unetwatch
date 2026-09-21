@@ -98,6 +98,7 @@ def build_logs_query(
     search: str | None = None,
     client_ip: str | None = None,
     fields: list[str] | None = None,
+    actions: list[str] | None = None,
 ) -> dict:
     """ES query that flags URLs matching any block pattern within the window.
 
@@ -108,10 +109,22 @@ def build_logs_query(
     client via a ``term`` filter — used by the drill-down radial.
     ``fields`` (optional) limits ``_source`` to only the listed fields for
     projection — only requested fields are fetched from ES.
+
+    ``actions`` (optional) turns this into an ACTION query: a ``terms``
+    filter on ``action`` is appended and the block-pattern clause is OMITTED
+    entirely. The two are mutually exclusive by construction, because they
+    answer different questions about different row populations. A REACH
+    ("did this host get through?") is a block-pattern match; an ENFORCEMENT
+    ("did the proxy deny this host?") is an ``action`` the proxy recorded —
+    and the proxy records a DENY against the destination it refused, which
+    need not be the URL a block pattern names. Asking for enforcements with
+    the pattern clause present therefore under-counts to zero on ordinary
+    traffic (see ``_aggregate_host`` in ``app/routes/hosts.py``).
+
+    ``actions is None`` (the default) keeps the legacy shape byte-identical:
+    pattern clause present, no action filter. Callers that pass ``actions``
+    receive a query with NO pattern restriction.
     """
-    query_string = " OR ".join(
-        f"url : {escape_query_string(p)}" for p in block_patterns
-    )
     # Scoring-free: the block-pattern clause is a filter (same doc set, no
     # scores). Only the optional user search stays in must (possibly empty —
     # ES accepts "must": []).
@@ -139,14 +152,23 @@ def build_logs_query(
         )
     filters: list[dict] = []
     # minutes <= 0 is the "all time" sentinel — no time range filter at all.
-    # Order: range first, then pattern clause, then client_ip term.
+    # Order: range first, then the pattern-or-action clause, then client_ip.
     if minutes > 0:
         filters.append(
             {"range": {"@timestamp": {"gte": f"now-{minutes}m", "lte": "now"}}}
         )
-    filters.append(
-        {"query_string": {"query": query_string, "analyze_wildcard": True}}
-    )
+    if actions is not None:
+        # Action query: the pattern clause is deliberately absent so DENY rows
+        # recorded against a non-pattern URL are still returned. This is the
+        # one branch where the pattern clause must NOT be appended.
+        filters.append({"terms": {"action": list(actions)}})
+    else:
+        query_string = " OR ".join(
+            f"url : {escape_query_string(p)}" for p in block_patterns
+        )
+        filters.append(
+            {"query_string": {"query": query_string, "analyze_wildcard": True}}
+        )
     if client_ip:
         filters.append({"term": {"client_ip": client_ip}})
     result: dict = {

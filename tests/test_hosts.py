@@ -648,3 +648,271 @@ async def test_host_profile_fallback_grades_a_dedup_collapsed_population(
     # The reason sentence states the population it graded over, so a reader can
     # tell which count this is — "over 3 request(s)", the persisted rows.
     assert "over 3 request(s)" in risk["riskReason"]["text"]
+
+
+
+# ── Enforcement measurement on the LIVE path (2026-09-21) ───────────────────
+# The live path used to derive `enforcements` from the block-pattern frame:
+# `actions.isin(["DENY","FLAG"]).sum()` over the rows the PATTERN query
+# returned. A proxy records a DENY against the destination it refused, whose
+# URL need not contain any block pattern — so on ordinary traffic that frame
+# held no DENY rows and the figure read 0. The fix measures enforcements with
+# a SECOND, action-filtered ES query whose result is independent of the
+# pattern clause. These tests pin both halves of that: the count, and the
+# query SHAPE that produces it.
+
+
+async def _stub_es(monkeypatch, *, reach_hits, enforcement_total, mode="COLLAPSED"):
+    """Stub ES for ``_aggregate_host`` and record the queries it sends.
+
+    ``_aggregate_host`` bails out before searching when ``get_mode()`` is
+    UNKNOWN, and it imports ``es_client`` INSIDE the function — so the name is
+    local to that call and is not an attribute of ``hosts_mod``. This helper
+    therefore (a) sets the field-inventory cache through the REAL public path
+    (``fetch_field_inventory`` over a sample doc) so the mode gate admits the
+    call, and (b) patches the DEFINING module's ``es_client`` attribute, which
+    is what the in-function import resolves through.
+
+    The fake answers the two searches the function now issues — the reach
+    query (returns ``reach_hits``) and the count-only enforcement query
+    (returns ``enforcement_total``) — and remembers both bodies so a test can
+    assert on the DSL, not only on the resulting number.
+    """
+    from app.services import es_fields
+
+    baseline = {
+        "@timestamp": "2026-09-21T07:00:00Z",
+        "url": "https://x/",
+        "client_ip": "172.21.122.6",
+        "server_ip": "57.144.192.3",
+        "duration_seconds": 0.01,
+        "action": "ALLOW",
+    }
+    es_fields._invalidate_cache()
+    await es_fields.fetch_field_inventory(
+        es=_SampleES(sample_doc=baseline, field_caps={k: {} for k in baseline})
+    )
+    assert es_fields.get_mode() != "UNKNOWN"
+
+    sent: list[dict] = []
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            body = kwargs["body"]
+            sent.append(body)
+            filters = body["query"]["bool"]["filter"]
+            if any("terms" in f for f in filters):
+                return {
+                    "hits": {
+                        "total": {"value": enforcement_total, "relation": "eq"},
+                        "hits": [],
+                    }
+                }
+            return {"hits": {"hits": reach_hits}}
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        "app.services.es_client.es_client", lambda *a, **k: _Ctx()
+    )
+    monkeypatch.setattr(es_fields, "es_client", lambda *a, **k: _Ctx())
+    return sent
+
+
+class _SampleES:
+    """Minimal ES double for the field-inventory probe (sample + field_caps)."""
+
+    def __init__(self, *, sample_doc, field_caps):
+        self._sample = sample_doc
+        self._caps = field_caps
+
+    async def search(self, **kwargs):
+        return {"hits": {"hits": [{"_source": self._sample}]}}
+
+    async def field_caps(self, **kwargs):
+        return {"fields": self._caps}
+
+    async def close(self):
+        return None
+
+
+
+async def test_enforcements_are_measured_not_derived_from_the_pattern_frame(
+    client, db_path, monkeypatch
+):
+    """A host whose DENY URLs match NO block pattern still reports its DENYs.
+
+    Reproduces the reported defect. The operator's proxy records DENYs against
+    the destination it refused (``https://z-m-gateway.facebook.com/`` in the
+    real sample, docs/attck-mapping-spec.md:783-793), which contains none of
+    the seeded block patterns. Pre-fix, the reach query returned only the
+    ALLOW row and the mask over that frame counted ZERO enforcements.
+    """
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        for pattern in ("*porn*", "*nonton*", "*indoxxi*"):
+            await db.execute(
+                "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+                " VALUES (?, 'block')",
+                (pattern,),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # The pattern frame: exactly ONE reach, and NOT ONE pattern-matching DENY
+    # — the DENYs live entirely outside the pattern clause.
+    reach_hits = [
+        {
+            "_source": {
+                "@timestamp": "2026-09-21T07:00:00Z",
+                "url": "https://indoxxi.foo/watch",
+                "client_ip": "172.21.122.6",
+                "server_ip": "57.144.192.3",
+                "action": "ALLOW",
+            }
+        }
+    ]
+    sent = await _stub_es(
+        monkeypatch, reach_hits=reach_hits, enforcement_total=3
+    )
+
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+
+    # The headline assertion: 3 proxy DENYs are reported, not 0.
+    assert risk["enforcements"] == 3
+    # Reach figures still come from the pattern frame, unchanged.
+    assert risk["riskRequests"] == 1
+    assert risk["totalRequests"] == 1
+    assert risk["riskReason"]["inputs"]["attemptCount"] == 3
+
+    # The QUERY SHAPE — this pins the root cause rather than the symptom. Two
+    # searches were issued; the one that measured the enforcement count
+    # carries a `terms` clause on `action` and NO `url : <pattern>`
+    # query_string. Pre-fix there was only one search, pattern-clause-only.
+    assert len(sent) == 2
+    action_queries = [
+        b for b in sent if any("terms" in f for f in b["query"]["bool"]["filter"])
+    ]
+    assert len(action_queries) == 1, "exactly one action-filtered query"
+    aq_filters = action_queries[0]["query"]["bool"]["filter"]
+    assert {"terms": {"action": ["DENY", "FLAG"]}} in aq_filters
+    assert not any("query_string" in f for f in aq_filters), (
+        "the enforcement query must carry NO block-pattern clause — that "
+        "clause is what hid the DENY rows"
+    )
+    # Count-only: no documents shipped for the enforcement measurement.
+    assert action_queries[0]["size"] == 0
+    assert action_queries[0]["track_total_hits"] is True
+
+
+async def test_deny_only_host_reports_enforcements_and_zero_reaches(
+    client, db_path, monkeypatch
+):
+    """D2: an empty PATTERN window must not report a measured-looking 0.
+
+    A host that was denied three times and never reached anything has no
+    pattern-matching rows at all. The pattern query legitimately returns
+    nothing — but "no reaches found" is not "no data". The chosen design runs
+    the enforcement query on this path too, so the profile reports 3
+    enforcements / 0 reaches instead of a bare 0 that reads as a measurement
+    of no activity.
+    """
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*nonton*', 'block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    sent = await _stub_es(monkeypatch, reach_hits=[], enforcement_total=3)
+
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    assert res.status_code == 200
+    data = res.json()
+    risk = data["risk"]
+
+    assert risk["enforcements"] == 3
+    assert risk["riskRequests"] == 0
+    assert risk["totalRequests"] == 0
+    # Still a live, graded answer — the fallback must NOT have been consulted.
+    # ``es_online`` is a top-level key, not a member of ``risk``.
+    assert data["es_online"] is True
+    assert risk["riskScoreAvailable"] is True
+    assert risk["enforcementsPct"] == 100.0
+    assert risk["riskReason"]["rule"] == "graded_attempt_only"
+
+    # The enforcement query ran even though the reach query found nothing.
+    assert len(sent) == 2
+    assert any("terms" in f for f in sent[1]["query"]["bool"]["filter"])
+
+
+def test_build_logs_query_default_is_unchanged_and_actions_omits_pattern():
+    """The new ``actions`` param is a new branch, not a rewrite.
+
+    ``actions=None`` (every existing caller) must keep the legacy shape
+    byte-for-byte: pattern clause present, no action filter. ``actions=[...]``
+    must omit the pattern clause entirely — otherwise the DENY rows stay
+    invisible and the fix does nothing.
+    """
+    from app.services.query_builder import build_logs_query
+
+    # Default: identical to the pre-fix shape.
+    default = build_logs_query(
+        ["*porn*", "*nonton*"], 1440, 5000, client_ip="1.2.3.4"
+    )
+    default_filters = default["query"]["bool"]["filter"]
+    assert {
+        "query_string": {
+            "query": "url : *porn* OR url : *nonton*",
+            "analyze_wildcard": True,
+        }
+    } in default_filters
+    assert not any("terms" in f for f in default_filters)
+    assert {"term": {"client_ip": "1.2.3.4"}} in default_filters
+
+    # Explicit None is the documented default — same object shape.
+    explicit_none = build_logs_query(
+        ["*porn*", "*nonton*"], 1440, 5000, client_ip="1.2.3.4", actions=None
+    )
+    assert explicit_none == default
+
+    # actions=[...]: terms clause in, pattern clause OUT.
+    action_q = build_logs_query(
+        ["*porn*", "*nonton*"],
+        1440,
+        5000,
+        client_ip="1.2.3.4",
+        actions=["DENY", "FLAG"],
+    )
+    action_filters = action_q["query"]["bool"]["filter"]
+    assert {"terms": {"action": ["DENY", "FLAG"]}} in action_filters
+    assert not any("query_string" in f for f in action_filters), (
+        "actions=[...] must omit the block-pattern clause"
+    )
+    # Range + client_ip filters survive on both branches.
+    assert action_filters[0]["range"]["@timestamp"]["gte"] == "now-1440m"
+    assert {"term": {"client_ip": "1.2.3.4"}} in action_filters
+    # The block_patterns argument is irrelevant to an action query.
+    assert action_q == build_logs_query(
+        [], 1440, 5000, client_ip="1.2.3.4", actions=["DENY", "FLAG"]
+    )

@@ -131,7 +131,16 @@ def _risk_from_shares(
     attempts = max(0, enforcements)
     reached_distinct = max(0, blacklisted_distinct)
 
-    if total <= 0:
+    # The empty-window gate. `total` is the block-pattern frame, which is
+    # blind to DENY rows recorded against a non-pattern URL — so a host the
+    # proxy denied repeatedly can have `total == 0` while `enforcements > 0`.
+    # That host HAS a recorded disposition and must not be reported as the
+    # model's empty-window baseline ("no traffic ... not a measurement"); the
+    # attempt-only branch below is the honest reading. The gate therefore
+    # fires only when there is genuinely NO evidence on either population.
+    # No constant or weight changes: the terms that produce the score are
+    # untouched, and `enforcements` still feeds the model as before.
+    if total <= 0 and attempts <= 0:
         reason = {
             "rule": "no_traffic",
             "level": "LOW",
@@ -476,14 +485,30 @@ async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
         newest_reach_age_minutes = int(max(0, age))
 
     return {
-        # The count of RECORDED FINDINGS for this host in the window — a
-        # deduplicated, filtered population. This is NOT the live path's
-        # ``total`` (block-pattern hits in the ES window, whitelist-filtered
-        # only): findings are deduped by (client_ip, url, log_timestamp) and,
-        # in whitelist-excluding modes, a further-filtered subset, recorded
-        # over time by the poll rather than measured once over the window.
-        # Both are real persisted/measured counts; they are different
-        # quantities, and the model's emptiness gate only needs ``> 0``.
+        # An ENFORCEMENT is the same thing on both sources: a row whose
+        # persisted ``action`` is DENY/FLAG (via ``_row_is_enforced`` — the
+        # canonical ADR 0001 row semantics, shared with analytics). The live
+        # path measures that same predicate over ES with an action-filtered
+        # query; this path measures it over the persisted table. The
+        # DEFINITION is identical even though the two stores hold different
+        # evidence — the live window is not deduplicated and current, the
+        # findings table is deduped by (client_ip, url, log_timestamp) and
+        # accumulated by the poll — so the counts may legitimately differ and
+        # ``sources.risk.source`` names which store answered. What must never
+        # differ is what counts as an enforcement. An enforcement does NOT
+        # require a block-pattern match on either path: the proxy records a
+        # DENY against the destination it refused, which need not be a URL any
+        # pattern names.
+        #
+        # ``totalRequests`` here is the count of RECORDED FINDINGS for this
+        # host in the window — a deduplicated, filtered population. This is
+        # NOT the live path's ``total`` (block-pattern hits in the ES window,
+        # whitelist-filtered only): findings are deduped by
+        # (client_ip, url, log_timestamp) and, in whitelist-excluding modes, a
+        # further-filtered subset, recorded over time by the poll rather than
+        # measured once over the window. Both are real persisted/measured
+        # counts; they are different quantities, and the model's emptiness
+        # gate only needs ``> 0``.
         "totalRequests": len(rows),
         "riskRequests": len(reach_rows),
         "enforcements": len(attempt_rows),
@@ -534,19 +559,58 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
         blacklist_domains = blacklist_urls | blacklist_ips
 
         whitelist_regex = _build_pattern_regex(whitelist_patterns)
-        query = build_logs_query(
+        # Two searches, because a reach and an enforcement are different
+        # questions about different row populations and ONE query cannot
+        # answer both:
+        #   * REACH  (totalRequests / riskRequests / blacklisted* / recency)
+        #     is a block-pattern match — the pattern clause is the point.
+        #   * ENFORCEMENT (enforcements) is an `action` the proxy recorded.
+        #     The proxy logs a DENY against the destination it refused, whose
+        #     URL need not contain any block pattern (a bare host, an IP, the
+        #     SNI). Asking for DENYs through the pattern-filtered query
+        #     therefore returned zero rows and the figure read 0 on ordinary
+        #     traffic, which is the defect this split fixes.
+        # Both searches share the one `es_client` session below.
+        reach_query = build_logs_query(
             block_patterns, minutes, settings.es_query_size, client_ip=ip
         )
+        # Count-only: no documents are needed, just the total. `_source` off
+        # and `size: 0` keep the second round-trip cheap.
+        enforcement_query = build_logs_query(
+            block_patterns,
+            minutes,
+            0,
+            client_ip=ip,
+            fields=[],
+            actions=["DENY", "FLAG"],
+        )
+        enforcement_query["track_total_hits"] = True
 
         async with es_client(settings, timeout=30) as es:
-            res = await es.search(index=settings.elastic_index, body=query)
+            res = await es.search(index=settings.elastic_index, body=reach_query)
+            enf_res = await es.search(
+                index=settings.elastic_index, body=enforcement_query
+            )
+
+        # The proxy's own count of DENY/FLAG rows for this host in the window —
+        # a measurement over the enforcement population, independent of whether
+        # any of those rows matched a block pattern.
+        enforcements = int(
+            enf_res.get("hits", {}).get("total", {}).get("value", 0)
+        )
 
         hits = res.get("hits", {}).get("hits", [])
         if not hits:
+            # No REACH traffic matched a block pattern in the window. That is
+            # NOT the same as "nothing happened": the host may still have been
+            # DENIED repeatedly, and `enforcements` above is that real count.
+            # Returning it here keeps a host with 3 proxy DENYs and 0 reaches
+            # reporting 3 enforcements / 0 reaches instead of a bare 0 that
+            # reads as a measurement of no activity at all.
             return {
                 "totalRequests": 0,
                 "riskRequests": 0,
-                "enforcements": 0,
+                "enforcements": enforcements,
                 "blacklistedRequests": 0,
                 "blacklistedDistinct": 0,
                 "newestReachAgeMinutes": None,
@@ -559,11 +623,15 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
             actions=None,
         )
         total = int(len(df))
+        # Reach shares come from the PATTERN frame. `enforcements` does NOT:
+        # it is the proxy's action count measured above, over a population this
+        # frame cannot see (and must not pretend to). Deriving it here from
+        # `actions.isin(["DENY", "FLAG"])` was the defect — it counted only the
+        # DENYs that happened to match a block pattern.
         if "action" in df.columns:
             actions = df["action"].fillna("").astype(str).str.strip().str.upper()
             reach_mask = actions.isin(["ALLOW", ""])
             risk_requests = int(reach_mask.sum())
-            enforcements = int(actions.isin(["DENY", "FLAG"]).sum())
             blacklisted_mask = df["base_url"].astype(str).isin(blacklist_domains)
             blacklisted_requests = int((blacklisted_mask & reach_mask).sum())
         else:
@@ -571,7 +639,6 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
             # ALLOW risk by construction.
             reach_mask = pd.Series(True, index=df.index)
             risk_requests = total
-            enforcements = 0
             blacklisted_mask = df["base_url"].astype(str).isin(blacklist_domains)
             blacklisted_requests = int(blacklisted_mask.sum())
 
@@ -666,8 +733,20 @@ async def host_profile(
     blacklisted_distinct = (agg or {}).get("blacklistedDistinct", 0)
     newest_reach_age_minutes = (agg or {}).get("newestReachAgeMinutes")
     enforcements = (agg or {}).get("enforcements", 0)
-    enforcements_pct = (enforcements / total) * 100 if total > 0 else 0
 
+    # The share is the enforcement fraction of a DENOMINATOR that includes
+    # them: block-pattern hits (totalRequests) plus the enforcements the
+    # pattern query cannot see. Dividing by `total` alone would read 3
+    # enforcements over 0 reaches as 0%, and could exceed 100% when the
+    # pattern frame is the smaller of the two populations. A DENY-only host
+    # therefore shows 100% enforcements — the honest reading of "every
+    # decision recorded for this host was a block".
+    _decision_population = total + enforcements
+    enforcements_pct = (
+        (enforcements / _decision_population) * 100
+        if _decision_population > 0
+        else 0
+    )
     # Real byte totals from persisted findings — an ES-independent path, so
     # the figure survives an Elasticsearch outage. `bandwidthNeverMeasured`
     # marks "nothing to sum": the total is never invented, and a measured 0 is
@@ -675,6 +754,11 @@ async def host_profile(
     bandwidth_download, bandwidth_upload = await _host_byte_totals(ip, minutes)
     bandwidth_never_measured = bandwidth_download is None
     if risk_available:
+        # `total` is the real block-pattern frame — a measured count, never a
+        # synthesized population. The empty-window gate inside the model knows
+        # that a DENY-only host is not "no traffic" (see `_risk_from_shares`),
+        # so the enforcement evidence reaches the attempt-only branch without
+        # inflating any reported input.
         risk = _risk_from_shares(
             total,
             risk_requests,
