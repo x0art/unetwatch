@@ -281,6 +281,23 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     width: "w-24",
   },
   {
+    /* The new/enforcement split, read straight off the persisted
+     * `accounting_tag` — never re-derived from `action` here, so the UI cannot
+     * drift from what the backend stored. A DENY row is an "enforcement"
+     * (the proxy already handled it), everything else is a "new" finding. */
+    id: "accounting_tag",
+    header: "Type",
+    filterType: "enum",
+    accessor: (d) => d.accounting_tag,
+    cell: (d) =>
+      d.accounting_tag === "enforcement" ? (
+        <Badge variant="secondary">Enforcement</Badge>
+      ) : (
+        <Badge variant="outline">New</Badge>
+      ),
+    width: "w-28",
+  },
+  {
     id: "pattern",
     header: "Pattern",
     filterType: "text",

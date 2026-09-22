@@ -140,6 +140,19 @@ async def init_db():
             "ALTER TABLE findings ADD COLUMN intent TEXT NOT NULL DEFAULT ''"
         )
 
+    # Migration: accounting_tag — the new/enforcement split, derived from
+    # `action` at store time ("enforcement" for DENY, "new" otherwise). Added
+    # beside `intent` and for the same reason: both are pure functions of
+    # `action`, so legacy rows need no backfill and the column can never
+    # disagree with the action it was derived from. `intent` answers what the
+    # client DID (REACH/ATTEMPT); this answers how the row COUNTS, so a DENY
+    # (an already-handled ATTEMPT) is distinguishable from a new finding
+    # without re-deriving the rule in every consumer.
+    if "accounting_tag" not in columns:
+        await db.execute(
+            "ALTER TABLE findings ADD COLUMN accounting_tag TEXT NOT NULL DEFAULT ''"
+        )
+
     # Migration: rich flat proxy fields — carry the full logstash-proxy schema
     # into the findings table so Query/Findings/Host/Analytics can surface them.
     rich_findings_columns = [
@@ -179,6 +192,13 @@ async def init_db():
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_intent "
         "ON findings(client_ip, intent, log_timestamp)"
+    )
+
+    # Accounting-aware list/drill-down: separate new findings from enforcement
+    # findings in a window without scanning the whole table.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_accounting_tag "
+        "ON findings(accounting_tag, log_timestamp)"
     )
     await db.execute("""
         CREATE TABLE IF NOT EXISTS blacklist_entries (

@@ -49,6 +49,26 @@ truth about what is blocked.
   Rationale, and the rejected alternatives (jaillist client-IP membership, a
   stored flag, a cooldown): `docs/known-issue-alert-suppression.md`.
 
+### New findings vs enforcement findings
+
+`intent` says what the client **did** (REACH for ALLOW, ATTEMPT for DENY); it
+does **not** say how a row counts. Those are different questions, so every
+persisted row also carries `accounting_tag`, derived from the same `action` at
+store time:
+
+- **`"enforcement"`** — a DENY. The proxy already handled it, so it is evidence
+  the policy worked, **not** a new finding. Subordinately counted, never
+  alerted on.
+- **`"new"`** — everything else (ALLOW, FLAG, blank/unknown). It surfaced on
+  this poll and the operator has not seen policy dispose of it.
+
+Because both columns are pure functions of `action`, they are recomputed at
+store time rather than stored as independent assertions — they can never drift
+from the action they describe, and legacy rows (`action = ''`) need no backfill
+(they tag as `"new"`, matching their empty `intent`). Implementation:
+`app/services/result_processor.py::accounting_tag_for_action`, persisted in
+`store_findings`; surfaced as a **Type** column in Findings and Query.
+
 ## Stack & architecture
 
 - **Backend**: Python / FastAPI, single process, SQLite storage (`app/`). Pure-function service modules: `result_processor.py` (filtering, findings, items), `query_builder.py` (ES DSL), `monitor.py` (orchestrator: poll, query, store, webhook), `readout.py` (per-client risk ranking), `blacklist.py`, `jaillist.py` (client-IP jail list), `upstream_jaillist.py` (gist sync). Routes under `app/routes/` (`findings`, `query`, `analytics`, `patterns`, `blacklist`, `jaillist`, `redirects`, `readout`).

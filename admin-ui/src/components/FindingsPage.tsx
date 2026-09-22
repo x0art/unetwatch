@@ -220,6 +220,24 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     width: "w-40",
   },
   {
+    /* Read straight off the persisted `accounting_tag` — never re-derived from
+     * `action` here, so the UI cannot disagree with what the backend stored.
+     * A DENY row is an "enforcement" (the proxy already handled it, so it is
+     * evidence the policy worked rather than a new finding); everything else
+     * is a "new" finding to act on. */
+    id: "accounting_tag",
+    header: "Type",
+    filterType: "enum",
+    accessor: (f) => f.accounting_tag,
+    cell: (f) =>
+      f.accounting_tag === "enforcement" ? (
+        <Badge variant="secondary">Enforcement</Badge>
+      ) : (
+        <Badge variant="outline">New</Badge>
+      ),
+    width: "w-32",
+  },
+  {
     id: "log_timestamp",
     header: "Detected",
     filterType: "datetime",

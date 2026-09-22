@@ -324,6 +324,43 @@ def intent_for_action(action: str) -> str:
         return "ATTEMPT"
     return ""
 
+# ── Accounting tag (new finding vs enforcement finding) ────────────────────
+#
+# ``intent`` says what the client DID (REACH / ATTEMPT); it does not say how
+# the row counts. Those are two different questions, and conflating them is
+# how a DENY (a blocked ATTEMPT) reads as if it were a fresh reach. The tag
+# answers only the accounting question, at a glance:
+#
+#   "new"          — a finding the operator should ACT on: the client reached
+#                    something (REACH), or a non-DENY row we cannot otherwise
+#                    place. Freshly surfaced by this poll.
+#   "enforcement"  — the proxy already handled it (DENY / ATTEMPT). It is
+#                    EVIDENCE that the policy worked, not a new problem, so it
+#                    is subordinately counted, never alerted on
+#                    (see :func:`alertable_check`), and must not be read as a
+#                    new finding.
+#
+# Derived, like ``intent``, so it is a pure function of the row's ``action``:
+# no backfill is needed, legacy rows holding ``action = ''`` tag as "new"
+# (their intent is likewise ""), and the column can never drift from ``action``
+# because it is recomputed at store time rather than stored as an independent
+# assertion. It is deliberately NOT a verdict about the destination — that
+# lives in the queue/ledger; this is only "new finding, or enforcement
+# finding?".
+ACCOUNTING_TAG_NEW = "new"
+ACCOUNTING_TAG_ENFORCEMENT = "enforcement"
+
+
+def accounting_tag_for_action(action: str) -> str:
+    """Classify a row as a NEW finding or an ENFORCEMENT finding.
+
+    A DENY is an enforcement — the proxy already handled it, so it is not a
+    new finding. Everything else (ALLOW, FLAG, blank, unknown) counts as a
+    new finding: it surfaced on this poll and the operator has not seen the
+    policy dispose of it.
+    """
+    return ACCOUNTING_TAG_ENFORCEMENT if action == "DENY" else ACCOUNTING_TAG_NEW
+
 
 async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | None = None) -> int:
     """Persist filtered matches so they surface in the Findings page.
@@ -342,6 +379,14 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
     Legacy rows predating the column keep the DB default "" — that is
     intentional and requires no backfill, since the value is a pure function
     of ``action`` (which is likewise "" for those same legacy rows).
+
+    ``accounting_tag`` is the same pattern for the new/enforcement split
+    (see :func:`accounting_tag_for_action`): "enforcement" for DENY,
+    "new" for every other action including a legacy "" — so the two columns
+    never disagree, and no backfill is needed for this one either. It is the
+    column to read when asking "is this a finding to act on, or evidence the
+    policy already worked?", because ``intent`` (REACH/ATTEMPT) deliberately
+    does not answer that.
     """
     rows = []
     now = datetime.now(UTC).isoformat()
@@ -398,7 +443,10 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
     # Derived intent column — persisted for both ALLOW (REACH) and DENY
     # (ATTEMPT) rows; "" only for legacy rows and non-ALLOW/DENY actions.
     df["intent"] = df["action"].astype(str).map(intent_for_action)
-    all_cols = db_base_cols + ext_cols + ["intent"]
+    # Derived accounting tag — the new/enforcement split, computed from the
+    # SAME action column as intent so the two are consistent by construction.
+    df["accounting_tag"] = df["action"].astype(str).map(accounting_tag_for_action)
+    all_cols = db_base_cols + ext_cols + ["intent", "accounting_tag"]
     placeholders = ", ".join(["?"] * len(all_cols))
     col_names = ", ".join(all_cols)
 
@@ -427,6 +475,7 @@ async def store_findings(db, df: pd.DataFrame, matched_patterns: list[str] | Non
             # user_agent defaults to ""
             vals.append(str(df.iloc[i].get("user_agent", "")) if "user_agent" in df.columns else "")
         vals.append(str(df.iloc[i].get("intent", "")))
+        vals.append(str(df.iloc[i].get("accounting_tag", "")))
         rows.append(tuple(vals))
 
     if not rows:

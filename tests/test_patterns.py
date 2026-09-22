@@ -835,3 +835,102 @@ async def test_store_findings_persists_rich_flat_columns(client):
     assert row[9] == "172.21.26.84"     # user_id
     assert row[10] == "ALLOW"           # action
     assert row[11] == 12                # duration_seconds (int)
+
+
+async def test_store_findings_persists_accounting_tag(client):
+    """Every stored row carries a new/enforcement tag derived from its action.
+
+    The tag is what lets a DENY (an enforcement — the proxy already handled it,
+    so it is evidence the policy worked) be told apart from a new finding
+    without re-deriving the rule in each consumer. It is a pure function of
+    ``action``, stored alongside ``intent``; a blank/unknown action must still
+    tag as "new" rather than landing as an empty string, or the column would
+    read as "neither" instead of the accounting class it exists to answer.
+    """
+    import pandas as pd
+
+    from app.database import get_db
+    from app.services.result_processor import store_findings
+
+    df = pd.DataFrame(
+        [
+            {
+                "@timestamp": f"2026-09-03T09:4{i}:00.000Z",
+                "client_ip": "10.0.0.1",
+                "server_ip": "1.1.1.1",
+                "url": f"http://evil.test/{i}",
+                "base_url": "evil.test",
+                "action": action,
+                "duration_seconds": 1,
+            }
+            for i, action in enumerate(["ALLOW", "DENY", "FLAG", ""])
+        ]
+    )
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        inserted = await store_findings(db, df, matched_patterns=[])
+        assert inserted == 4
+        cur = await db.execute(
+            "SELECT url, action, intent, accounting_tag FROM findings ORDER BY id"
+        )
+        rows = {r[1]: (r[2], r[3]) for r in await cur.fetchall()}
+    finally:
+        await db.close()
+
+    assert rows["ALLOW"] == ("REACH", "new")
+    assert rows["DENY"] == ("ATTEMPT", "enforcement")
+    # FLAG and blank are not enforcements — they are not disposals, so they
+    # must read as new findings rather than as a third, unhandled class.
+    assert rows["FLAG"] == ("", "new")
+    assert rows[""] == ("", "new")
+
+
+async def test_store_findings_tags_deny_as_enforcement_not_new(client):
+    """A DENY is an enforcement, and the tag must not disagree with the action.
+
+    Both columns are derived from the same ``action`` in one pass, so this
+    asserts the invariant that makes the tag trustworthy: whenever ``action``
+    is DENY the tag is "enforcement", and it is "new" for every other row.
+    """
+    import pandas as pd
+
+    from app.database import get_db
+    from app.services.result_processor import store_findings
+
+    df = pd.DataFrame(
+        [
+            {
+                "@timestamp": "2026-09-03T09:00:00.000Z",
+                "client_ip": "10.0.0.2",
+                "server_ip": "1.1.1.1",
+                "url": "http://x.test/a",
+                "base_url": "x.test",
+                "action": "ALLOW",
+                "duration_seconds": 1,
+            },
+            {
+                "@timestamp": "2026-09-03T09:01:00.000Z",
+                "client_ip": "10.0.0.2",
+                "server_ip": "1.1.1.1",
+                "url": "http://x.test/b",
+                "base_url": "x.test",
+                "action": "DENY",
+                "duration_seconds": 1,
+            },
+        ]
+    )
+
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM findings")
+        await store_findings(db, df, matched_patterns=[])
+        cur = await db.execute("SELECT action, accounting_tag FROM findings")
+        pairs = [(r[0], r[1]) for r in await cur.fetchall()]
+    finally:
+        await db.close()
+
+    assert pairs, "expected the two rows to be persisted"
+    for action, tag in pairs:
+        assert tag == ("enforcement" if action == "DENY" else "new")

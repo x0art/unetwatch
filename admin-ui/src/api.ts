@@ -73,6 +73,16 @@ export interface Finding {
   duration_seconds?: number | string | null
   /** JSON array of block patterns that matched at poll time. */
   matched_patterns?: string | null
+  /**
+   * New/enforcement split, derived from `action` at store time:
+   * "enforcement" for DENY (the proxy already handled it — evidence the policy
+   * worked, NOT a new finding), "new" for everything else. Distinct from
+   * `intent`, which says what the client did (REACH/ATTEMPT): a DENY is an
+   * ATTEMPT that is also an enforcement finding.
+   */
+  accounting_tag?: "new" | "enforcement" | string | null
+  /** REACH (ALLOW) / ATTEMPT (DENY) / "" — what the client did. */
+  intent?: string | null
 }
 
 export interface FindingsResponse {
@@ -221,6 +231,13 @@ export interface QueryDoc {
   rule_info?: string
   rule_name?: string
   user_id?: string
+  /**
+   * New/enforcement split, derived from `action` at store time:
+   * "enforcement" for DENY (the proxy already handled it — evidence the policy
+   * worked, NOT a new finding), "new" for everything else. Distinct from a
+   * REACH/ATTEMPT reading: a DENY is an ATTEMPT that is also an enforcement.
+   */
+  accounting_tag?: "new" | "enforcement" | string | null
 }
 
 export interface QueryTopUrl {
