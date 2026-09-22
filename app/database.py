@@ -324,6 +324,12 @@ async def init_db():
             msteams_payload TEXT,                    -- JSON payload for MS Teams retry
             top_urls TEXT,                           -- JSON array: top flagged URLs
             matched_patterns TEXT,                   -- JSON array: block patterns that matched
+            -- Suppression counters (measured row counts, never estimated).
+            -- `suppressed_rows` counts distinct withheld rows; the two
+            -- sub-counts overlap on a row that is both DENY and blacklisted.
+            suppressed_rows INTEGER NOT NULL DEFAULT 0,
+            suppressed_enforced INTEGER NOT NULL DEFAULT 0,
+            suppressed_blacklisted INTEGER NOT NULL DEFAULT 0,
             error TEXT
         )
     """)
@@ -346,6 +352,17 @@ async def init_db():
     ):
         if col not in columns:
             await db.execute(f"ALTER TABLE monitor_logs ADD COLUMN {col} TEXT")
+
+    # Migration: add suppression counters. Guarded exactly like the blocks
+    # above; SQLite accepts a constant default in ADD COLUMN, so the same
+    # NOT NULL DEFAULT 0 shape as the CREATE TABLE is used here.
+    cursor = await db.execute("PRAGMA table_info(monitor_logs)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    for col in ("suppressed_rows", "suppressed_enforced", "suppressed_blacklisted"):
+        if col not in columns:
+            await db.execute(
+                f"ALTER TABLE monitor_logs ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
+            )
 
     # Migration: normalize blacklist entries to bare FQDN / IPv4 (protocol,
     # port, path and query stripped) so the plain-text feeds stay clean.

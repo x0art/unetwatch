@@ -320,6 +320,12 @@ export interface MonitorLog {
   error: string | null
   /** Parsed convenience views — present after listLogs. */
   topUrls?: string[]
+  /** Findings dropped before delivery (DENY enforced + already-blacklisted). */
+  suppressed_rows: number
+  /** Of the suppressed rows, those the proxy already enforced (action DENY). */
+  suppressed_enforced: number
+  /** Of the suppressed rows, those whose destination is already blacklisted. */
+  suppressed_blacklisted: number
   matchedPatterns?: string[]
 }
 

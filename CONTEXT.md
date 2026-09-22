@@ -15,6 +15,40 @@ uNetWatch (rebranded from "ELK Monitoring") watches **user internet behaviour re
 - **Analytics / Dashboard**: risk metrics count ALLOW pattern-matches only. Denied requests are reported as a separate **"Enforcements (handled)"** number, never as risk.
 - ADR: `docs/adr/0001-risk-definition.md`.
 
+### Alert suppression (what may reach a webhook)
+
+An alert is about what needs **action**. A row is **suppressed** — persisted as
+evidence, but withheld from *both* the n8n webhook and the MS Teams card — when
+either holds:
+
+- **`action == "DENY"`** — the proxy already enforced the policy (ADR 0001, the
+  request is "handled"); it never reached the destination, so alerting on it
+  double-counts a stop the operator already made. It stays in `findings` as an
+  ATTEMPT.
+- **the destination host is already in `blacklist_entries`** — the alert would
+  ask the operator to re-block what is already blocked.
+
+Suppression is **delivery-only**: suppressed rows are still persisted (the DENY
+ledger is the evidence of clients trying to bypass policy) and still visible in
+Monitor / Query / Findings. It is a pure function of the row's own action plus
+current blacklist membership — **there is deliberately no `suppressed` column
+and no suppression table**, because a stored flag would be a second source of
+truth about what is blocked.
+
+- Counts are **measured row counts** (`monitor_logs.suppressed_rows` /
+  `suppressed_enforced` / `suppressed_blacklisted`), never estimated.
+  `suppressed_rows` counts distinct suppressed rows and the two sub-counts
+  **overlap** on a row that is both DENY and blacklisted — never sum them.
+- The skip reason is written to `monitor_logs.webhook_reason` and is prefixed
+  with the literal **`suppressed:`**. That prefix is a contract with the Logs
+  page badge; the prose after it is display-only and must not be parsed.
+- `payload.summary.total_matches` still counts **all** filtered rows, not just
+  the alertable subset.
+- Implementation: `app/services/result_processor.py::alertable_check` (the rule),
+  applied in `app/services/monitor.py::fetch_logs` (the only call site).
+  Rationale, and the rejected alternatives (jaillist client-IP membership, a
+  stored flag, a cooldown): `docs/known-issue-alert-suppression.md`.
+
 ## Stack & architecture
 
 - **Backend**: Python / FastAPI, single process, SQLite storage (`app/`). Pure-function service modules: `result_processor.py` (filtering, findings, items), `query_builder.py` (ES DSL), `monitor.py` (orchestrator: poll, query, store, webhook), `readout.py` (per-client risk ranking), `blacklist.py`, `jaillist.py` (client-IP jail list), `upstream_jaillist.py` (gist sync). Routes under `app/routes/` (`findings`, `query`, `analytics`, `patterns`, `blacklist`, `jaillist`, `redirects`, `readout`).

@@ -140,6 +140,39 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     width: "w-20",
   },
   {
+    id: "suppressed",
+    header: "Suppressed",
+    filterType: "number",
+    accessor: (l) => l.suppressed_rows,
+    cell: (l) => (
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
+        {l.suppressed_rows !== null && l.suppressed_rows !== undefined
+          ? l.suppressed_rows.toLocaleString()
+          : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "monitored_dests",
+    header: "Monitored dests",
+    filterType: "number",
+    accessor: (l) => l.suppressed_blacklisted,
+    cell: (l) => (
+      <span
+        className="font-mono tabular-nums text-xs text-muted-foreground"
+        title="alertable rows dropped because the destination is already on the blacklist"
+      >
+        {l.suppressed_blacklisted !== null && l.suppressed_blacklisted !== undefined
+          ? l.suppressed_blacklisted.toLocaleString()
+          : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
     id: "flagged",
     header: "Flagged URLs",
     filterType: "number",
@@ -220,10 +253,27 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   },
 ]
 
+/* The backend writes a pre-delivery suppression reason prefixed with the
+ * literal ``suppressed:`` — a machine-readable contract with this badge
+ * (both writers, the poll and the Teams path, emit it). This is the signal
+ * the badge keys off; the prose after the prefix is display-only and NOT
+ * stable, so nothing here parses it. */
+const SUPPRESSION_REASON_PREFIX = "suppressed:"
+
 function WebhookBadge({ log }: { log: MonitorLog }) {
   if (log.kind === "query") {
     return <span className="text-xs text-muted-foreground">—</span>
   }
+
+  const reason = log.webhook_reason ?? ""
+  // PRIMARY suppression signal. The backend contract is the literal prefix;
+  // the remaining clause is a DEFENSIVE fallback for an un-prefixed
+  // suppression (rows dropped, webhook never ran — no status, no error),
+  // which is exactly the suppressed-with-nothing-to-send shape and distinct
+  // from the error path.
+  const suppressed =
+    reason.startsWith(SUPPRESSION_REASON_PREFIX) ||
+    ((log.suppressed_rows ?? 0) > 0 && log.webhook_status === null && !log.webhook_error)
 
   const hasN8n = log.webhook_status !== null || log.webhook_error || log.webhook_reason
   const hasMsteams = log.msteams_status !== null || log.msteams_error
@@ -232,8 +282,32 @@ function WebhookBadge({ log }: { log: MonitorLog }) {
     return <span className="text-xs text-muted-foreground">not sent</span>
   }
 
+  // Measured split, e.g. "n8n: 3 of 12 rows suppressed — already enforced /
+  // already blocked". `filtered` is the denominator; `suppressed_rows` the
+  // numerator — both persisted, neither estimated.
+  const reasonTitle = (prefix: string) =>
+    `${prefix}: ${log.suppressed_rows ?? 0} of ${log.filtered} rows suppressed — already enforced / already blocked`
+
   return (
     <span className="flex flex-wrap gap-1">
+      {/* PRIMARY suppression badge — rendered first, labelled "suppressed", so
+          it is never confused with the secondary "n8n: skip" badge below. */}
+      {suppressed && (
+        <>
+          <span title={reasonTitle("n8n")}>
+            <Badge variant="warning">
+              <CircleSlash className="mr-1 h-3 w-3" />
+              n8n: suppressed
+            </Badge>
+          </span>
+          <span title={reasonTitle("Teams")}>
+            <Badge variant="warning">
+              <CircleSlash className="mr-1 h-3 w-3" />
+              Teams: suppressed
+            </Badge>
+          </span>
+        </>
+      )}
       {hasN8n && (
         <span
           title={

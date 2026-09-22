@@ -247,6 +247,70 @@ def apply_filters(
     return df
 
 
+def alertable_check(
+    df: pd.DataFrame, blacklist: set[str]
+) -> tuple[pd.DataFrame, dict]:
+    """Split a filtered frame into the subset that may be alerted on.
+
+    Returns ``(alertable_df, stats)``. ``alertable_df`` is ``df`` with the
+    suppressed rows dropped; ``stats`` is exactly::
+
+        {"suppressed_rows": int, "suppressed_enforced": int,
+         "suppressed_blacklisted": int}
+
+    Two kinds of row are suppressed, for two different reasons:
+
+    * ``action == "DENY"`` — the proxy *enforced* the policy (ADR 0001, the
+      request is "handled") and the destination was never reached. Alerting on
+      it double-counts a request the operator already knows was stopped; it is
+      reported separately as an enforcement, never as a reach.
+    * ``base_url`` (string-coerced) in *blacklist* — the destination is already
+      blocked. An alert naming it asks the operator to re-block what is already
+      blocked, which is noise, not signal.
+
+    **Precedence: a row that is BOTH DENY and blacklisted counts once in
+    ``suppressed_rows`` and is attributed to ``suppressed_enforced``.**
+    ``suppressed_rows`` is therefore the number of DISTINCT suppressed rows and
+    is always ``>= max(suppressed_enforced, suppressed_blacklisted)``; the two
+    sub-counts overlap on exactly those doubly-suppressed rows.
+
+    Every value is a measured row count over *df* — nothing is estimated. A
+    frame lacking ``action`` (or holding only blank/NaN values) and one
+    lacking ``base_url`` are both tolerated: a missing column suppresses
+    nothing on that axis rather than raising, because a DataFrame built
+    directly from ES hits can lack either (``apply_filters`` is what
+    materialises them, and the helper must also be usable without it).
+
+    Pure: uses ``pd.DataFrame.copy`` and never mutates *df*. Deliberately
+    opt-in — called only from the poll path (``monitor.fetch_logs``) so every
+    other ``apply_filters`` call site keeps its current behaviour.
+    """
+    df = df.copy()
+
+    has_action = "action" in df.columns
+    if has_action:
+        enforced = (
+            df["action"].fillna("").astype(str).str.strip().str.upper() == "DENY"
+        )
+    else:
+        enforced = pd.Series(False, index=df.index)
+
+    if "base_url" in df.columns:
+        blacklisted = df["base_url"].astype(str).isin(blacklist) if blacklist else (
+            pd.Series(False, index=df.index)
+        )
+    else:
+        blacklisted = pd.Series(False, index=df.index)
+
+    suppressed = enforced | blacklisted
+    stats = {
+        "suppressed_rows": int(suppressed.sum()),
+        "suppressed_enforced": int(enforced.sum()),
+        "suppressed_blacklisted": int(blacklisted.sum()),
+    }
+    return df[~suppressed], stats
+
+
 def intent_for_action(action: str) -> str:
     """Derive the intent class of an evidence row from its proxy action.
 

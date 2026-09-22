@@ -57,6 +57,7 @@ from app.services.delivery import (  # noqa: F401
     send_logs,
 )
 from app.services.result_processor import (  # noqa: F401
+    alertable_check,
     apply_filters,
     store_findings,
 )
@@ -672,14 +673,92 @@ async def fetch_logs(minutes: int = 10):
                     actual_patterns.append(pat)
             log["matched_patterns"] = actual_patterns or list(block_patterns)
 
-        if df.empty:
+        # Suppression gate — the canonical ADR 0001 enforcement rule (DENY is
+        # "handled") plus the blacklist join, applied AFTER the whitelist/action
+        # filter and BEFORE anything is built for delivery. Only alertable rows
+        # may reach deliver_n8n/deliver_msteams; store_findings receives the
+        # preserved FULL filtered frame (df_full) so suppressed rows are still
+        # persisted as evidence.
+        #
+        # The blacklist set is keyed on `value` alone (both kinds), exactly as
+        # build_items does — base_url is a host, so a URL row and an IP row
+        # both match it the same way. Read once per poll, after the early
+        # returns above so an empty window costs no query.
+        bl_cursor = await db.execute("SELECT value FROM blacklist_entries")
+        blacklist = {r[0] for r in await bl_cursor.fetchall()}
+        df_full = df  # apply_filters returned a fresh copy and alertable_check
+        # copies internally (never mutates its input), so this snapshot holds the
+        # full filtered frame; only `df` is narrowed to the alertable subset.
+        df, suppression = alertable_check(df, blacklist)
+        # MEASURED suppression counts, read straight from alertable_check and
+        # recorded on BOTH paths below (all-suppressed early return and normal
+        # delivery) — never re-derived here, never defaulted, never guessed.
+        # `suppressed_rows` counts DISTINCT suppressed rows, while the two
+        # sub-counts overlap on a row that is BOTH a DENY row and blacklisted
+        # (see alertable_check's precedence note), so
+        # suppressed_enforced + suppressed_blacklisted can exceed
+        # suppressed_rows and must NEVER be added together as a total.
+        log["suppressed_rows"] = suppression["suppressed_rows"]
+        log["suppressed_enforced"] = suppression["suppressed_enforced"]
+        log["suppressed_blacklisted"] = suppression["suppressed_blacklisted"]
+
+        # MIXED-window reason. Only the all-suppressed early return below used
+        # to explain a withholding, so a card-subset window recorded the counts
+        # yet explained nothing (deliver_msteams only writes a reason from
+        # inside its preview path, which is skipped entirely when no Teams
+        # webhook URL is configured and is in any case guarded on the shared
+        # reason still being free). The monitor path is authoritative and
+        # deterministic: set the reason HERE, on the normal delivery path,
+        # before any store/deliver call, whenever rows were actually withheld
+        # and nothing has claimed the reason yet. Same "suppressed:" prefix
+        # contract as the all-suppressed branch (the Logs page keys its badge
+        # off it). Nothing suppressed => never set => stays None, as before.
+        if suppression["suppressed_rows"] > 0 and not log.get("webhook_reason"):
             log["webhook_reason"] = (
-                f"{len(hits)} matches, all excluded by whitelist/ALLOW filter — "
-                "nothing to send"
+                f"suppressed: {suppression['suppressed_rows']} of "
+                f"{log['filtered']} filtered matches withheld before delivery — "
+                f"{suppression['suppressed_enforced']} already enforced by the "
+                f"proxy (DENY), {suppression['suppressed_blacklisted']} to an "
+                "already-blacklisted destination — not included in this alert"
             )
-            print(f"[{datetime.now(UTC).isoformat()}][INFO] No filtered matches.")
+
+        if df.empty:
+            # Every filtered row was suppressed. Same early return as the
+            # filter path (payloads and statuses stay None), with the
+            # suppression explanation as the reason.
+            # The "suppressed:" prefix is a CONTRACT with the Logs page, which
+            # keys its distinct suppression badge off it (admin-ui LogsPage
+            # WebhookBadge). The other reasons in this function are plain prose;
+            # this one is machine-readable, so it must keep the prefix.
+            log["webhook_reason"] = (
+                f"suppressed: {suppression['suppressed_rows']} of "
+                f"{log['filtered']} filtered matches withheld before delivery — "
+                f"{suppression['suppressed_enforced']} already enforced by the "
+                f"proxy (DENY), {suppression['suppressed_blacklisted']} to an "
+                "already-blacklisted destination — nothing to send"
+            )
+            print(
+                f"[{datetime.now(UTC).isoformat()}][INFO] "
+                f"All {log['filtered']} filtered matches suppressed."
+            )
+            # Persist the full filtered frame before returning even though
+            # nothing is alertable: an all-DENY window is precisely the "client
+            # repeatedly trying to bypass policy" evidence the operator wants,
+            # so it must be recorded rather than silently dropped. The log is
+            # still written by the existing finally block.
+            try:
+                matched_pats = log.get("matched_patterns", block_patterns)
+                log["stored"] = await store_findings(db, df_full, matched_pats)
+            except Exception as e:
+                log["error"] = f"Failed to store findings: {e}"
+                print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")
             return
 
+
+        # Everything below is built from the ALERTABLE frame (`df`) — only these
+        # rows may reach deliver_n8n/deliver_msteams. store_findings receives the
+        # preserved full filtered frame (`df_full`), so suppressed rows are
+        # still persisted as evidence even though they are never delivered.
         required_columns = [
             "@timestamp", "client_ip", "server_ip", "url",
             "duration_seconds", "action",
@@ -715,7 +794,7 @@ async def fetch_logs(minutes: int = 10):
         # Persist locally before webhook delivery
         try:
             matched_pats = log.get("matched_patterns", block_patterns)
-            log["stored"] = await store_findings(db, df, matched_pats)
+            log["stored"] = await store_findings(db, df_full, matched_pats)
         except Exception as e:
             log["error"] = f"Failed to store findings: {e}"
             print(f"[{datetime.now(UTC).isoformat()}][WARN] Failed to store findings: {e}")
@@ -731,7 +810,10 @@ async def fetch_logs(minutes: int = 10):
 
         # ── MS Teams Workflows delivery ──────────────────────────────
         matched_pats = log.get("matched_patterns", block_patterns)
-        await deliver_msteams(log, result, matched_pats, block_patterns)
+        await deliver_msteams(
+            log, result, matched_pats, block_patterns,
+            suppressed=suppression["suppressed_rows"],
+        )
 
     except Exception as e:
         log["error"] = str(e)

@@ -38,8 +38,9 @@ async def write_log(entry: dict) -> None:
             "  stored, es_query, webhook_url, webhook_status, webhook_error,"
             "  webhook_reason, msteams_status, msteams_error,"
             "  webhook_payload, msteams_payload,"
-            "  top_urls, matched_patterns, error)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  top_urls, matched_patterns, error,"
+            "  suppressed_rows, suppressed_enforced, suppressed_blacklisted)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry.get("kind", "poll"),
                 entry.get("started_at") or datetime.now(UTC).isoformat(),
@@ -61,6 +62,9 @@ async def write_log(entry: dict) -> None:
                 _json_list(entry.get("top_urls")),
                 _json_list(entry.get("matched_patterns")),
                 entry.get("error"),
+                int(entry.get("suppressed_rows") or 0),
+                int(entry.get("suppressed_enforced") or 0),
+                int(entry.get("suppressed_blacklisted") or 0),
             ),
         )
         await db.commit()
@@ -145,4 +149,7 @@ def default_log(kind: str, minutes: int | None) -> dict:
         "top_urls": [],
         "matched_patterns": [],
         "error": None,
+        "suppressed_rows": 0,
+        "suppressed_enforced": 0,
+        "suppressed_blacklisted": 0,
     }
