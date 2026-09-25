@@ -624,46 +624,7 @@ export function HostInspectorPage({
           </span>
         ),
       },
-      {
-        id: "action",
-        header: "Action",
-        filterType: "enum",
-        accessor: (r) => r.action,
-        cell: (r) => <Badge variant={actionVariant(r.action ?? "")}>{r.action || "—"}</Badge>,
-        width: "w-24",
-      },
-      {
-        id: "duration",
-        header: "Duration",
-        filterType: "number",
-        accessor: (r) => getDurationMs(r),
-        cell: (r) => {
-          const ms = getDurationMs(r)
-          return <span className="font-mono text-xs tabular-nums">{ms != null ? `${ms}ms` : "—"}</span>
-        },
-        align: "right" as const,
-        width: "w-24",
-      },
-      {
-        id: "pattern",
-        header: "Triggered pattern",
-        filterType: "text",
-        accessor: (r) => getMatchedRule(r),
-        cell: (r) => (
-          <span className="block max-w-[200px] truncate font-mono text-xs" title={getMatchedRule(r)}>
-            {getMatchedRule(r)}
-          </span>
-        ),
-      },
       /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
-      {
-        id: "category",
-        header: "Category",
-        filterType: "enum",
-        accessor: (r) => r.category,
-        cell: (r) => <span className="text-xs text-muted-foreground">{r.category || "—"}</span>,
-        width: "w-24",
-      },
       {
         id: "method",
         header: "Method",
@@ -682,14 +643,6 @@ export function HostInspectorPage({
         align: "right" as const,
       },
       {
-        id: "country",
-        header: "Country",
-        filterType: "enum",
-        accessor: (r) => r.country_code,
-        cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
-        width: "w-20",
-      },
-      {
         id: "bytes",
         header: "↓/↑ Bytes",
         filterType: "number",
@@ -705,6 +658,56 @@ export function HostInspectorPage({
           )
         },
         align: "right" as const,
+        width: "w-24",
+      },
+      {
+        id: "duration",
+        header: "Duration",
+        filterType: "number",
+        accessor: (r) => getDurationMs(r),
+        cell: (r) => {
+          const ms = getDurationMs(r)
+          return <span className="font-mono text-xs tabular-nums">{ms != null ? `${ms}ms` : "—"}</span>
+        },
+        align: "right" as const,
+        width: "w-24",
+      },
+      {
+        id: "country",
+        header: "Country",
+        filterType: "enum",
+        accessor: (r) => r.country_code,
+        cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
+        width: "w-20",
+      },
+      /* ── Enforcement & audit columns — always the LAST columns ──
+       * Action, Triggered pattern, Category and Rule answer "whether the policy
+       * fired and on what". They must stay at the tail of this table. */
+      {
+        id: "action",
+        header: "Action",
+        filterType: "enum",
+        accessor: (r) => r.action,
+        cell: (r) => <Badge variant={actionVariant(r.action ?? "")}>{r.action || "—"}</Badge>,
+        width: "w-24",
+      },
+      {
+        id: "pattern",
+        header: "Triggered pattern",
+        filterType: "text",
+        accessor: (r) => getMatchedRule(r),
+        cell: (r) => (
+          <span className="block max-w-[200px] truncate font-mono text-xs" title={getMatchedRule(r)}>
+            {getMatchedRule(r)}
+          </span>
+        ),
+      },
+      {
+        id: "category",
+        header: "Category",
+        filterType: "enum",
+        accessor: (r) => r.category,
+        cell: (r) => <span className="text-xs text-muted-foreground">{r.category || "—"}</span>,
         width: "w-24",
       },
       {
