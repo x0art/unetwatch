@@ -6,6 +6,13 @@ export interface TopDomain {
   count: number
   /** Percentage share of the whole window (0..100). */
   pct: number
+  /** True when this domain's rows matched a block pattern (flag — distinct
+   * from an ordinary top destination). Set from the backend's
+   * `flaggedDomains` when that list is supplied. */
+  flagged?: boolean
+  /** Optional caption clarifying what `count` measures. Used to label the
+   * backend's flagged-domain counts honestly as pattern matches. */
+  countLabel?: string
 }
 
 export interface TriggeredPattern {
@@ -16,6 +23,9 @@ export interface TriggeredPattern {
 interface TopDestinationsProps {
   topDomains: TopDomain[]
   triggeredPatterns: TriggeredPattern[]
+  /** Optional header caption, overridden when the backend's flagged-domain
+   * list is rendered so the numbers are never read as total access volume. */
+  domainsCaption?: string
   className?: string
 }
 
@@ -28,8 +38,8 @@ function EmptyCell() {
   )
 }
 
-export function TopDestinations({ topDomains, triggeredPatterns, className }: TopDestinationsProps) {
-  const maxDomain = Math.max(1, ...topDomains.map((d) => d.count))
+export function TopDestinations({ topDomains, triggeredPatterns, domainsCaption, className }: TopDestinationsProps) {
+  const maxDomain = Math.max(1, ...topDomains.map((d) => (Number.isFinite(d.count) ? d.count : 0)))
   const maxHits = Math.max(1, ...triggeredPatterns.map((p) => p.hits))
 
   return (
@@ -38,7 +48,7 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
         <span className="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
         <h3 className="text-xs font-medium">Top Destinations &amp; Rule Matches</h3>
         <span className="ml-auto hidden text-xs font-medium text-muted-foreground sm:inline">
-          Destinations ranked by volume · rules by trigger count
+          {domainsCaption ?? "Destinations ranked by volume · rules by trigger count"}
         </span>
       </div>
 
@@ -74,12 +84,20 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex min-w-0 items-center gap-2">
+                        {d.flagged ? (
+                          <span
+                            className="shrink-0 rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning"
+                            title="Destination reached through a block-pattern match"
+                          >
+                            Flagged
+                          </span>
+                        ) : null}
                         <span className="block max-w-[220px] truncate font-mono text-[13px] font-semibold" title={d.domain}>
                           {d.domain}
                         </span>
                         <div className="h-1.5 min-w-[24px] flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
                           <div
-                            className="h-full rounded-full bg-primary"
+                            className={cn("h-full rounded-full", d.flagged ? "bg-warning" : "bg-primary")}
                             style={{ width: `${Math.max(2, (d.count / maxDomain) * 100)}%` }}
                           />
                         </div>
@@ -87,8 +105,9 @@ export function TopDestinations({ topDomains, triggeredPatterns, className }: To
                     </td>
                     <td className="px-4 py-2.5 text-right font-mono text-[13px] font-bold tabular-nums">
                       {d.pct.toFixed(0)}%
-                      <span className="ml-1.5 font-normal text-muted-foreground">
-                        ({d.count.toLocaleString()})
+                      <span className="ml-1.5 font-normal text-muted-foreground" title={d.countLabel}>
+                        ({d.count.toLocaleString()}
+                        {d.countLabel ? ` ${d.countLabel}` : ""})
                       </span>
                     </td>
                   </StaggerItem>

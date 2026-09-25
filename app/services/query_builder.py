@@ -114,10 +114,18 @@ def build_block_pattern_clause(block_patterns: list[str]) -> str:
     ``build_logs_query`` inlines this as the pattern filter;
     `build_pattern_match_predicate` expresses the identical predicate in Python
     for the pandas side.
+
+    A blank pattern (``p.strip() == ""``) is SKIPPED, not escaped-and-emitted:
+    `glob_to_regex` returns ``""`` for it and `build_pattern_match_predicate`
+    skips it, so emitting a degenerate ``(url : \\ \\ \\  OR base_url : \\ \\ \\ )``
+    term here would make the ES clause and the Python predicate express
+    different rules for the same input. Every surviving pattern keeps the
+    exact per-pattern shape, so the clause shape is unchanged.
     """
     return " OR ".join(
         f"(url : {escape_query_string(p)} OR base_url : {escape_query_string(p)})"
         for p in block_patterns
+        if p.strip()
     )
 
 

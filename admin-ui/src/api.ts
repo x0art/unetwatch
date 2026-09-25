@@ -1548,6 +1548,14 @@ export interface HostRisk {
    * Absent on profiles assembled client-side (findings/query fallbacks). */
   riskScoreAvailable?: boolean
   sources?: HostRiskSources
+  /** How many rows in the window matched a block pattern BY DOMAIN (>= the
+   * URL-only count). Additive to the payload; ABSENT on an older backend, so
+   * render it as an explicit unmeasured marker, never a `0`. */
+  domainMatchCount?: number
+  /** Distinct flagged domains with hit counts, busiest first, capped at 10.
+   * EMPTY ARRAY (not null/undefined) when the host reached nothing; absent on
+   * an older backend. Each `count` counts FLAGGED rows, not total volume. */
+  flaggedDomains?: { domain: string; count: number }[]
 }
 
 /** When the risk figure could not be computed at all (ES unreachable or the

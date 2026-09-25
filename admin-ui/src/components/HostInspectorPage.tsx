@@ -35,6 +35,7 @@ import {
   notifySessionExpired,
   type QueryDoc,
   type HostProfile,
+  type HostRisk,
   type ClientReport,
   type Finding,
 } from "../api"
@@ -139,6 +140,69 @@ function buildTopDomains(items: QueryDoc[]): TopDomain[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([domain, count]) => ({ domain, count, pct: (count / total) * 100 }))
+}
+
+/** Legend for the domain-match figure. The backend number counts rows that
+ * matched a block pattern BY DOMAIN — it is NOT the destination's total
+ * access volume, and this text never claims it is. */
+const DOMAIN_MATCH_COUNT_LABEL = "Rows matched a block pattern by destination domain"
+
+/** The host's domain-level flag picture, read from the OPTIONAL backend keys
+ * on `GET /api/hosts/{ip}`'s `risk` object. Both fields are additive, so an
+ * older backend leaves `count` null and `domains` empty, and the page renders
+ * the client-side fallback / an unmeasured figure instead of a fabricated `0`. */
+interface DomainMatch {
+  /** Distinct flagged domains, busiest first, already capped by the backend. */
+  domains: { domain: string; count: number }[]
+  /** Total rows matched by domain; `null` when the backend did not say. */
+  count: number | null
+}
+
+/** Read `risk.domainMatchCount` / `risk.flaggedDomains` defensively: validate
+ * element shapes so a malformed payload can never render `undefined`/`NaN`. */
+function readDomainMatch(risk: HostRisk): DomainMatch {
+  const domains = Array.isArray(risk.flaggedDomains)
+    ? risk.flaggedDomains
+        .filter(
+          (d): d is { domain: string; count: number } =>
+            !!d && typeof d.domain === "string" && typeof d.count === "number",
+        )
+        .map((d) => ({ domain: d.domain, count: d.count }))
+    : []
+  const count =
+    typeof risk.domainMatchCount === "number" && Number.isFinite(risk.domainMatchCount)
+      ? risk.domainMatchCount
+      : null
+  return { domains, count }
+}
+
+/** Resolve the domain rows for the destination table. The backend's
+ * `flaggedDomains` list is preferred when supplied (its `count` is the
+ * authoritative per-domain flagged count); otherwise the client-side
+ * `buildTopDomains` frame is used. BOTH sources are rows from the flagged
+ * frame — every row already matched a block pattern — so both are marked
+ * `flagged` and carry the honest "matched" count label; the caption then never
+ * claims more than the rows say. */
+function flaggedDomainDomains(sections: HostSectionData, dm: DomainMatch): TopDomain[] {
+  if (dm.domains.length === 0) {
+    return sections.topDomains.map((d) => ({
+      domain: d.domain,
+      count: d.count,
+      pct: Number.isFinite(d.pct) ? d.pct : 0,
+      flagged: true,
+      countLabel: "matched",
+    }))
+  }
+  const fallback = new Map(sections.topDomains.map((d) => [d.domain, d]))
+  return dm.domains.map((d) => ({
+    domain: d.domain,
+    count: d.count,
+    // Backend gives no share; compute it against the flagged rows we counted,
+    // else fall back to the client-side share for the same domain.
+    pct: dm.count && dm.count > 0 ? (d.count / dm.count) * 100 : (fallback.get(d.domain)?.pct ?? 0),
+    flagged: true,
+    countLabel: "matched",
+  }))
 }
 
 function buildTriggeredPatterns(items: QueryDoc[]): TriggeredPattern[] {
@@ -274,6 +338,7 @@ export function HostInspectorPage({
   const [sections, setSections] = useState<HostSectionData | null>(null)
   const [sectionsLoading, setSectionsLoading] = useState(false)
   const [sectionsError, setSectionsError] = useState<string | null>(null)
+  const [domainMatch, setDomainMatch] = useState<DomainMatch | null>(null)
   const [actionFilter, setActionFilter] = useState("All")
   const [hSource, setHSource] = useState<HostSource>("live")
   const [page, setPage] = useState(0)
@@ -363,6 +428,30 @@ export function HostInspectorPage({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hSource])
+
+  // Domain-level flag picture from the dedicated host endpoint. This is
+  // SUPPLEMENTARY to the request-log table (which is fed by `runQuery`): it is
+  // fetched independently once a lookup resolves, so a failing or slow profile
+  // call can never block, empty or break the log rows — those still paint from
+  // `sections`. A failure leaves `domainMatch` null and the page falls back to
+  // the client-side `buildTopDomains` and an unmeasured "—" figure.
+  useEffect(() => {
+    if (!host || loading) return
+    let cancelled = false
+    setDomainMatch(null)
+    const ip = host.primaryIp || target
+    void getHostProfile(ip, timeRange)
+      .then((profile) => {
+        if (!cancelled) setDomainMatch(readDomainMatch(profile.risk))
+      })
+      .catch(() => {
+        if (!cancelled) setDomainMatch(null)
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [host, timeRange])
 
   // Shared sections loader: uses the cleaned host string, falls back to
   // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
@@ -838,6 +927,22 @@ export function HostInspectorPage({
   )
   const volumeValue = hasRealData ? formatBytes(report!.total_volume) : "—"
 
+  // Domain-level picture. An absent `domainMatchCount` reads "—" — never a
+  // manufactured 0, which would look like a measured clean result; an absent
+  // (or empty) `flaggedDomains` falls back to the client-side aggregation.
+  const domainMatchValue =
+    domainMatch?.count != null ? domainMatch.count.toLocaleString() : "—"
+  const flaggedDomainsLoading = !!host && domainMatch === null && !sectionsError
+  const topDomainItems: TopDomain[] = flaggedDomainsLoading
+    ? []
+    : sections
+      ? flaggedDomainDomains(sections, domainMatch ?? { domains: [], count: null })
+      : []
+  // Both paths (backend `flaggedDomains` list OR the client-side flagged-frame
+  // fallback) show flagged, pattern-matched domains, so the caption is set in
+  // both — it never reads as total traffic and never claims more than the rows.
+  const topDomainsCaption = "Flagged domains ranked by pattern matches · rules by trigger count"
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -942,11 +1047,28 @@ export function HostInspectorPage({
             )}
           </Panel>
 
+          {/* Domain coverage — how many of this host's rows a block pattern
+              caught BY DESTINATION DOMAIN (a subset, never total traffic).
+              "—" when an older backend does not report the figure. */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <StatCard
+              icon={Globe}
+              label="Domain matches"
+              value={domainMatchValue}
+              tone="warning"
+              hint={DOMAIN_MATCH_COUNT_LABEL}
+            />
+          </div>
+
           {/* 2) Top Destinations & Rule Matches */}
           {sectionsLoading ? (
             <Skeleton className="h-64 w-full" />
           ) : sections ? (
-            <TopDestinations topDomains={sections.topDomains} triggeredPatterns={sections.triggeredPatterns} />
+            <TopDestinations
+              topDomains={topDomainItems}
+              triggeredPatterns={sections.triggeredPatterns}
+              domainsCaption={topDomainsCaption}
+            />
           ) : null}
 
           {/* 3) Ranked URLs — each row links into URL Investigation */}

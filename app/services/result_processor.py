@@ -130,8 +130,15 @@ def extract_domain(row: dict) -> str:
     and falls back to the `url`'s authority only when `base_url` is empty (a
     legacy/unprojected row). Both normalizations go through `_domain_of_base`,
     so the output shape is identical whichever field answered.
+
+    A whitespace-ONLY `base_url` counts as empty and falls back to the url: a
+    bare ``"   "`` is truthy, so it would otherwise win the ``or`` and make the
+    row's domain whitespace instead of its host. The live path never sees one
+    (`apply_filters` recomputes `base_url` from the url), but the persisted
+    path reads the raw column, so the ES clause and this domain would disagree
+    about the same row — exactly the drift the one-expression design prevents.
     """
-    base = str(row.get("base_url") or "")
+    base = str(row.get("base_url") or "").strip()
     return _domain_of_base(base or str(row.get("url") or ""))
 
 

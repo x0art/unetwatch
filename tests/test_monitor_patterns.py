@@ -397,3 +397,63 @@ def test_build_logs_query_clause_matches_url_or_base_url():
         == "(url : *indoxxi* OR base_url : *indoxxi*)"
     )
     assert filters[1]["query_string"]["analyze_wildcard"] is True
+
+
+def test_extract_domain_whitespace_base_url_falls_back_to_url():
+    """A whitespace-ONLY `base_url` must NOT win over the url authority.
+
+    WHY this pins a real disagreement, not a cosmetic one: `base_url` is read
+    first and a bare ``"   "`` is TRUTHY, so an unstripped ``or`` would make the
+    row's domain whitespace instead of ``indoxxi.foo``. The ES clause matches
+    the row on ``url OR base_url``, so the Python side must resolve the SAME
+    domain or the two express different rules for one row — the exact drift the
+    one-expression design exists to prevent. A non-blank `base_url` still wins,
+    so this only closes the blank hole.
+    """
+    from app.services.result_processor import extract_domain
+
+    # Whitespace-only base_url → the url's authority answers.
+    assert (
+        extract_domain({"url": "https://indoxxi.foo/a", "base_url": "   "})
+        == "indoxxi.foo"
+    )
+    # Genuinely empty/None behaves as before (unchanged legacy fallback).
+    assert (
+        extract_domain({"url": "https://indoxxi.foo/a", "base_url": ""})
+        == "indoxxi.foo"
+    )
+    assert extract_domain({"url": "https://indoxxi.foo/a"}) == "indoxxi.foo"
+    # A non-blank base_url still wins over the url.
+    assert (
+        extract_domain(
+            {"url": "https://cdn.example/a", "base_url": "indoxxi.foo"}
+        )
+        == "indoxxi.foo"
+    )
+
+
+def test_block_pattern_clause_skips_blank_patterns():
+    """A blank pattern contributes NO clause term — it must not be emit-able.
+
+    WHY: `glob_to_regex('   ')` returns ``''`` and
+    `build_pattern_match_predicate` SKIPS the blank pattern, so if the ES clause
+    escaped-and-emitted a degenerate ``(url : \\ \\ \\  OR base_url : \\ \\ \\ )``
+    term the two surfaces would express different rules for the same input.
+    Non-blank patterns are untouched, and the shape per surviving pattern is
+    unchanged, so callers that pin the clause keep passing.
+    """
+    from app.services.query_builder import build_block_pattern_clause
+
+    assert build_block_pattern_clause(["   "]) == ""
+    assert build_block_pattern_clause(["   ", "\t", ""]) == ""
+    # A blank alongside a real pattern contributes nothing, and the real
+    # pattern keeps its exact ``(url : <p> OR base_url : <p>)`` shape.
+    assert (
+        build_block_pattern_clause(["   ", "*indoxxi*"])
+        == "(url : *indoxxi* OR base_url : *indoxxi*)"
+    )
+    assert (
+        build_block_pattern_clause(["*porn*", "\t", "*nonton*"])
+        == "(url : *porn* OR base_url : *porn*)"
+        " OR (url : *nonton* OR base_url : *nonton*)"
+    )
