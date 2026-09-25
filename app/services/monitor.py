@@ -28,7 +28,9 @@ from app.services.es_client import (  # noqa: F401
 from app.services.query_builder import (  # noqa: F401
     QUERY_SOURCE_FIELDS,
     build_all_query,
+    build_block_pattern_clause,
     build_logs_query,
+    build_pattern_match_predicate,
     build_pattern_regex as _build_pattern_regex,
     escape_query_string as _escape_query_string,
     glob_to_regex as _glob_to_regex,

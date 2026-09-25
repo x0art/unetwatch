@@ -408,6 +408,68 @@ async def _fetch_findings_rows(db, ip: str, minutes: int) -> list[dict]:
     return [dict(row) for row in await cursor.fetchall()]
 
 
+# ── Domain-level reach measurement (2026-09-25) ─────────────────────────────
+#
+# With the block-pattern clause widened to `url OR base_url`, the reach frame
+# now also contains the sibling-path rows of a flagged domain
+# (`https://x.example/a`, `/b`, `/c`…), which URL-only matching missed. The
+# operator reads that frame as "how much did this host hit THIS destination",
+# so the aggregate reports the domain-level view explicitly rather than
+# leaving the UI to re-derive it from the URL-only rows it used to see.
+#
+# `DOMAIN_REACH_LIMIT` caps the per-domain list. It is a DISPLAY cap, not a
+# measurement cap: `domainMatchCount` counts every matching row in the frame,
+# the list simply names the busiest ten destinations (the tail lives in the
+# table, which shows the rows themselves).
+DOMAIN_REACH_LIMIT = 10
+
+
+def _domain_reach_breakdown(df, predicate) -> tuple[list[dict], int]:
+    """The domain-level reach view of a frame: per-domain counts + row count.
+
+    ``predicate(row) -> bool`` is the shared block-pattern test
+    (`query_builder.build_pattern_match_predicate`) — the SAME rule the ES
+    clause applies, evaluated over the frame we already hold, so this adds no
+    round-trip and no store. Rows are the block-pattern hits of that frame; a
+    row counts toward its DOMAIN (``result_processor.extract_domain``), so one
+    flagged domain reached through many sibling paths contributes every path.
+
+    Returns ``(domains, domain_match_count)`` where ``domains`` is sorted by
+    hit count DESC (then domain ASC, so equal counts are deterministic) and
+    capped to `DOMAIN_REACH_LIMIT`. An empty frame yields ``([], 0)`` — an
+    empty list, never a fabricated entry.
+    """
+    from app.services.result_processor import extract_domain
+    counts: dict[str, int] = {}
+    for row in df.to_dict("records"):
+        if predicate(row):
+            domain = extract_domain(row)
+            counts[domain] = counts.get(domain, 0) + 1
+    domains = [
+        {"domain": domain, "count": count}
+        for domain, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return domains[:DOMAIN_REACH_LIMIT], sum(counts.values())
+
+
+async def _load_block_patterns() -> list[str]:
+    """The configured block patterns — ONE reader for both aggregate paths.
+
+    The live path already opens a DB session for its patterns and blacklist;
+    the persisted path opens one here. Sharing the reader keeps the two paths'
+    definition of "a block pattern" identical (more important now that the
+    match is URL-or-domain on both).
+    """
+    from app.database import get_db
+    from app.services.monitor import get_block_patterns
+
+    db = await get_db()
+    try:
+        return await get_block_patterns(db)
+    finally:
+        await db.close()
+
+
 async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
     """Grade the PERSISTED findings table for one host — the fallback source.
 
@@ -429,6 +491,8 @@ async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
         _row_is_enforced,
         _row_is_risk,
     )
+    from app.services.monitor import build_pattern_match_predicate
+    from app.services.result_processor import extract_domain
 
     db = await get_db()
     try:
@@ -442,6 +506,26 @@ async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
         await db.close()
     has_action = _has_column(columns, "action")
     blacklist_domains = {r["value"] for r in blacklist_rows if r["value"]}
+
+    # Domain-level reach — the SAME definitions the live path reports, so the
+    # two stores hand the UI one shape (their numbers may legitimately differ;
+    # see the ``totalRequests`` note below). A persisted row's domain comes
+    # from its ``base_url`` column with the SAME shared helper the live path
+    # uses (`extract_domain` → `_domain_of_base`), which falls back to parsing
+    # the stored ``url``'s authority when ``base_url`` is empty. The SAME
+    # shared matcher decides the hit, so the ES clause and this annotation
+    # cannot drift.
+    block_patterns = await _load_block_patterns()
+    match = build_pattern_match_predicate(block_patterns)
+    domain_match_count = sum(1 for r in rows if match(r))
+    domains: dict[str, int] = {}
+    for r in rows:
+        if match(r):
+            domains[extract_domain(r)] = domains.get(extract_domain(r), 0) + 1
+    flagged_domains = [
+        {"domain": domain, "count": count}
+        for domain, count in sorted(domains.items(), key=lambda kv: (-kv[1], kv[0]))
+    ][:DOMAIN_REACH_LIMIT]
 
     reach_rows = [r for r in rows if _row_is_risk(r, has_action)]
     attempt_rows = [r for r in rows if _row_is_enforced(r, has_action)]
@@ -514,6 +598,11 @@ async def _aggregate_host_from_findings(ip: str, minutes: int) -> dict | None:
         "enforcements": len(attempt_rows),
         "blacklistedRequests": len(blacklisted_reaches),
         "blacklistedDistinct": blacklisted_distinct,
+        # Domain-level reach: the rows whose DOMAIN matches a block pattern
+        # (>= the URL-only count), and the distinct flagged domains with their
+        # hit counts. Same definitions and shape as the live path.
+        "domainMatchCount": domain_match_count,
+        "flaggedDomains": flagged_domains,
         "newestReachAgeMinutes": newest_reach_age_minutes,
         "es_online": False,
         "persisted": True,
@@ -535,6 +624,7 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
         from app.services.monitor import (
             _build_pattern_regex,
             build_logs_query,
+            build_pattern_match_predicate,
             get_block_patterns,
             get_whitelist_patterns,
         )
@@ -613,6 +703,10 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
                 "enforcements": enforcements,
                 "blacklistedRequests": 0,
                 "blacklistedDistinct": 0,
+                # No reach traffic → no flagged domain, an EMPTY list (not a
+                # fabricated entry) and a domain-level count of 0.
+                "domainMatchCount": 0,
+                "flaggedDomains": [],
                 "newestReachAgeMinutes": None,
                 "es_online": True,
             }
@@ -661,12 +755,24 @@ async def _aggregate_host(ip: str, minutes: int) -> dict | None:
                 age = (pd.Timestamp.now(tz="UTC") - newest).total_seconds() / 60.0
                 newest_reach_age_minutes = int(max(0, age))
 
+        # Domain-level reach, over the frame already in hand (no third ES
+        # round-trip): which domains the block pattern flagged, and how many
+        # rows each. Widening the clause ships sibling-path rows for a flagged
+        # domain, so this count is >= the url-only count and `total` above
+        # already equals the widened frame — the UI count and the table agree.
+        # A `url`-only row still contributes: `extract_domain` parses its URL.
+        flagged_domains, domain_match_count = _domain_reach_breakdown(
+            df, build_pattern_match_predicate(block_patterns)
+        )
+
         return {
             "totalRequests": total,
             "riskRequests": risk_requests,
             "enforcements": enforcements,
             "blacklistedRequests": blacklisted_requests,
             "blacklistedDistinct": blacklisted_distinct,
+            "domainMatchCount": domain_match_count,
+            "flaggedDomains": flagged_domains,
             "newestReachAgeMinutes": newest_reach_age_minutes,
             "es_online": True,
         }
@@ -733,6 +839,11 @@ async def host_profile(
     blacklisted_distinct = (agg or {}).get("blacklistedDistinct", 0)
     newest_reach_age_minutes = (agg or {}).get("newestReachAgeMinutes")
     enforcements = (agg or {}).get("enforcements", 0)
+    # Domain-level reach, measured over the same frame `total` counts. The UI
+    # count and the table cannot disagree because `total` IS the widened frame
+    # and `domainMatchCount` is that frame's block-pattern subset.
+    domain_match_count = (agg or {}).get("domainMatchCount", 0)
+    flagged_domains = (agg or {}).get("flaggedDomains", [])
 
     # The share is the enforcement fraction of a DENOMINATOR that includes
     # them: block-pattern hits (totalRequests) plus the enforcements the
@@ -814,6 +925,13 @@ async def host_profile(
             # Distinct blacklisted destinations REACHed (breadth) — a persisted
             # `base_url` count, additive to the payload.
             "blacklistedDistinct": blacklisted_distinct,
+            # Domain-level reach: rows whose DOMAIN matches a block pattern
+            # (>= the url-only count, since the pattern clause now matches
+            # `url OR base_url`) and the distinct flagged domains with their
+            # hit counts, busiest first, capped. Empty list when the host
+            # reached nothing — never a fabricated entry.
+            "domainMatchCount": domain_match_count,
+            "flaggedDomains": flagged_domains,
             "enforcementsPct": round(enforcements_pct, 1),
             # Real byte totals from persisted findings — `null` when nothing
             # was persisted, with bandwidthNeverMeasured marking that state.

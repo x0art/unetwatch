@@ -99,6 +99,65 @@ def _domain_of_base(base_url: str) -> str:
     return host or "unknown"
 
 
+# ── Block-pattern match: URL OR domain (canonical) ─────────────────────────
+#
+# A block pattern matches a row when it matches the row's URL **or** its
+# destination domain. Only the URL used to be searched, which under-counts the
+# thing the operator actually reasons about: a destination reached through many
+# different paths (`https://x.example/a`, `/b`, `/c`…) contributed only the
+# paths whose full URL happened to contain the pattern text. The domain — the
+# scheme/port-stripped authority persisted as `base_url` — is the durable
+# identity, so `*indoxxi*` must flag `indoxxi.foo` and `www.indoxxi.foo`
+# whichever path was requested.
+#
+# `extract_domain` is the ONE way a row's domain is derived, wherever that row
+# came from: `_domain_of_base` for a persisted `base_url` (its canonical home
+# is directly above, and it keeps `www.` and strips a trailing `:port`). Every
+# other field — `url`, `domain` — is DERIVED here, never read: the flat
+# `domain` field is frequently empty in real persisted rows and
+# `_domain_of_base`'s authority extraction subsumes URL parsing, so neither is
+# a second implementation. `pattern_match_series` is the ONE match predicate,
+# reused by `build_items` over a DataFrame (vectorized) and by
+# `app/services/query_builder.build_pattern_match_predicate` over dict rows
+# (symbolic, so `app/routes/hosts.py` can size the ES `size` cap without
+# fetching a row) — one expression of the rule, three call sites.
+
+
+def extract_domain(row: dict) -> str:
+    """The ONE way to derive a row's domain for block-pattern matching.
+
+    Reads `base_url` first — the persisted, scheme/port-stripped authority —
+    and falls back to the `url`'s authority only when `base_url` is empty (a
+    legacy/unprojected row). Both normalizations go through `_domain_of_base`,
+    so the output shape is identical whichever field answered.
+    """
+    base = str(row.get("base_url") or "")
+    return _domain_of_base(base or str(row.get("url") or ""))
+
+
+def pattern_match_series(rows: list[dict], pattern: str) -> pd.Series:
+    """Vectorized glob match of one block pattern over a URL-or-domain batch.
+
+    The single source of the match predicate. Each row's domain is derived with
+    `extract_domain` (which reads the row's persisted ``base_url`` and falls
+    back to the ``url``'s authority), and the pattern — a glob, matched
+    case-insensitively via `glob_to_regex` — must match the row's ``url`` **or**
+    its domain. The URL arm preserves the pre-widening behaviour exactly, so a
+    row that matched before still matches. Returns a positional boolean Series
+    aligned with ``rows``.
+    """
+    regex = glob_to_regex(pattern)
+    if not regex:
+        return pd.Series(False, index=range(len(rows)))
+    url_hit = pd.Series(
+        [str(r.get("url") or "") for r in rows], dtype="object"
+    ).str.contains(regex, regex=True, case=False, na=False)
+    domain_hit = pd.Series(
+        [extract_domain(r) for r in rows], dtype="object"
+    ).str.contains(regex, regex=True, case=False, na=False)
+    return url_hit | domain_hit
+
+
 def _persisted_bytes(value) -> int | None:
     """The persisted byte figure for one row, or ``None`` when not recorded.
 
@@ -551,7 +610,13 @@ def build_items(
     (``blocked_by``), whether the URL matches a whitelist pattern
     (``whitelisted``), and whether its destination host (``base_url``) is
     already on the blacklist (``blacklisted`` / ``blacklist_source``).
+
+    ``blocked_by`` is a URL-or-DOMAIN match: a pattern now annotates a row when
+    it matches the row's ``url`` **or** its domain (``extract_domain`` —
+    ``base_url``'s authority) — see ``pattern_match_series``. A domain-only
+    match therefore still shows its Triggered pattern in the table.
     """
+
     now = datetime.now(UTC).isoformat()
     whitelist_matcher = (
         re.compile(whitelist_regex, re.IGNORECASE) if whitelist_regex else None
@@ -559,17 +624,15 @@ def build_items(
 
     df = df.head(limit)
     records = df.to_dict("records")
-    # Vectorized block-pattern annotation: one regex pass per pattern across
-    # the whole batch instead of a per-row re.search per pattern. Indices are
-    # positional (reset_index) so they line up with the records list.
-    url_series = df["url"].astype(str).reset_index(drop=True)
+    # Block-pattern annotation: one pass per pattern across the whole batch
+    # instead of a per-row re.search per pattern. The match is URL-OR-DOMAIN
+    # (see `pattern_match_series`), so the rows carry `base_url` too and the
+    # returned Series is positional, lining up with `records`.
     block_hits: list[list[str]] = [[] for _ in range(len(records))]
     for pattern in block_patterns:
         if not pattern.strip():
             continue
-        matched = url_series.str.contains(
-            glob_to_regex(pattern), regex=True, case=False, na=False
-        )
+        matched = pattern_match_series(records, pattern)
         for i in matched[matched].index:
             block_hits[i].append(pattern)
 

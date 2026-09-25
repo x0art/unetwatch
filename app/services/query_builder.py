@@ -91,6 +91,67 @@ def escape_query_string(term: str) -> str:
     return _QUERY_STRING_SPECIAL.sub(r"\\\1", term) if term else term
 
 
+# ── Block-pattern clause: URL OR domain (canonical) ────────────────────────
+#
+# The block-pattern clause is built ONCE, here, and shared by the ES clause
+# (`build_logs_query`) and the pandas annotation
+# (`result_processor.build_items`) so the two can never express different
+# rules. A pattern is glob-matched against the row's URL **or** its
+# destination domain — the scheme/port-stripped authority persisted as
+# `base_url` — because URL-only matching under-counts a destination reached
+# through many paths (`https://x.example/a`, `/b`, `/c`…). The `url` arm is
+# kept verbatim so every row that matched before still matches; the widening
+# only ADDS rows. `base_url` is a keyword field in the proxy mapping (the
+# `build_all_query` search clause already targets `base_url.keyword`), so the
+# domain arm is itself a wildcard query_string term, not an aggregation.
+
+
+def build_block_pattern_clause(block_patterns: list[str]) -> str:
+    """The Lucene ``url OR base_url`` query_string for one block-pattern set.
+
+    ONE expression of the block-pattern rule: each pattern becomes
+    ``(url : <p> OR base_url : <p>)`` and the per-pattern clauses are ORed.
+    ``build_logs_query`` inlines this as the pattern filter;
+    `build_pattern_match_predicate` expresses the identical predicate in Python
+    for the pandas side.
+    """
+    return " OR ".join(
+        f"(url : {escape_query_string(p)} OR base_url : {escape_query_string(p)})"
+        for p in block_patterns
+    )
+
+
+def build_pattern_match_predicate(block_patterns: list[str]):
+    """The SAME block-pattern rule as `build_block_pattern_clause`, for dict rows.
+
+    Returns ``predicate(row) -> bool``: a pattern matches a row when it matches
+    the row's ``url`` OR its destination domain. The domain is derived with
+    ``result_processor.extract_domain`` — the one home for how a row's domain
+    is computed — so the ES clause and this predicate cannot drift. This is the
+    per-row twin of `build_block_pattern_clause`: the ES query decides WHICH
+    rows come back, this decides how MANY (``app/routes/hosts.py`` sizes the ES
+    ``size`` cap from the widened frame without a second round-trip).
+    """
+    from app.services.result_processor import extract_domain, pattern_match_series
+
+    def predicate(row: dict) -> bool:
+        domain = extract_domain(row)
+        url = str(row.get("url") or "")
+        for pattern in block_patterns:
+            if not pattern.strip():
+                continue
+            regex = glob_to_regex(pattern)
+            if not regex:
+                continue
+            if re.search(regex, url, re.IGNORECASE):
+                return True
+            if re.search(regex, domain, re.IGNORECASE):
+                return True
+        return False
+
+    return predicate
+
+
 def build_logs_query(
     block_patterns: list[str],
     minutes: int,
@@ -100,7 +161,7 @@ def build_logs_query(
     fields: list[str] | None = None,
     actions: list[str] | None = None,
 ) -> dict:
-    """ES query that flags URLs matching any block pattern within the window.
+    """ES query that flags URLs OR domains matching any block pattern.
 
     ``search`` (optional) narrows the result set *at the ES level*: every
     whitespace-separated token must appear as a substring of the URL, client
@@ -121,9 +182,14 @@ def build_logs_query(
     the pattern clause present therefore under-counts to zero on ordinary
     traffic (see ``_aggregate_host`` in ``app/routes/hosts.py``).
 
-    ``actions is None`` (the default) keeps the legacy shape byte-identical:
-    pattern clause present, no action filter. Callers that pass ``actions``
-    receive a query with NO pattern restriction.
+    ``actions is None`` (the default) keeps the same SHAPE as before (pattern
+    clause present, no action filter); only the clause TEXT widened. The
+    pattern now matches the row's ``url`` **or** its destination domain
+    (``base_url``), because URL-only matching under-counts a flagged
+    destination reached through many sibling paths — the domain is the durable
+    identity the operator reasons about (see `build_block_pattern_clause`).
+    The ``url`` arm is unchanged, so a row that matched before still matches.
+    Callers that pass ``actions`` receive a query with NO pattern restriction.
     """
     # Scoring-free: the block-pattern clause is a filter (same doc set, no
     # scores). Only the optional user search stays in must (possibly empty —
@@ -163,9 +229,10 @@ def build_logs_query(
         # one branch where the pattern clause must NOT be appended.
         filters.append({"terms": {"action": list(actions)}})
     else:
-        query_string = " OR ".join(
-            f"url : {escape_query_string(p)}" for p in block_patterns
-        )
+        # URL OR domain, built once in `build_block_pattern_clause` so this
+        # clause and the pandas annotation in `result_processor` share ONE
+        # expression of the rule.
+        query_string = build_block_pattern_clause(block_patterns)
         filters.append(
             {"query_string": {"query": query_string, "analyze_wildcard": True}}
         )

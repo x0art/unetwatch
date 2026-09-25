@@ -40,6 +40,7 @@ import {
 } from "../api"
 import { SankeyDiagram } from "./SankeyDiagram"
 import {
+  getDestDomain,
   getDestIp,
   getDurationMs,
   getMatchedRule,
@@ -113,10 +114,24 @@ function formatHour(iso: string): string {
   return `${hh}:${mm}`
 }
 
+/**
+ * Per-domain row counts over the host's FLAGGED rows — this is the frame the
+ * page fetches (live: the block-pattern query; findings: rows only written on
+ * a pattern match), so it counts rows that already matched a pattern, NOT the
+ * destination's total access volume. Total volume comes from the backend
+ * (domain-level measurements on the host aggregate), never from here.
+ *
+ * Within that flagged frame the count is complete: every flagged row is
+ * counted, and the domain is read as `base_url` first so sibling paths on one
+ * flagged domain aggregate into one honest bucket (a domain is counted once
+ * per access, regardless of which path was hit). Rows that resolve to no
+ * domain (blank url/base_url) land in "unknown" rather than being dropped, so
+ * the flagged counts stay honest.
+ */
 function buildTopDomains(items: QueryDoc[]): TopDomain[] {
   const counts = new Map<string, number>()
   for (const it of items) {
-    const domain = it.base_url || it.category || hostOfUrl(it.url) || "unknown"
+    const domain = getDestDomain(it as unknown as LogRow)
     counts.set(domain, (counts.get(domain) ?? 0) + 1)
   }
   const total = Math.max(1, items.length)
@@ -679,6 +694,36 @@ export function HostInspectorPage({
         accessor: (r) => r.country_code,
         cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
         width: "w-20",
+      },
+      {
+        /* Dest domain — the destination the operator acts on. Resolved from
+         * `base_url` (else derived from `url`), never from the matched pattern;
+         * a domain-level pattern match shows in "Triggered pattern" via
+         * `blocked_by`, so this column always answers "where did it go". */
+        id: "domain",
+        header: "Dest domain",
+        filterType: "text",
+        accessor: (r) => getDestDomain(r),
+        cell: (r) => {
+          const domain = getDestDomain(r)
+          return (
+            <span className="flex items-center gap-1.5">
+              <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={domain}>
+                {domain || "—"}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleOpenUrl(domain)}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+                aria-label="Open in URL Investigation"
+                title="Open in URL Investigation"
+              >
+                <Search className="h-3 w-3" />
+              </button>
+            </span>
+          )
+        },
+        width: "w-28",
       },
       /* ── Enforcement & audit columns — always the LAST columns ──
        * Action, Triggered pattern, Category and Rule answer "whether the policy

@@ -866,24 +866,37 @@ async def test_deny_only_host_reports_enforcements_and_zero_reaches(
     assert any("terms" in f for f in sent[1]["query"]["bool"]["filter"])
 
 
-def test_build_logs_query_default_is_unchanged_and_actions_omits_pattern():
-    """The new ``actions`` param is a new branch, not a rewrite.
+def test_build_logs_query_default_is_domain_inclusive_and_actions_omits_pattern():
+    """The default clause is now ``url OR base_url``; ``actions`` still omits it.
 
-    ``actions=None`` (every existing caller) must keep the legacy shape
-    byte-for-byte: pattern clause present, no action filter. ``actions=[...]``
-    must omit the pattern clause entirely — otherwise the DENY rows stay
-    invisible and the fix does nothing.
+    WHY the clause widened (2026-09-25): a block pattern used to match the
+    ``url`` field ONLY, so a flagged destination reached through many paths
+    (``https://x.example/a``, ``/b``, ``/c``…) contributed only the paths whose
+    full URL happened to contain the pattern text. The operator reasons about
+    the DOMAIN — the durable identity persisted as ``base_url`` — so the clause
+    now matches ``url OR base_url`` and reports how many times, and how much, a
+    host hit one destination. The ``url`` arm is kept verbatim, so every row
+    that matched before still matches (the widening only ADDS rows), and the
+    shape is unchanged: the same query_string filter at the same position.
+
+    ``actions=None`` (every existing caller) keeps that shape;
+    ``actions=[...]`` must still omit the pattern clause entirely — otherwise
+    the DENY rows stay invisible (ADR 0001 REACH-vs-ENFORCEMENT split) and the
+    fix does nothing.
     """
     from app.services.query_builder import build_logs_query
 
-    # Default: identical to the pre-fix shape.
+    # Default: the widened clause, same filter shape/position as before.
     default = build_logs_query(
         ["*porn*", "*nonton*"], 1440, 5000, client_ip="1.2.3.4"
     )
     default_filters = default["query"]["bool"]["filter"]
     assert {
         "query_string": {
-            "query": "url : *porn* OR url : *nonton*",
+            "query": (
+                "(url : *porn* OR base_url : *porn*)"
+                " OR (url : *nonton* OR base_url : *nonton*)"
+            ),
             "analyze_wildcard": True,
         }
     } in default_filters
@@ -916,3 +929,179 @@ def test_build_logs_query_default_is_unchanged_and_actions_omits_pattern():
     assert action_q == build_logs_query(
         [], 1440, 5000, client_ip="1.2.3.4", actions=["DENY", "FLAG"]
     )
+
+
+# ── Domain-level reach on the live path (2026-09-25) ────────────────────────
+# With the block-pattern clause widened to `url OR base_url`, the reach frame
+# now carries the sibling-path rows of a flagged domain. These tests pin the
+# DOMAIN-level view of that frame: the per-domain hit counts, the row count
+# (which must be >= the url-only count), and the empty case (no reach traffic
+# → an empty list, never a fabricated entry).
+
+
+def _reach_hit(url, base_url, when="2026-09-25T07:00:00Z", action="ALLOW"):
+    """One ES hit as `_aggregate_host` receives it (`base_url` persisted)."""
+    return {
+        "_source": {
+            "@timestamp": when,
+            "url": url,
+            "base_url": base_url,
+            "client_ip": "172.21.122.6",
+            "server_ip": "57.144.192.3",
+            "action": action,
+        }
+    }
+
+
+async def test_aggregate_host_reports_domain_reach_above_url_only(
+    client, db_path, monkeypatch
+):
+    """Several sibling paths on ONE flagged domain are all counted.
+
+    Only the first path's URL contains the pattern text; the others match by
+    DOMAIN alone. The url-only count would be 1, the domain-level count must be
+    strictly greater — and the per-domain list names that domain with its real
+    hit count.
+    """
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*indoxxi*', 'block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    reach_hits = [
+        _reach_hit("https://indoxxi.foo/watch", "indoxxi.foo"),
+        _reach_hit("https://indoxxi.foo/a", "indoxxi.foo"),
+        _reach_hit("https://indoxxi.foo/b", "indoxxi.foo"),
+        # An unrelated domain is not flagged and must not appear.
+        _reach_hit("https://cdn.example/c", "cdn.example"),
+    ]
+    await _stub_es(monkeypatch, reach_hits=reach_hits, enforcement_total=0)
+
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+
+    url_only_count = 1  # only `/watch` contains "indoxxi" in its URL
+    assert risk["domainMatchCount"] > url_only_count
+    assert risk["domainMatchCount"] == 3
+
+    domains = {d["domain"]: d["count"] for d in risk["flaggedDomains"]}
+    assert domains["indoxxi.foo"] == 3
+    assert "cdn.example" not in domains
+    # Sorted by count DESC — the busiest destination leads.
+    assert risk["flaggedDomains"][0]["domain"] == "indoxxi.foo"
+    # The reach share still equals the (widened) frame's row count, so the UI
+    # count and the table agree.
+    assert risk["totalRequests"] == 4
+    assert risk["riskRequests"] == 4
+
+
+async def test_aggregate_host_domain_match_count_covers_url_only_rows(
+    client, db_path, monkeypatch
+):
+    """A URL-only match (no domain hit) still counts toward the domain view."""
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*indoxxi*', 'block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # The pattern appears ONLY in the path — the domain does not match it.
+    reach_hits = [_reach_hit("https://mirror.example/indoxxi", "mirror.example")]
+    await _stub_es(monkeypatch, reach_hits=reach_hits, enforcement_total=0)
+
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    risk = res.json()["risk"]
+    assert risk["domainMatchCount"] == 1
+    assert risk["flaggedDomains"] == [
+        {"domain": "mirror.example", "count": 1}
+    ]
+
+
+async def test_aggregate_host_without_reach_traffic_reports_empty_domain_list(
+    client, db_path, monkeypatch
+):
+    """No reach traffic → an EMPTY domain list, and the enforcement count kept."""
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*nonton*', 'block')"
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    await _stub_es(monkeypatch, reach_hits=[], enforcement_total=3)
+
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    risk = res.json()["risk"]
+    assert risk["flaggedDomains"] == []
+    assert risk["domainMatchCount"] == 0
+    # The existing enforcement figure is untouched by the widening.
+    assert risk["enforcements"] == 3
+    assert risk["riskRequests"] == 0
+
+
+async def test_persisted_fallback_reports_same_domain_shape(
+    client, db_path, monkeypatch
+):
+    """The offline path reports the same domain fields, from persisted rows."""
+    from app.database import get_db, init_db
+
+    await init_db()
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO url_patterns (pattern, pattern_type)"
+            " VALUES ('*indoxxi*', 'block')"
+        )
+        for url in (
+            "https://indoxxi.foo/watch",
+            "https://indoxxi.foo/a",
+        ):
+            await db.execute(
+                "INSERT INTO findings (client_ip, server_ip, url, base_url,"
+                " log_timestamp, action, matched_patterns)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "172.21.122.6",
+                    "57.144.192.3",
+                    url,
+                    "indoxxi.foo",
+                    "2026-09-25T07:00:00Z",
+                    "ALLOW",
+                    '["*indoxxi*"]',
+                ),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+    # ES unavailable → the persisted path answers the aggregate.
+    from app.services import es_fields
+
+    es_fields._invalidate_cache()
+    res = client.get("/api/hosts/172.21.122.6?timeRange=24h")
+    assert res.status_code == 200
+    risk = res.json()["risk"]
+    assert risk["domainMatchCount"] == 2
+    assert risk["flaggedDomains"] == [{"domain": "indoxxi.foo", "count": 2}]

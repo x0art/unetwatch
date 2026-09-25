@@ -298,3 +298,102 @@ def test_build_client_session_query_shape():
     assert len(filters) == 2
     assert filters[0] == {"range": {"@timestamp": {"gte": "now-60m", "lte": "now"}}}
     assert filters[1] == {"term": {"client_ip": "10.0.0.1"}}
+
+
+# ── URL-OR-DOMAIN block-pattern match (2026-09-25) ─────────────────────────
+# A block pattern used to match the `url` field only, so a flagged destination
+# reached through many paths contributed only the paths whose full URL happened
+# to contain the pattern text. The match is now URL-OR-DOMAIN (the domain being
+# the scheme/port-stripped authority persisted as `base_url`), with the `url`
+# arm kept verbatim so nothing that matched before is lost. These pin the
+# behaviour through the two public surfaces: the ES clause and the pandas
+# annotation `build_items` writes into `blocked_by`.
+
+
+def test_block_pattern_matches_the_domain_not_only_the_url():
+    """A domain-only match is flagged, and shows up in ``blocked_by``."""
+    from app.services.result_processor import build_items
+
+    # No URL contains "indoxxi" — only the destination domain does.
+    df = pd.DataFrame(
+        [
+            {
+                "url": "https://cdn.example/a",
+                "base_url": "indoxxi.foo",
+                "client_ip": "10.0.0.1",
+                "action": "ALLOW",
+                "@timestamp": "2026-09-25T10:00:00Z",
+            }
+        ]
+    )
+    items = build_items(
+        df,
+        50,
+        block_patterns=["*indoxxi*"],
+        whitelist_regex="",
+        blacklist_urls=set(),
+        blacklist_ips=set(),
+    )
+    assert items[0]["blocked_by"] == ["*indoxxi*"]
+
+
+def test_block_pattern_still_matches_the_url():
+    """No regression: a URL match is still flagged."""
+    from app.services.result_processor import build_items
+
+    df = pd.DataFrame(
+        [
+            {
+                "url": "https://mirror.example/indoxxi/watch",
+                "base_url": "mirror.example",
+                "client_ip": "10.0.0.1",
+                "action": "ALLOW",
+                "@timestamp": "2026-09-25T10:00:00Z",
+            }
+        ]
+    )
+    items = build_items(
+        df,
+        50,
+        block_patterns=["*indoxxi*"],
+        whitelist_regex="",
+        blacklist_urls=set(),
+        blacklist_ips=set(),
+    )
+    assert items[0]["blocked_by"] == ["*indoxxi*"]
+
+
+def test_block_pattern_domain_match_is_glob_and_case_insensitive():
+    """Glob semantics apply to the domain exactly as to the URL."""
+    from app.services.query_builder import build_pattern_match_predicate
+
+    predicate = build_pattern_match_predicate(["*indoxxi*"])
+    # Case-insensitive, and `*` is a wildcard on the domain.
+    assert predicate({"url": "https://x.example/p", "base_url": "WWW.Indoxxi.Foo"})
+    # An unrelated domain does NOT match.
+    assert not predicate(
+        {"url": "https://other.example/x", "base_url": "other.example"}
+    )
+    # `?` matches exactly one character — "in?oxxi.com" matches "indoxxi.com"
+    # but not the same name with the "d" dropped.
+    one_char = build_pattern_match_predicate(["in?oxxi.com"])
+    assert one_char({"url": "https://x/y", "base_url": "indoxxi.com"})
+    assert not one_char({"url": "https://x/y", "base_url": "inoxxi.com"})
+    # Everything but `*`/`?` is literal: the `.` in a domain pattern is a dot,
+    # not "any character", so "a.example" does not match "axexample".
+    literal_dot = build_pattern_match_predicate(["a.example"])
+    assert literal_dot({"url": "https://x/y", "base_url": "sub.a.example"})
+    assert not literal_dot({"url": "https://x/y", "base_url": "axexample"})
+
+
+def test_build_logs_query_clause_matches_url_or_base_url():
+    """The ES clause names both fields, at the same filter position as before."""
+    q = build_logs_query(["*indoxxi*"], 10, 50)
+    filters = q["query"]["bool"]["filter"]
+    # Same shape: one query_string filter, after the range clause.
+    assert filters[0]["range"]["@timestamp"]["gte"] == "now-10m"
+    assert (
+        filters[1]["query_string"]["query"]
+        == "(url : *indoxxi* OR base_url : *indoxxi*)"
+    )
+    assert filters[1]["query_string"]["analyze_wildcard"] is True

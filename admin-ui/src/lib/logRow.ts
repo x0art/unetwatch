@@ -69,3 +69,22 @@ export function hostOfUrl(url: string): string {
     return url.split("/")[0]?.split(":")[0] ?? url
   }
 }
+
+/**
+ * Destination DOMAIN for a row — the thing the operator acts on when a row is
+ * flagged. Resolved as `base_url` when the backend supplied it, else derived
+ * from the full `url` via {@link hostOfUrl}. Falls back to the row's `domain`
+ * field, then "unknown" so callers never aggregate on an empty key.
+ *
+ * Deliberately NOT derived from `blocked_by`/the matched pattern: the backend
+ * reports domain-level matches through `blocked_by`, and the UI must show the
+ * domain the row actually went to, not a restatement of the pattern.
+ */
+export function getDestDomain(r: LogRow): string {
+  const baseUrl = (r.base_url ?? "").trim()
+  if (baseUrl) return baseUrl
+  const host = hostOfUrl((r.url ?? "").trim())
+  if (host) return host
+  const domain = (r.domain ?? "").trim()
+  return domain || "unknown"
+}

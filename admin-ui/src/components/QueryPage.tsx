@@ -17,7 +17,7 @@ import {
 } from "lucide-react"
 import { useDebounce, useAutoRefresh } from "../lib/utils"
 import { useFilter } from "../contexts/FilterContext"
-import { type LogRow } from "../lib/logRow"
+import { getDestDomain, type LogRow } from "../lib/logRow"
 import {
   type QueryDoc,
   type QueryResult,
@@ -296,6 +296,29 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
         <Badge variant="outline">New</Badge>
       ),
     width: "w-28",
+  },
+  {
+    /* Dest domain — the domain the row actually went to (`base_url`, else
+     * derived from `url`), so a flagged row is readable at DOMAIN level. Not
+     * derived from the matched pattern: a domain-level pattern match is
+     * reported through `blocked_by` and shown in the Pattern column. */
+    id: "domain",
+    header: "Dest domain",
+    filterType: "text",
+    accessor: (d) => getDestDomain(d),
+    defaultSortDir: "asc",
+    cell: (d) => {
+      const domain = getDestDomain(d)
+      return (
+        <span className="flex items-center gap-1.5">
+          <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={domain}>
+            {domain || "—"}
+          </span>
+          <QuickNavCell kind="url" value={domain} label="Open in URL Investigation" />
+          <CopyCell value={domain} label="Dest domain" />
+        </span>
+      )
+    },
   },
   {
     id: "pattern",
