@@ -86,7 +86,9 @@ async def test_blacklist_urls_endpoint_returns_urls_only(client):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/plain")
     lines = resp.text.split("\r\n")
-    assert "only.example" in lines
+    # URL-kind entries are emitted in Palo Alto EDL form: slash-terminated.
+    assert "only.example/" in lines
+    assert "only.example" not in lines
     assert "9.9.9.9" not in lines
     # Feeds use CRLF line terminators (downstream integrations expect
     # Windows-style plain text: `file` reports "ASCII text, with CRLF
@@ -213,7 +215,7 @@ def test_blacklist_bulk_add(client):
     assert data["errors"][0]["value"] == "not a url or ip"
 
     # Feeds were regenerated from the DB.
-    assert "a.example" in client.get("/api/blacklist/urls.txt").text
+    assert "a.example/" in client.get("/api/blacklist/urls.txt").text
     assert "1.2.3.4" in client.get("/api/blacklist/ips.txt").text
 
 
@@ -252,9 +254,9 @@ def test_blacklist_bulk_delete(client):
     assert resp.json()["deleted"] == 2
 
     # Feeds were regenerated.
-    assert "a.example" not in client.get("/api/blacklist/urls.txt").text
+    assert "a.example/" not in client.get("/api/blacklist/urls.txt").text
     assert "1.2.3.4" not in client.get("/api/blacklist/ips.txt").text
-    assert "b.example" in client.get("/api/blacklist/urls.txt").text
+    assert "b.example/" in client.get("/api/blacklist/urls.txt").text
 
 
 def test_blacklist_bulk_delete_invalid_payload(client):
@@ -264,11 +266,11 @@ def test_blacklist_bulk_delete_invalid_payload(client):
 
 def test_blacklist_delete_entry(client):
     client.post("/api/blacklist/", json={"value": "http://del.example/x"})
-    assert "del.example" in client.get("/api/blacklist/urls.txt").text
+    assert "del.example/" in client.get("/api/blacklist/urls.txt").text
 
     resp = client.delete("/api/blacklist/url/del.example")
     assert resp.status_code == 204
-    assert "del.example" not in client.get("/api/blacklist/urls.txt").text
+    assert "del.example/" not in client.get("/api/blacklist/urls.txt").text
 
 
 def test_blacklist_feeds_are_never_heuristically_cached(client):
@@ -287,7 +289,7 @@ def test_blacklist_feeds_are_never_heuristically_cached(client):
     # Sanity: a re-fetch after an add still returns the new entry.
     resp = client.post("/api/blacklist/", json={"value": "http://fresh.example/x"})
     assert resp.status_code == 201
-    assert "fresh.example" in client.get("/api/blacklist/urls.txt").text
+    assert "fresh.example/" in client.get("/api/blacklist/urls.txt").text
 
 
 def test_blacklist_delete_ip_entry(client):
@@ -326,3 +328,38 @@ def test_blacklist_feeds_are_public(db_path):
         # Write/list routes still require auth.
         assert c.post("/api/blacklist/", json={"value": "http://x.example"}).status_code == 401
         assert c.get("/api/blacklist/entries").status_code == 401
+
+
+def test_edl_line_slash_terminates_urls_only():
+    """The EDL helper is idempotent on an already-slashed host and leaves IPs alone."""
+    from app.services.feeds import edl_line
+
+    assert edl_line("url", "a.example") == "a.example/"
+    assert edl_line("url", "a.example/") == "a.example/"
+    assert edl_line("ip", "1.2.3.4") == "1.2.3.4"
+
+
+async def test_blacklist_url_feed_lines_are_edl_slash_terminated(client, db_path):
+    from app.services.feeds import _feed_path
+
+    resp = client.post("/api/blacklist/", json={"value": "http://x.example/path"})
+    assert resp.status_code == 201
+
+    body = _feed_path("url").read_bytes()
+    assert body == b"x.example/\r\n"
+    assert b"//" not in body
+
+    # Re-adding the same host must not accumulate a second slash.
+    again = client.post("/api/blacklist/", json={"value": "x.example/"})
+    assert again.status_code == 201
+    body = _feed_path("url").read_bytes()
+    assert body == b"x.example/\r\n"
+    assert "//" not in body.decode()
+
+
+async def test_blacklist_ip_feed_is_unchanged_by_edl(client, db_path):
+    from app.services.feeds import _feed_path
+
+    resp = client.post("/api/blacklist/", json={"value": "9.9.9.9"})
+    assert resp.status_code == 201
+    assert _feed_path("ip").read_bytes() == b"9.9.9.9\r\n"

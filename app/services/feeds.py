@@ -49,6 +49,18 @@ def _atomic_write(path: Path, body: str) -> None:
     os.replace(tmp, path)
 
 
+def edl_line(kind: str, value: str) -> str:
+    """Render one stored value in the form the enforcement device consumes.
+
+    The URL feed is loaded as a Palo Alto External Dynamic List (EDL), whose
+    URL lists match an entry only when the object ends at a path boundary —
+    i.e. the host must be terminated with a trailing slash (`blocked.example/`).
+    IP entries carry no path and are emitted unchanged. The database and the
+    upstream gist keep the bare host; this is a render-time transform only.
+    """
+    return value if kind != "url" else value.rstrip("/") + "/"
+
+
 async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip")) -> None:
     """Rewrite the feed files for ``kinds`` from the database.
 
@@ -56,9 +68,14 @@ async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip")) -> None:
     the feeds as classic Windows-style plain text, and ``file`` reports them
     as "ASCII text, with CRLF line terminators". A trailing CRLF keeps the
     last entry terminated like every other line.
+
+    Values of kind ``"url"`` are emitted in EDL form via ``edl_line`` (each
+    host slash-terminated) so the URL feed matches at a path boundary;
+    IP-kind lines (and the jaillist feed) are unchanged.
     """
     for kind in kinds:
-        _atomic_write(_feed_path(kind), "\r\n".join(await _values(db, kind)) + "\r\n")
+        values = [edl_line(kind, v) for v in await _values(db, kind)]
+        _atomic_write(_feed_path(kind), "\r\n".join(values) + "\r\n")
 
 
 def jail_feed_path() -> Path:

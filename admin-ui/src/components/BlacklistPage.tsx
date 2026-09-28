@@ -48,6 +48,13 @@ export interface UpstreamFeedState {
   lastError: string | null
 }
 
+/** Enforcement-device form of a feed entry: the URL feed is a Palo Alto EDL,
+ *  which requires each host terminated with a trailing slash. Display-only —
+ *  the bare value stays the identity for keys, delete, and selection. */
+function edlDisplay(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`
+}
+
 interface FeedCardProps {
   title: string
   path: string
@@ -69,6 +76,8 @@ interface FeedCardProps {
   onDeleteSelected?: () => void
   disabled?: boolean
   onClearSearch?: () => void
+  /** Optional muted hint rendered under the feed path. */
+  note?: string
   /** Upstream feed state for this card; omit to hide the fetch button. */
   upstream?: UpstreamFeedState
   upstreamSyncing?: boolean
@@ -102,6 +111,7 @@ export function FeedCard({
   onDeleteSelected,
   disabled,
   onClearSearch,
+  note,
   upstream,
   upstreamSyncing = false,
   onFetchUpstream,
@@ -123,6 +133,7 @@ export function FeedCard({
           <code className="mt-1.5 inline-block rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-muted-foreground">
             {path}
           </code>
+          {note ? <p className="mt-1.5 text-xs text-muted-foreground">{note}</p> : null}
           {upstream ? (
             <p
               className="mt-1.5 text-xs font-medium text-muted-foreground"
@@ -216,12 +227,12 @@ export function FeedCard({
                       className="h-4 w-4 shrink-0 rounded border-input accent-primary"
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={value}>
-                    {value}
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={kind === "url" ? edlDisplay(value) : value}>
+                    {kind === "url" ? edlDisplay(value) : value}
                   </span>
                   {!selectMode && (
                     <span className="flex items-center gap-1">
-                      <CopyUrlButton value={value} label="Entry" />
+                      <CopyUrlButton value={kind === "url" ? edlDisplay(value) : value} label="Entry" />
                       <button
                         type="button"
                         onClick={() => onDelete(kind, value)}
@@ -577,7 +588,8 @@ export function BlacklistPage() {
             searchActive={!!q}
             loading={loading}
             onRefresh={load}
-            onCopy={() => copy(urls.join("\n"), "URLs")}
+            note="EDL form — each host terminated with a trailing slash"
+            onCopy={() => copy(urls.map(edlDisplay).join("\n"), "URLs")}
             onDelete={requestDelete}
             selectMode={selectFeed === "url"}
             selected={selected}

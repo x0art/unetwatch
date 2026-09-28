@@ -665,9 +665,9 @@ async def test_sync_prune_regen_reflects_deletions(monkeypatch, db_path):
     )
     assert result["deleted"] == 1
     content = _feed_path("url").read_text()
-    assert "old3.example.com" not in content
-    assert "old1.example.com" in content
-    assert "old2.example.com" in content
+    assert "old3.example.com/" not in content
+    assert "old1.example.com/" in content
+    assert "old2.example.com/" in content
 
 
 async def test_upstream_status_reflects_prune(monkeypatch, db_path):

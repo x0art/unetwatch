@@ -169,7 +169,7 @@ async def test_harmful_destination_regenerates_urls_feed(client, db_path):
     )
     feed = Path(db_path).parent / "feeds" / "urls.txt"
     assert feed.exists()
-    assert feed.read_bytes() == b"evil.example\r\n"
+    assert feed.read_bytes() == b"evil.example/\r\n"
 
 
 # ── HARMFUL_SOURCE jails and regenerates jail-ips.txt ───────────────────────

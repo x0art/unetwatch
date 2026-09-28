@@ -93,7 +93,7 @@ Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diag
 | `action` | proxy disposition: `ALLOW` / `DENY`; `FLAG` unused |
 | `enforcement` | a DENY — the proxy handled a prohibited request; *not* a risk |
 | `whitelist` | URLs the operator explicitly allows; excluded from Findings + risk counts |
-| `blacklist` | bare hosts (`kind ∈ url, ip`) served at `/api/blacklist/urls.txt` / `ips.txt` for nginx/fail2ban |
+| `blacklist` | bare hosts (`kind ∈ url, ip`); URL feed served in EDL trailing-slash form (`host/`), IP feed stays bare, at `/api/blacklist/urls.txt` / `ips.txt` for nginx/fail2ban |
 | `jaillist` | client IPs (sources) to jail, served at `/api/jaillist/ips.txt` for firewall/fail2ban; manual + Findings action + gist upstream |
 | `client_ip` | source host; `base_url`/`domain` = destination |
 | `host` | an IP + optional hostname; no dept/user/MAC identity |

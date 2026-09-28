@@ -114,6 +114,9 @@ require a valid `X-API-Key` header, Basic Auth, or a dashboard session token.
 The feeds (`/api/blacklist/urls.txt` and `/api/blacklist/ips.txt`) are public
 so external integrations (nginx, fail2ban, firewall scripts) can consume them
 without credentials.
+The two feeds differ in form: `urls.txt` is emitted for a Palo Alto Networks External Dynamic
+List — one host per line, terminated with a trailing slash (`evil.example/`) — while `ips.txt`
+is a plain list of bare IPs with no trailing slash. Both use CRLF line endings.
 
 ### URL Patterns
 
@@ -156,8 +159,8 @@ matches a single character, and everything else is literal.
 | GET    | `/api/findings/`                | List persisted findings            |
 | GET    | `/api/findings/graph`           | Client → server → URL flow graph   |
 | GET    | `/api/blacklist/`               | List blacklisted URLs / IPs        |
-| GET    | `/api/blacklist/urls.txt`       | Public plain-text URL feed (real file) |
-| GET    | `/api/blacklist/ips.txt`        | Public plain-text IP feed (real file)  |
+| GET    | `/api/blacklist/urls.txt`       | Public plain-text URL feed, EDL form (`host/`, one per line) |
+| GET    | `/api/blacklist/ips.txt`        | Public plain-text IP feed, bare IPs (one per line)   |
 | POST   | `/api/blacklist/`               | Add a blacklist entry              |
 | POST   | `/api/blacklist/bulk`           | Add many blacklist entries at once |
 | POST   | `/api/blacklist/bulk-delete`    | Delete many blacklist entries at once |

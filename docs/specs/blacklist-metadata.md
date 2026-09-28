@@ -145,14 +145,19 @@ it is generated from the enforcement projection, which holds each destination ex
     is a "candidate" — so that the app never implies a judgement I have not personally made.
 22. As an operator, I want no fixed list of categories offered or required, so that the
     classification stays a human judgement rather than being forced into the app's vocabulary.
-23. As the downstream device/consumer, I want `/api/blacklist/urls.txt` to keep containing only
-    bare domains, one per line, CRLF-terminated, so that my parsing continues to work unchanged.
+23. As the downstream device/consumer, I want `/api/blacklist/urls.txt` to contain only the bare
+    domain per line, terminated with a trailing slash (`evil.example/`) to match the EDL
+    boundary semantics of my device, still CRLF-terminated, so that my parsing continues to work
+    unchanged while the DB and upstream keep storing the bare host.
 24. As the downstream device/consumer, I want `/api/blacklist/ips.txt` to keep containing only
-    bare IPs, one per line, CRLF-terminated, so that my parsing continues to work unchanged.
+    bare IPs, one per line, with no trailing slash, CRLF-terminated, so that my parsing continues
+    to work unchanged.
 25. As the downstream device/consumer, I want metadata never to appear in either feed under any
     circumstance, so that a leaked annotation cannot corrupt the block list my firewall applies.
 26. As an operator, I want the feed files to remain byte-identical after this change, so that I
-    can deploy it without revalidating what my device consumes.
+    can deploy it without revalidating what my device consumes. (This held for the metadata-only
+    change: the feeds were untouched by it. The URL feed's *format* now carries a trailing slash
+    per the EDL requirement, while the ips feed remains byte-identical.)
 27. As an operator, I want an existing database to gain the new fields transparently on startup,
     so that upgrading does not require a manual migration step.
 28. As an operator, I want existing entries to retain their exact values through the upgrade, so
@@ -504,8 +509,14 @@ stated explicitly and protected by tests:
    that the feed reads the deduped projection. `ORDER BY value` also keeps the feed's byte order
    stable, and a destination kept out of the result set by `UNIQUE` never appears twice.
 
-The two plain-text feeds keep their exact current format — bare domain or bare IP, one per line,
-CRLF-terminated with a trailing CRLF, written atomically — and the regeneration trigger points
+The two plain-text feeds no longer share one format. The URL feed emits each host terminated with
+a trailing slash (`evil.example/`), because it is consumed as a Palo Alto Networks External
+Dynamic List and the device matches an entry only at a path boundary; the IP feed is unchanged —
+bare IPs, no trailing slash. Both keep their existing line discipline: one entry per line,
+CRLF-terminated with a trailing CRLF, written atomically; `ORDER BY value` keeps byte order
+stable. The database (`blacklist_entries`) and the upstream gist sync still store the BARE host —
+the trailing slash is a render-time transform applied by a single helper (`edl_line` in
+`app/services/feeds.py`), not a change to any stored value. The regeneration trigger points
 (startup and after every mutation that added a new destination) are unchanged.
 
 **API contract — additions only, plus one response correction the split forces.** These are the
@@ -641,14 +652,16 @@ The single seam is the HTTP API on the blacklist endpoints. Tests cover:
   contains exactly **ONE** line for `porn-site.com`. Three blocks, one feed line: that is the
   whole design in one assertion, and it fails if anyone reintroduces per-block rows into the
   enforcement table or adds a second source of feed lines.
-- **REGRESSION — feed bytes are unchanged: CRLF, trailing CRLF, bare value, no metadata (highest
-  priority, kept alongside the above).** After creating entries both with and without metadata
-  and with multiple events per destination, fetch (and read the on-disk file for) each feed and
-  assert the content is exactly the bare domains / bare IPs, one per line, CRLF-terminated with a
-  trailing CRLF, `ORDER BY value` — with **no `url`, `category`, `note`, `id`, `source`, or
-  `created_at` text anywhere** and no other field bleeding in. This must fail loudly if a future
-  refactor widens the feed query or points it at `blacklist_events`, because it is the guarantee
-  that a leaked metadata field or a duplicate cannot break parsing on the device.
+- **REGRESSION — feed bytes: CRLF, trailing CRLF, no metadata (highest priority, kept alongside
+  the above).** After creating entries both with and without metadata and with multiple events
+  per destination, fetch (and read the on-disk file for) each feed and assert the content is
+  exactly one entry per line, CRLF-terminated with a trailing CRLF, `ORDER BY value` — and the
+  two feeds differ in form: `urls.txt` holds each host terminated with a trailing slash
+  (`porn-site.com/`), while `ips.txt` holds bare IPs with no trailing slash — with **no `url`,
+  `category`, `note`, `id`, `source`, or `created_at` text anywhere** and no other field bleeding
+  in. This must fail loudly if a future refactor widens the feed query or points it at
+  `blacklist_events`, because it is the guarantee that a leaked metadata field or a duplicate
+  cannot break parsing on the device.
 - **add with metadata** — an add carrying `url`/`category`/`note` persists all three **on the
   event**, and the event's `url` is stored as supplied while its `value` is the normalized bare
   host; the destination exists exactly once in `blacklist_entries`.
