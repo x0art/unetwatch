@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react"
-import { Badge } from "./ui"
+import { StatusBadge, type StatusTone } from "./ui"
 import { formatBytes, type HostRisk, type HostRiskUnavailable } from "../api"
 
 export interface HostEntityCardProps {
@@ -10,8 +10,10 @@ export interface HostEntityCardProps {
   jailed?: boolean
 }
 
-function riskBadgeVariant(level: HostRisk["riskLevel"]): "destructive" | "warning" | "success" {
-  if (level === "HIGH") return "destructive"
+/** Risk level → `StatusBadge` tone. Kept local to this card: the tone is the
+ *  card's own presentation decision, not a domain fact other surfaces share. */
+function riskBadgeTone(level: HostRisk["riskLevel"]): StatusTone {
+  if (level === "HIGH") return "danger"
   if (level === "MEDIUM") return "warning"
   return "success"
 }
@@ -66,7 +68,7 @@ export function HostEntityCard({ host, risk, jailed }: HostEntityCardProps) {
           <span className="hidden truncate text-xs font-medium text-muted-foreground sm:inline" title={`${host.hostname || host.primaryIp} — ${figure(risk.totalRequests)} requests`}>
             {host.hostname || host.primaryIp} · {figure(risk.totalRequests)} req
           </span>
-          {jailed ? <Badge variant="destructive">Jailed</Badge> : null}
+          {jailed ? <StatusBadge tone="danger">Jailed</StatusBadge> : null}
         </span>
       </div>
 
@@ -90,11 +92,11 @@ export function HostEntityCard({ host, risk, jailed }: HostEntityCardProps) {
           <div className="flex items-center justify-between gap-3">
             <span className="text-muted-foreground">Risk Score</span>
             {unavailable ? (
-              <Badge variant="secondary">{risk.riskLevel} Unavailable</Badge>
+              <StatusBadge tone="neutral">{risk.riskLevel} Unavailable</StatusBadge>
             ) : (
-              <Badge variant={riskBadgeVariant(risk.riskLevel)} className="tabular-nums">
+              <StatusBadge tone={riskBadgeTone(risk.riskLevel)} className="font-mono tabular-nums">
                 {label} {risk.riskScore}/100
-              </Badge>
+              </StatusBadge>
             )}
           </div>
           <div className="flex justify-between gap-3 tabular-nums">

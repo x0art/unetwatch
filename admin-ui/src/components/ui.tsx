@@ -12,6 +12,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import * as SelectPrimitive from "@radix-ui/react-select"
 import * as ToastPrimitive from "@radix-ui/react-toast"
 import {
+  ArrowUpDown,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -19,8 +20,9 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Copy,
-  Info,
   AlertTriangle,
+  Info,
+  Inbox,
   CheckCircle2,
   Loader2,
   Search,
@@ -43,8 +45,8 @@ const buttonBase =
   "inline-flex items-center justify-center gap-2 border rounded-md text-sm font-medium shadow-sm active:scale-[0.98] transition-[transform,box-shadow,background-color,color,border-color] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer whitespace-nowrap [&_svg]:shrink-0"
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  default: "bg-primary text-white hover:bg-primary/90 border-transparent",
-  destructive: "bg-danger text-white hover:bg-danger/90 border-transparent",
+  default: "bg-primary text-primary-foreground hover:bg-primary/90 border-transparent",
+  destructive: "bg-danger text-danger-foreground hover:bg-danger/90 border-transparent",
   outline: "bg-card text-foreground hover:bg-muted border-border shadow-none",
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70 border-border",
   ghost: "bg-transparent border-transparent shadow-none hover:bg-muted",
@@ -140,6 +142,55 @@ export function CopyUrlButton({
   )
 }
 
+/* ── IconButton — the one icon-only control ─────────────────────
+ * Absorbs ~14 byte-identical raw `<button>`s (`inline-flex h-6 w-6 … rounded
+ * border border-transparent …`) scattered across the pages, plus their
+ * `h-7 w-7`/`h-8 w-8` near-misses. Those copies drifted on radius (`rounded`
+ * vs `rounded-md`), hover (`bg-muted` vs `bg-secondary`) and focus ring
+ * (present on some, absent on others). One primitive makes that impossible.
+ *
+ * `label` is required and lands on BOTH `aria-label` and `title`, so an
+ * icon-only control is never unlabelled and always gets a native tooltip. */
+export function IconButton({
+  icon: Icon,
+  label,
+  size = "sm",
+  variant = "ghost",
+  className,
+  type = "button",
+  ref,
+  ...props
+}: Omit<ComponentPropsWithRef<"button">, "children"> & {
+  icon: LucideIcon
+  label: string
+  size?: "sm" | "md" | "lg"
+  variant?: "ghost" | "outline" | "danger"
+}) {
+  return (
+    <button
+      ref={ref}
+      type={type}
+      aria-label={label}
+      title={label}
+      className={cn(
+        // `rounded-md` (not the bare `rounded`/4px the raw copies used) per Rule R1.
+        "inline-flex shrink-0 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+        // Sizes are the control box ONLY; the glyph size comes from the
+        // `[&>svg]` rules so callers never hand-pick an icon size.
+        size === "sm" && "h-6 w-6 [&>svg]:h-3 [&>svg]:w-3",
+        size === "md" && "h-7 w-7 [&>svg]:h-3.5 [&>svg]:w-3.5",
+        size === "lg" && "h-8 w-8 [&>svg]:h-4 [&>svg]:w-4",
+        variant === "outline" && "border-border bg-card hover:bg-muted",
+        variant === "danger" && "hover:bg-danger/10 hover:text-danger",
+        className,
+      )}
+      {...props}
+    >
+      <Icon aria-hidden="true" />
+    </button>
+  )
+}
+
 /* ── Input — hairline frame, soft radius ─────────────────────── */
 
 export function Input({
@@ -190,39 +241,6 @@ export function Input({
   )
 }
 
-export function Textarea({
-  className,
-  value,
-  onChange,
-  placeholder,
-  id,
-  "aria-label": ariaLabel,
-}: {
-  className?: string
-  value?: string
-  onChange?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void
-  placeholder?: string
-  id?: string
-  "aria-label"?: string
-}) {
-  return (
-    <textarea
-      id={id}
-      aria-label={ariaLabel}
-      className={cn(
-        "flex min-h-[120px] w-full rounded-md border border-input bg-card px-3 py-2 text-sm",
-        "placeholder:text-muted-foreground",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring",
-        "disabled:opacity-50",
-        className,
-      )}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-    />
-  )
-}
-
 /* ── Badge — soft tint pill, hairline border ─────────────────── */
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "success" | "warning"
@@ -257,9 +275,60 @@ export function Badge({
     </span>
   )
 }
+/* ── StatusBadge — the one status pill ──────────────────────────
+ * Absorbs every hand-written "coloured pill with a state meaning" plus the
+ * six divergent domain→variant mappers. Square-cornered (`rounded-md`, the
+ * deliberate exception it shares with `ListBadge`) so it reads as a status
+ * chip, not the pill-shaped categorical `Badge`. */
+
+export type StatusTone = "success" | "warning" | "danger" | "info" | "neutral"
+
+/** Per-tone tint. `neutral` falls back to the muted surface so a
+ *  "no signal yet" chip still reads as one of the family. */
+const statusToneStyles: Record<StatusTone, string> = {
+  success: "bg-success/10 text-success border-success/20",
+  warning: "bg-warning/10 text-warning border-warning/20",
+  danger: "bg-danger/10 text-danger border-danger/20",
+  info: "bg-info/10 text-info border-info/20",
+  neutral: "bg-muted text-muted-foreground border-border",
+}
+
+export function StatusBadge({
+  children,
+  tone = "neutral",
+  dot = false,
+  icon: Icon,
+  title,
+  className,
+}: {
+  children: ReactNode
+  tone?: StatusTone
+  dot?: boolean
+  icon?: LucideIcon
+  title?: string
+  className?: string
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+        statusToneStyles[tone],
+        className,
+      )}
+    >
+      {dot && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />}
+      {Icon && <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />}
+      {children}
+    </span>
+  )
+}
 
 export type ListBadgeTone = "warning" | "success" | "danger"
 
+/* `ListBadge` is the icon-first spelling of `StatusBadge` (only three tones).
+ * Delegating keeps one className source of truth so the two cannot drift;
+ * the public API is unchanged for its existing call sites. */
 export function ListBadge({
   tone,
   title,
@@ -272,18 +341,9 @@ export function ListBadge({
   children: ReactNode
 }) {
   return (
-    <span
-      title={title}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
-        tone === "warning" && "bg-warning/10 text-warning border-warning/20",
-        tone === "success" && "bg-success/10 text-success border-success/20",
-        tone === "danger" && "bg-danger/10 text-danger border-danger/20",
-      )}
-    >
-      <Icon className="h-3 w-3" aria-hidden="true" />
+    <StatusBadge tone={tone} title={title} icon={Icon}>
       {children}
-    </span>
+    </StatusBadge>
   )
 }
 
@@ -303,6 +363,61 @@ export function CardTitle({ children, className }: { children: ReactNode; classN
 
 export function CardContent({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cn("p-5", className)}>{children}</div>
+}
+
+/* ── Callout — inline error / notice banner ─────────────────────
+ * The one row grammar for "something went wrong (or is worth noting)" that
+ * sits inline in a page: hairline tinted frame, a flex-1 message and an
+ * optional trailing action. Absorbs ~12 hand-rolled banners that had drifted
+ * on padding, border opacity (`/20`–`/40`) and colour token (`text-danger`
+ * vs `text-destructive`). `danger` keeps `text-destructive` because that is
+ * the alias the existing banners used — it resolves to the same token, so
+ * the rendered colour is identical. */
+
+export type CalloutTone = "danger" | "warning" | "info" | "success"
+
+/** Per-tone tint. The border is a hairline `/40` and the fill a quiet `/10`
+ *  so the banner reads as a tinted surface, not a solid alert slab. */
+const calloutToneStyles: Record<CalloutTone, string> = {
+  danger: "border-danger/40 bg-danger/10 text-destructive",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  info: "border-info/40 bg-info/10 text-info",
+  success: "border-success/40 bg-success/10 text-success",
+}
+
+export function Callout({
+  tone = "danger",
+  icon: Icon,
+  title,
+  action,
+  children,
+  className,
+}: {
+  tone?: CalloutTone
+  icon?: LucideIcon
+  title?: ReactNode
+  action?: ReactNode
+  children?: ReactNode
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-md border px-4 py-3 text-xs font-medium",
+        calloutToneStyles[tone],
+        className,
+      )}
+    >
+      {Icon && <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />}
+      {/* `min-w-0` lets a long message truncate/wrap instead of pushing the
+          action out of the frame; the flex-1 child is what right-aligns it. */}
+      <span className="min-w-0 flex-1">
+        {title}
+        {children}
+      </span>
+      {action}
+    </div>
+  )
 }
 
 /* ── Label — mono caps ──────────────────────────────────────── */
@@ -530,7 +645,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               key={t.id}
               duration={t.duration}
               onOpenChange={(open) => !open && dismiss(t.id)}
-              className={cn("group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-lg border p-4", "data-[state=open]:slide-in-from-bottom data-[state=closed]:animate-out", className)}
+              className={cn("group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-md border p-4", "data-[state=open]:slide-in-from-bottom data-[state=closed]:animate-out", className)}
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <div className="flex-1 space-y-0.5">
@@ -576,8 +691,8 @@ export function ConfirmDialog({
 
 export function EmptyState({ icon: Icon, title, description, action, className }: { icon: LucideIcon; title: string; description?: string; action?: ReactNode; className?: string }) {
   return (
-    <div className={cn("relative flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card px-6 py-14 text-center overflow-hidden", className)}>
-      <div className="relative flex h-12 w-12 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+    <div className={cn("relative flex flex-col items-center justify-center rounded-md border border-dashed border-border bg-card px-6 py-14 text-center overflow-hidden", className)}>
+      <div className="relative flex h-12 w-12 items-center justify-center rounded-md bg-muted text-muted-foreground">
         <Icon className="h-6 w-6" aria-hidden="true" />
       </div>
       <h3 className="relative mt-4 text-sm font-medium">{title}</h3>
@@ -623,6 +738,98 @@ export function PageHeader({ title, description, children, className }: { title:
   )
 }
 
+/* ── Toolbar — the one control row ──────────────────────────────
+ * One row grammar for the `DataTable` toolbar, `Panel` headers, page-level
+ * control rows and the bulk bar. The wrapper class is exactly the string
+ * `DataTable` used to inline; the right cluster now lives in the primitive
+ * so its gap (`gap-2`, Rule R3) can never drift again. */
+
+export function Toolbar({
+  left,
+  right,
+  className,
+  children,
+  role = "toolbar",
+  "aria-label": ariaLabel,
+}: {
+  left?: ReactNode
+  right?: ReactNode
+  className?: string
+  children?: ReactNode
+  /** `toolbar` by default — the ARIA role for a row of controls. `Panel`
+   *  sets `undefined` because its header also carries a heading, and a
+   *  heading inside a `toolbar` would be mis-announced. */
+  role?: string
+  "aria-label"?: string
+}) {
+  return (
+    <div role={role} aria-label={ariaLabel} className={cn("flex flex-wrap items-center gap-2", className)}>
+      {left}
+      {children}
+      {right && <div className="ml-auto flex items-center gap-2">{right}</div>}
+    </div>
+  )
+}
+
+/* ── Section — a titled section, or a bare stack ────────────────
+ * Exists so section spacing is canonical: with a title it is a `Panel`
+ * (px-4 py-3 header, p-4 sm:p-5 body); without one it is a `space-y-3`
+ * stack. Pages stop inventing their own `space-y-3`/`space-y-4` wrapper. */
+
+export function Section({
+  title,
+  description,
+  icon,
+  action,
+  children,
+  className,
+}: {
+  title?: string
+  description?: string
+  icon?: LucideIcon
+  action?: ReactNode
+  children: ReactNode
+  className?: string
+}) {
+  if (!title) return <div className={cn("space-y-3", className)}>{children}</div>
+  return (
+    <Panel title={title} description={description} icon={icon} action={action} className={className}>
+      {children}
+    </Panel>
+  )
+}
+
+/* ── PageShell — PageHeader + the canonical page root ───────────
+ * Pairs the two so the root wrapper (`space-y-5`, Rule R3) and the header
+ * cannot drift apart. The AppShell already centers at max-w-[1440px], so
+ * there is no mx-auto / max-w-* here. */
+
+export function PageShell({
+  title,
+  description,
+  actions,
+  toolbar,
+  children,
+  className,
+}: {
+  title: string
+  description?: string
+  actions?: ReactNode
+  toolbar?: ReactNode
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={cn("space-y-5", className)}>
+      <PageHeader title={title} description={description}>
+        {actions}
+      </PageHeader>
+      {toolbar}
+      {children}
+    </div>
+  )
+}
+
 /* ── Panel — soft slab with quiet header ─────────────────────── */
 
 export function Panel({
@@ -633,61 +840,274 @@ export function Panel({
   return (
     <div className={cn("overflow-hidden rounded-md border border-border bg-card shadow-sm", className)}>
       {(title || action) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
-          {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
-          {title && <h3 className="text-sm font-semibold">{title}</h3>}
-          {description && <span className="ml-auto text-xs text-muted-foreground">{description}</span>}
-          {action && <div className="ml-auto">{action}</div>}
-        </div>
+        /* The header row is the shared `Toolbar` so its wrapper class
+         *  (`flex flex-wrap items-center gap-2`) and right-cluster gap
+         *  (`gap-2`) come from one source. `border-b border-border px-4 py-3`
+         *  is the Panel-only frame that stays here. `role={undefined}` keeps
+         *  the heading out of a `toolbar` landmark — the header is a title
+         *  row, not a control cluster. */
+        <Toolbar
+          role={undefined}
+          className="border-b border-border px-4 py-3"
+          left={
+            <>
+              {Icon && <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+              {title && <h3 className="text-sm font-semibold">{title}</h3>}
+            </>
+          }
+          right={
+            description || action ? (
+              <>
+                {description && <span className="text-xs text-muted-foreground">{description}</span>}
+                {action}
+              </>
+            ) : undefined
+          }
+        />
       )}
       <div className="p-4 sm:p-5">{children}</div>
     </div>
   )
 }
 
-/* ── RankedTable — clean grid ─────────────────────────────────── */
+/* ── Table chrome — TableFrame / TableHeadRow / TableHeadCell ───
+ * The ONE static table chrome. Small (non-grid) tables render inside this
+ * so border, radius, background, header tint and density are byte-identical
+ * to `DataTable`, which differs only in `shadow-none` + `overflow-x-auto`
+ * (Rule R2) because the grid sits inside a `Panel` that already lifts. */
 
-export function RankedTable({ rows, className, onRowClick }: { rows: { label: string; count: number }[]; className?: string; onRowClick?: (label: string) => void }) {
-  const max = Math.max(1, ...rows.map((r) => r.count))
-  if (rows.length === 0) return <p className="py-8 text-center text-sm text-muted-foreground">No data in window</p>
+export function TableFrame({
+  children,
+  className,
+  ariaLabel,
+  dense = false,
+}: {
+  children: ReactNode
+  className?: string
+  ariaLabel?: string
+  dense?: boolean
+}) {
   return (
-    // Compact variant: px-3 py-2 density (vs DataTable px-4 py-3) — intentional.
-    <div className={cn("overflow-hidden rounded-md border border-border bg-card", className)}>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border bg-muted/50">
-            <th className="mono-label w-9 px-3 py-2 text-left text-xs font-medium text-muted-foreground">#</th>
-            <th className="mono-label px-3 py-2 text-left text-xs font-medium text-muted-foreground">Label</th>
-            <th className="mono-label w-20 px-3 py-2 text-right text-xs font-medium text-muted-foreground">Count</th>
-          </tr>
-        </thead>
-        <Stagger as="tbody" className="divide-y divide-border">
-          {rows.map((r, i) => (
-            <StaggerItem
-              as="tr"
-              key={`${i}-${r.label}`}
-              className={cn("transition-colors", onRowClick ? "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" : "hover:bg-muted/40")}
-              title={`${r.label} — ${r.count.toLocaleString()}`}
-              onClick={onRowClick ? () => onRowClick(r.label) : undefined}
-              onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(r.label) } } : undefined}
-              tabIndex={onRowClick ? 0 : undefined}
-              role={onRowClick ? "button" : undefined}
-            >
-              <td className={cn("px-3 py-2 tabular-nums text-muted-foreground", i < 3 ? "text-foreground" : "")}>{String(i + 1).padStart(2, "0")}</td>
-              <td className="px-3 py-2">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="block max-w-[240px] truncate font-medium">{r.label}</span>
-                  <div className="h-1.5 min-w-[32px] flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                    <div className="h-full rounded-full bg-primary/60" style={{ width: `${Math.max(2, (r.count / max) * 100)}%` }} />
-                  </div>
-                </div>
-              </td>
-              <td className="px-3 py-2 text-right font-medium tabular-nums">{r.count.toLocaleString()}</td>
-            </StaggerItem>
-          ))}
-        </Stagger>
+    <div className={cn("overflow-hidden rounded-md border border-border bg-card shadow-sm", className)}>
+      <table className={cn("w-full", dense ? "text-xs" : "text-sm")} aria-label={ariaLabel}>
+        {children}
       </table>
     </div>
+  )
+}
+
+/** Header row helper so no page writes the `<thead>`/tint by hand. */
+export function TableHeadRow({ children }: { children: ReactNode }) {
+  return (
+    <thead>
+      <tr className="border-b border-border bg-muted/50">{children}</tr>
+    </thead>
+  )
+}
+
+export function TableHeadCell({
+  children,
+  align = "left",
+  width,
+  dense,
+  className,
+}: {
+  children: ReactNode
+  align?: "left" | "right" | "center"
+  width?: string
+  dense?: boolean
+  className?: string
+}) {
+  return (
+    <th
+      scope="col"
+      className={cn(
+        "mono-label",
+        dense ? "px-3 py-2" : "px-4 py-3",
+        align === "right" && "text-right",
+        align === "center" && "text-center",
+        width,
+        className,
+      )}
+    >
+      {children}
+    </th>
+  )
+}
+
+/* ── SimpleTable — the lightweight table ────────────────────────
+ * For surfaces too small for the full grid (ranked / indicator / backup):
+ * still typed, still framed, but no toolbar, no selection, no pagination.
+ * Reuses `Stagger as="tbody"` / `StaggerItem as="tr"` so its row entrance
+ * animation is the same one `RankedTable` has always used (and so reduced
+ * motion keeps being honored by `MotionGate`). */
+
+export interface SimpleTableColumn<T> {
+  id: string
+  header: ReactNode
+  cell: (row: T, index: number) => ReactNode
+  align?: "left" | "center" | "right"
+  width?: string
+  /** Optional bar cell (rank tables) — a 0..1 fraction rendered as a
+   *  `bg-primary/60` progress bar next to the cell content. */
+  bar?: (row: T) => number
+  className?: string
+  /** Optional per-row native tooltip for the `<tr>` (rank lists show the
+   *  full label + count here so the truncated cell text stays readable). */
+  rowTitle?: (row: T, index: number) => string
+}
+
+export function SimpleTable<T>({
+  columns,
+  data,
+  rowKey,
+  empty,
+  dense = true,
+  headDense,
+  onRowClick,
+  rowTitle,
+  ariaLabel,
+  className,
+}: {
+  columns: SimpleTableColumn<T>[]
+  data: T[]
+  rowKey: (row: T, index: number) => string | number
+  empty?: ReactNode
+  dense?: boolean
+  /** Header padding override, independent of body `dense`. Defaults to
+   *  `dense`; `RankedTable` sets `dense={false} headDense` so it keeps
+   *  `text-sm` body cells at `px-3 py-2` without inheriting the roomier
+   *  `px-4 py-3` header that would inflate its rows (§4.4 / R-4). */
+  headDense?: boolean
+  rowTitle?: (row: T, index: number) => string
+  onRowClick?: (row: T) => void
+  ariaLabel?: string
+  className?: string
+}) {
+  const clickable = Boolean(onRowClick)
+  return (
+    <TableFrame className={className} ariaLabel={ariaLabel} dense={dense}>
+      <TableHeadRow>
+        {columns.map((col) => (
+          <TableHeadCell key={col.id} align={col.align} width={col.width} dense={headDense ?? dense}>
+            {col.header}
+          </TableHeadCell>
+        ))}
+      </TableHeadRow>
+      {data.length === 0 ? (
+        <tbody>
+          <tr>
+            <td colSpan={columns.length}>
+              {/* `border-0` because the frame already draws the border (§4.7). */}
+              {empty ?? <EmptyState icon={Inbox} title="No data in window" className="border-0" />}
+            </td>
+          </tr>
+        </tbody>
+      ) : (
+        <Stagger as="tbody">
+          {data.map((row, index) => {
+            const activate = onRowClick ? () => onRowClick(row) : undefined
+            return (
+              <StaggerItem
+                as="tr"
+                key={rowKey(row, index)}
+                className={cn(
+                  // Per-row `border-b` is the canonical body border model
+                  // (`divide-y` is the retired loser, §4.1).
+                  "border-b border-border transition-colors last:border-b-0",
+                  clickable
+                    ? "cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                    : "hover:bg-muted/50",
+                )}
+                title={rowTitle?.(row, index)}
+                onClick={activate}
+                // Keyboard parity for the row-as-button idiom.
+                onKeyDown={onRowClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRowClick(row) } } : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                role={clickable ? "button" : undefined}
+              >
+                {columns.map((col) => {
+                  const barValue = col.bar?.(row)
+                  return (
+                    <td
+                      key={col.id}
+                      className={cn(
+                        "px-3 py-2",
+                        col.align === "right" && "text-right",
+                        col.align === "center" && "text-center",
+                        col.className,
+                      )}
+                    >
+                      {barValue === undefined ? (
+                        col.cell(row, index)
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-2">
+                          {col.cell(row, index)}
+                          <div className="h-1.5 min-w-[32px] flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                            <div className="h-full rounded-full bg-primary/60" style={{ width: `${Math.min(100, Math.max(2, barValue * 100))}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  )
+                })}
+              </StaggerItem>
+            )
+          })}
+        </Stagger>
+      )}
+    </TableFrame>
+  )
+}
+
+/* ── RankedTable — clean grid ─────────────────────────────────── */
+
+/** Compact ranked list. Now a thin wrapper over `SimpleTable` so it shares
+ *  the frame/header/empty-state chrome; the public API is unchanged. */
+export function RankedTable({ rows, className, onRowClick }: { rows: { label: string; count: number }[]; className?: string; onRowClick?: (label: string) => void }) {
+  const max = Math.max(1, ...rows.map((r) => r.count))
+  return (
+    <SimpleTable
+      // `dense={false}` keeps RankedTable's historical `text-sm` body, and
+      // `headDense` keeps the header at `px-3 py-2` — the exact `px-3 py-2
+      // text-sm` geometry it had before being recomputed on SimpleTable (§4.4 / R-4).
+      dense={false}
+      headDense
+      ariaLabel="Ranked list"
+      className={className}
+      data={rows}
+      // Index+label — a duplicate label alone used to collide React keys.
+      rowKey={(r, i) => `${i}-${r.label}`}
+      onRowClick={onRowClick ? (r) => onRowClick(r.label) : undefined}
+      rowTitle={(r) => `${r.label} — ${r.count.toLocaleString()}`}
+      empty={<EmptyState icon={ArrowUpDown} title="No data in window" className="border-0" />}
+      columns={[
+        {
+          id: "rank",
+          header: "#",
+          width: "w-9",
+          cell: (_r, i) => (
+            <span className={cn("tabular-nums", i < 3 ? "text-foreground" : "text-muted-foreground")}>
+              {String(i + 1).padStart(2, "0")}
+            </span>
+          ),
+        },
+        {
+          id: "label",
+          header: "Label",
+          // The bar is a 0..1 fraction of the max; `SimpleTable` renders it.
+          bar: (r) => r.count / max,
+          cell: (r) => <span className="block max-w-[240px] truncate font-medium">{r.label}</span>,
+        },
+        {
+          id: "count",
+          header: "Count",
+          align: "right",
+          width: "w-20",
+          cell: (r) => <span className="font-medium tabular-nums">{r.count.toLocaleString()}</span>,
+        },
+      ]}
+    />
   )
 }
 

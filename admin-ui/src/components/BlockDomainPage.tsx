@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { Ban, CheckCircle2, Loader2, Pencil, Trash2 } from "lucide-react"
 import { bulkAddBlacklist } from "../api"
-import { Button, Card, CardContent, Input, useToast } from "./ui"
+import { Button, Callout, Card, CardContent, EmptyState, IconButton, Input, SimpleTable, useToast } from "./ui"
 
 /**
  * Standalone confirmation page for bulk-adding domains / IPs to the blacklist.
@@ -190,112 +190,77 @@ export function BlockDomainPage() {
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center bg-primary/15 rounded-lg border border-border shadow-sm">
             <Ban className="h-7 w-7 text-primary" aria-hidden="true" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">Confirm blacklist add</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Confirm blacklist add</h1>
           <p className="text-sm text-muted-foreground">
             Review the entries below. Edit or remove any before confirming.
           </p>
         </div>
 
-        {/* Table */}
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-hidden rounded-md border border-border shadow-sm">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 text-left text-muted-foreground">
-                    <th className="w-12 px-4 py-3 text-center text-xs font-medium">#</th>
-                    <th className="px-4 py-3 text-xs font-medium">Value</th>
-                    <th className="w-24 px-4 py-3 text-right text-xs font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {items.length === 0 ? (
-                    <tr><td colSpan={3} className="px-4 py-3 text-center text-xs text-muted-foreground">No entries — add URLs above.</td></tr>
-                  ) : (
-                  items.map((item, idx) => {
-                    const isEditing = editingIdx === idx
-                    return (
-                      <tr
-                        key={`${idx}-${item}`}
-                        className="transition-colors hover:bg-muted/40"
-                      >
-                        <td className="px-4 py-2.5 text-center text-xs tabular-nums text-muted-foreground">
-                          {idx + 1}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          {isEditing ? (
-                            <Input
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onKeyDown={handleKeyDown}
-                              autoFocus
-                              className="h-8 font-mono text-xs"
-                            />
-                          ) : (
-                            <span className="block truncate font-mono text-xs" title={item}>
-                              {item}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {isEditing ? (
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={saveEdit}
-                                className="h-7 px-2 text-xs"
-                              >
-                                Save
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={cancelEdit}
-                                className="h-7 px-2 text-xs"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : (
-                            <div className="flex justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => startEdit(idx)}
-                                aria-label={`Edit ${item}`}
-                                className="h-7 w-7"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => removeItem(idx)}
-                                aria-label={`Remove ${item}`}
-                                className="h-7 w-7 hover:text-destructive"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  }))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Table — `SimpleTable` supplies the canonical frame, so no `Card`
+            wrapper is needed (one border, not two). */}
+        <SimpleTable
+          ariaLabel="Blacklist entries to confirm"
+          data={items}
+          rowKey={(item, index) => `${index}-${item}`}
+          empty={<EmptyState icon={Ban} title="No entries — add URLs above." className="border-0" />}
+          className="text-sm"
+          columns={[
+            {
+              id: "rank",
+              header: "#",
+              width: "w-12",
+              align: "center",
+              cell: (_item, index) => (
+                <span className="text-xs tabular-nums text-muted-foreground">{index + 1}</span>
+              ),
+            },
+            {
+              id: "value",
+              header: "Value",
+              cell: (item, index) =>
+                editingIdx === index ? (
+                  <Input
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    autoFocus
+                    className="h-8 font-mono text-xs"
+                  />
+                ) : (
+                  <span className="block truncate font-mono text-xs" title={item}>
+                    {item}
+                  </span>
+                ),
+            },
+            {
+              id: "actions",
+              header: "Actions",
+              width: "w-24",
+              align: "right",
+              cell: (item, index) =>
+                editingIdx === index ? (
+                  <div className="flex justify-end gap-1">
+                    <Button variant="ghost" size="sm" onClick={saveEdit} className="h-7 px-2 text-xs">
+                      Save
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={cancelEdit} className="h-7 px-2 text-xs">
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex justify-end gap-1">
+                    <IconButton icon={Pencil} label={`Edit ${item}`} size="md" onClick={() => startEdit(index)} />
+                    <IconButton icon={Trash2} label={`Remove ${item}`} size="md" variant="danger" onClick={() => removeItem(index)} />
+                  </div>
+                ),
+            },
+          ]}
+        />
 
         {submitError && (
-          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-            <span className="flex-1">{submitError}</span>
-            <Button variant="outline" size="sm" onClick={handleSubmit}>
-              Try again
-            </Button>
-          </div>
+          <Callout action={<Button variant="outline" size="sm" onClick={handleSubmit}>Retry</Button>}>
+            {submitError}
+          </Callout>
         )}
 
         {/* Actions */}

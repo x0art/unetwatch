@@ -1,5 +1,5 @@
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
-import { Badge, Button, Panel, Skeleton } from "./ui"
+import { Badge, Button, Callout, EmptyState, Panel, SimpleTable, Skeleton, StatusBadge, type StatusTone } from "./ui"
 import { type AttckMapping } from "../api"
 
 interface Props {
@@ -28,14 +28,16 @@ function formatDate(iso: string): string {
   })
 }
 
-function severityVariant(c: string): "destructive" | "warning" | "secondary" {
+/** Severity → `StatusBadge` tone. Identical mapping to `AttckFleetPage`'s
+ *  `severityTone` so severity reads the same way on both surfaces. */
+function severityTone(c: string): StatusTone {
   switch (c) {
     case "HIGH":
-      return "destructive"
+      return "danger"
     case "MEDIUM":
       return "warning"
     default:
-      return "secondary"
+      return "neutral"
   }
 }
 export function AttckPanel({ mapping, loading, error, entityLabel, embedded = false, onRetry }: Props) {
@@ -72,19 +74,19 @@ export function AttckPanel({ mapping, loading, error, entityLabel, embedded = fa
         </p>
       )}
       {!loading && error && (
-        <div className="flex flex-col gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
-          <span>{error}</span>
-          {onRetry && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="self-start text-[11px]"
-              onClick={onRetry}
-            >
-              Retry
-            </Button>
-          )}
-        </div>
+        <Callout
+          tone="danger"
+          className="flex-col items-start gap-2"
+          action={
+            onRetry ? (
+              <Button variant="outline" size="sm" className="self-start text-[11px]" onClick={onRetry}>
+                Retry
+              </Button>
+            ) : undefined
+          }
+        >
+          {error}
+        </Callout>
       )}
       {!loading && !error && mapping && (
         <div className="space-y-4">
@@ -111,49 +113,50 @@ export function AttckPanel({ mapping, loading, error, entityLabel, embedded = fa
               </>
             )}
           </div>
-          {mapping.techniques.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No ATT&CK techniques detected for this entity.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th scope="col" className="pb-2 pr-4 font-medium">Technique ID</th>
-                    <th scope="col" className="pb-2 pr-4 font-medium">Name</th>
-                    <th scope="col" className="pb-2 pr-4 font-medium">Severity</th>
-                    <th scope="col" className="pb-2 font-medium">Rationale</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {mapping.techniques.map((tech) => (
-                    <tr key={tech.technique_id} className="group">
-                      <td className="py-2 pr-4 font-mono text-xs text-muted-foreground align-top">
-                        {tech.technique_id}
-                      </td>
-                      <td className="py-2 pr-4 font-medium align-top">
-                        {tech.name}
-                      </td>
-                      <td className="py-2 pr-4 align-top">
-                        <Badge variant={severityVariant(tech.severity)}>
-                          {tech.severity}
-                        </Badge>
-                      </td>
-                      <td className="py-2 align-top">
-                        <p
-                          className="line-clamp-2 break-words text-xs text-muted-foreground group-hover:text-foreground"
-                          title={tech.description}
-                        >
-                          {tech.description}
-                        </p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <SimpleTable
+            className="group"
+            ariaLabel="MITRE ATT&CK techniques"
+            data={mapping.techniques}
+            rowKey={(tech) => tech.technique_id}
+            empty={<EmptyState icon={ShieldQuestion} title="No ATT&CK techniques detected for this entity." className="border-0" />}
+            columns={[
+              {
+                id: "id",
+                header: "Technique ID",
+                cell: (tech) => (
+                  <span className="font-mono text-xs text-muted-foreground align-top">
+                    {tech.technique_id}
+                  </span>
+                ),
+              },
+              {
+                id: "name",
+                header: "Name",
+                cell: (tech) => <span className="font-medium align-top">{tech.name}</span>,
+              },
+              {
+                id: "severity",
+                header: "Severity",
+                cell: (tech) => (
+                  <span className="align-top">
+                    <StatusBadge tone={severityTone(tech.severity)}>{tech.severity}</StatusBadge>
+                  </span>
+                ),
+              },
+              {
+                id: "rationale",
+                header: "Rationale",
+                cell: (tech) => (
+                  <p
+                    className="line-clamp-2 break-words text-xs text-muted-foreground group-hover:text-foreground align-top"
+                    title={tech.description}
+                  >
+                    {tech.description}
+                  </p>
+                ),
+              },
+            ]}
+          />
           {suppressed.length > 0 && (
             <div className="rounded-md border border-border bg-muted/40 p-3">
               <p className="mb-2 text-xs font-medium text-muted-foreground">

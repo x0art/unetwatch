@@ -28,6 +28,7 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   ConfirmDialog,
   Dialog,
   EmptyState,
@@ -38,6 +39,7 @@ import {
   Skeleton,
   TimestampCell,
   useToast,
+  SimpleTable,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { cn, formatInstant, useDebounce } from "../lib/utils"
@@ -487,28 +489,34 @@ function BackupPanel() {
 
         {preview && (
           <div className="mt-3 overflow-hidden rounded-md border border-border">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th scope="col" className="px-4 py-2 text-left font-medium text-muted-foreground">Section</th>
-                  <th scope="col" className="px-4 py-2 text-right font-medium tabular-nums text-muted-foreground">
-                    {preview.dry_run ? "Would add" : "Added"}
-                  </th>
-                  <th scope="col" className="px-4 py-2 text-right font-medium tabular-nums text-muted-foreground">Skipped</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {BACKUP_SECTIONS.map((s) => (
-                  <tr key={s} className="hover:bg-muted/40">
-                    <td className="px-4 py-2 font-mono text-[11px]">{s}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">{(preview.added[s] ?? 0).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+            <SimpleTable
+              ariaLabel="Backup preview"
+              data={[...BACKUP_SECTIONS]}
+              rowKey={(s) => s}
+              columns={[
+                {
+                  id: "section",
+                  header: "Section",
+                  cell: (s) => <span className="font-mono text-[11px]">{s}</span>,
+                },
+                {
+                  id: "added",
+                  header: preview.dry_run ? "Would add" : "Added",
+                  align: "right",
+                  cell: (s) => <span className="tabular-nums">{(preview.added[s] ?? 0).toLocaleString()}</span>,
+                },
+                {
+                  id: "skipped",
+                  header: "Skipped",
+                  align: "right",
+                  cell: (s) => (
+                    <span className="tabular-nums text-muted-foreground">
                       {(preview.skipped[s] ?? 0).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  ),
+                },
+              ]}
+            />
             {preview.dry_run && pendingFile && (
               <div className="flex items-center gap-2 border-t border-border bg-muted/30 px-4 py-2.5">
                 <span className="flex-1 text-xs text-muted-foreground">
@@ -658,7 +666,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const parsedQuery = detail ? parseQuery(detail.es_query) : null
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Header */}
       <PageHeader
         title="Logs"
@@ -722,12 +730,9 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
       )}
 
       {loadError ? (
-        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-          <span className="flex-1">{loadError}</span>
-          <Button variant="outline" size="sm" onClick={load}>
-            Retry
-          </Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
+          {loadError}
+        </Callout>
       ) : loading && items.length === 0 ? (
         <div className="space-y-3" aria-busy="true">
           <Skeleton className="h-56 w-full" />

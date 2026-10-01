@@ -14,12 +14,14 @@ import { FeedCard, type UpstreamFeedState } from "./BlacklistPage"
 import { copyText } from "../lib/utils"
 import {
   Button,
+  Callout,
   ConfirmDialog,
   Dialog,
   Input,
   Label,
   LoadingIcon,
   SearchInput,
+  PageHeader,
   useToast,
 } from "./ui"
 
@@ -245,15 +247,11 @@ export function JaillistPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="border-b border-border pb-4">
-        <p className="mono-label">Jaillist</p>
-        <h2 className="font-semibold tracking-tight mt-1 text-[26px] sm:text-[30px]">Jaillist</h2>
-        <p className="mt-1.5 max-w-[60ch] text-xs font-medium leading-relaxed text-muted-foreground">
-          Jailed client IPs, consumed as a plain-text feed by the firewall/fail2ban
-          enforcement layer via <code className="font-mono">/api/jaillist/ips.txt</code>.
-        </p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="Jaillist"
+        description="Jailed client IPs, consumed as a plain-text feed by the firewall/fail2ban enforcement layer via /api/jaillist/ips.txt."
+      />
 
       <div className="rounded-md border border-border bg-card shadow-sm space-y-4 p-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -296,23 +294,17 @@ export function JaillistPage() {
       </div>
 
       {error && !haveEntries ? (
-        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={load}>
-            Retry
-          </Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
+          {error}
+        </Callout>
       ) : (
         <div className="space-y-4">
           {/* A refetch failure with entries already on screen still shows the
               error, but never hides the feed the operator can still act on. */}
           {error && haveEntries && (
-            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-              <span className="flex-1">Refresh failed — {error}</span>
-              <Button variant="outline" size="sm" onClick={load}>
-                Retry
-              </Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
+              Refresh failed — {error}
+            </Callout>
           )}
           <FeedCard
             title="Jailed client IPs"

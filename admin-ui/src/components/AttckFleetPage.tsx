@@ -16,12 +16,15 @@ import { DataTable, type DataTableColumn } from "./DataTable"
 import {
   Badge,
   Button,
+  Callout,
   EmptyState,
   Panel,
   PageHeader,
   Select,
   Skeleton,
   StatCard,
+  StatusBadge,
+  type StatusTone,
 } from "./ui"
 
 /** Window options mirror the per-entity pages' time-range vocabulary. */
@@ -32,14 +35,15 @@ const RANGE_OPTIONS = [
   { value: "30d", label: "Last 30 days" },
 ]
 
-function severityVariant(c: string): "destructive" | "warning" | "secondary" {
+/** Severity → `StatusBadge` tone (HIGH/MEDIUM match the canon's map). */
+function severityTone(c: string): StatusTone {
   switch (c) {
     case "HIGH":
-      return "destructive"
+      return "danger"
     case "MEDIUM":
       return "warning"
     default:
-      return "secondary"
+      return "neutral"
   }
 }
 
@@ -82,7 +86,7 @@ const TECHNIQUE_COLUMNS: DataTableColumn<FleetTechnique>[] = [
     slot: "verdict",
     filterType: "enum",
     accessor: (t) => t.severity,
-    cell: (t) => <Badge variant={severityVariant(t.severity)}>{t.severity}</Badge>,
+    cell: (t) => <StatusBadge tone={severityTone(t.severity)}>{t.severity}</StatusBadge>,
     exportValue: (t) => t.severity,
   },
   {
@@ -263,7 +267,7 @@ export function AttckFleetPage({ onNavigate }: Props) {
     : ShieldQuestion
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         title="ATT&CK Coverage"
         description="Fleet-wide MITRE ATT&CK techniques across every host in the persisted findings — the aggregate the per-entity panels cannot show."
@@ -291,22 +295,26 @@ export function AttckFleetPage({ onNavigate }: Props) {
       )}
 
       {!loading && error && (
-        <div className="flex flex-col gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
-          <span>{error}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="self-start text-[11px]"
-            onClick={fetchFleet}
-          >
-            Retry
-          </Button>
-        </div>
+        <Callout
+          className="flex-col items-start text-xs"
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start text-[11px]"
+              onClick={fetchFleet}
+            >
+              Retry
+            </Button>
+          }
+        >
+          {error}
+        </Callout>
       )}
 
       {!loading && !error && mapping && (
         <>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <StatCard
               icon={HeaderIcon}
               label="Distinct techniques"

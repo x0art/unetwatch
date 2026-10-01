@@ -13,6 +13,7 @@ import type {
 import { ZoomIn, ZoomOut, Maximize2 } from "lucide-react"
 import { useTheme } from "./Sidebar"
 import { resolveAllColors, type ResolvedColors } from "./SankeyDiagram"
+import { IconButton } from "./ui"
 
 echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
@@ -375,30 +376,32 @@ export function NetworkGraphDiagram({
       />
       {/* Zoom controls — bottom-right overlay */}
       <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1">
-        <button
-          type="button"
+        {/* `size="lg"` (h-8 w-8) reproduces the legacy 32px box exactly;
+            `variant="outline"` + `shadow-sm` keep the overlaid plate look. */}
+        <IconButton
+          icon={ZoomIn}
+          label="Zoom in"
+          size="lg"
+          variant="outline"
           onClick={handleZoomIn}
-          aria-label="Zoom in"
-          className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ZoomIn className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
+          className="shadow-sm hover:bg-secondary"
+        />
+        <IconButton
+          icon={ZoomOut}
+          label="Zoom out"
+          size="lg"
+          variant="outline"
           onClick={handleZoomOut}
-          aria-label="Zoom out"
-          className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ZoomOut className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
+          className="shadow-sm hover:bg-secondary"
+        />
+        <IconButton
+          icon={Maximize2}
+          label="Reset zoom"
+          size="lg"
+          variant="outline"
           onClick={handleFitView}
-          aria-label="Reset zoom"
-          className="inline-flex h-8 w-8 items-center justify-center border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Maximize2 className="h-4 w-4" />
-        </button>
+          className="shadow-sm hover:bg-secondary"
+        />
       </div>
     </div>
   )

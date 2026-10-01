@@ -33,6 +33,7 @@ import {
   Button,
   CopyUrlButton,
   EmptyState,
+  IconButton,
   ListBadge,
   LoadingIcon,
   PageHeader,
@@ -136,15 +137,11 @@ function CopyCell({ value, label }: { value: string; label: string }) {
 function QuickNavCell({ kind, value, label }: { kind: "host" | "url"; value: string; label: string }) {
   return (
     <span onClick={(e) => e.stopPropagation()}>
-      <button
-        type="button"
+      <IconButton
+        icon={Search}
+        label={label}
         onClick={() => (kind === "host" ? queryUI.onInspectHost(value) : queryUI.onInspectUrl(value))}
-        className="inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-        aria-label={label}
-        title={label}
-      >
-        <Search className="h-3 w-3" />
-      </button>
+      />
     </span>
   )
 }
@@ -813,7 +810,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <PageHeader
         title="Query"

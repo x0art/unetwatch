@@ -23,6 +23,7 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   EmptyState,
   LoadingIcon,
   PageHeader,
@@ -274,10 +275,9 @@ export function UrlInvestigationPage({
       </form>
 
       {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
-          <span>{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void investigate(searched || url)}>Retry</Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={() => void investigate(searched || url)}>Retry</Button>}>
+          {error}
+        </Callout>
       )}
 
       {loading && !result ? (

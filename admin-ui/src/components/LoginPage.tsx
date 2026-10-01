@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { AlertTriangle, Eye, EyeOff, Loader2, Lock, ShieldCheck, User } from "lucide-react"
 import { login, setToken } from "../api"
-import { Button, Input, Label } from "./ui"
+import { Button, IconButton, Input, Label } from "./ui"
 
 export function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("")
@@ -79,16 +79,15 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
                     placeholder="••••••••"
                     className="pl-9 pr-10 text-sm"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  <IconButton
+                    icon={showPassword ? EyeOff : Eye}
+                    label={showPassword ? "Hide password" : "Show password"}
+                    size="lg"
                     aria-controls="login-password"
                     aria-pressed={showPassword}
-                    className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
-                  </button>
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-1 top-1/2 -translate-y-1/2"
+                  />
                 </div>
               </div>
 

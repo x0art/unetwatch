@@ -29,8 +29,10 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   ConfirmDialog,
   CopyUrlButton,
+  IconButton,
   PageHeader,
   Panel,
   RefreshIntervalSelect,
@@ -103,15 +105,11 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     cell: (f) => (
       <span className="flex items-center gap-1.5">
         <span className="font-mono text-xs">{f.client_ip}</span>
-        <button
-          type="button"
+        <IconButton
+          icon={Search}
+          label="Open in Host Inspector"
           onClick={() => FINDINGS_UI.onInspectHost(f.client_ip)}
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-          aria-label="Open in Host Inspector"
-          title="Open in Host Inspector"
-        >
-          <Search className="h-3 w-3" />
-        </button>
+        />
         <CopyUrlButton value={f.client_ip} label="Client IP" />
         {FINDINGS_UI.jailedIndex[f.client_ip] ? (
           <Badge variant="destructive">Jailed</Badge>
@@ -145,15 +143,11 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
         <span className="truncate font-mono text-xs" title={f.url}>
           {f.url}
         </span>
-        <button
-          type="button"
+        <IconButton
+          icon={Search}
+          label="Open in URL Investigation"
           onClick={() => FINDINGS_UI.onInspectUrl(f.url)}
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-          aria-label="Open in URL Investigation"
-          title="Open in URL Investigation"
-        >
-          <Search className="h-3 w-3" />
-        </button>
+        />
         <Button
           variant="ghost"
           size="icon"
@@ -177,15 +171,11 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     cell: (f) => (
       <div className="flex items-center gap-2">
         <span className="block max-w-[220px] truncate font-mono text-sm text-muted-foreground" title={f.base_url}>{f.base_url}</span>
-        <button
-          type="button"
+        <IconButton
+          icon={Search}
+          label="Open in URL Investigation"
           onClick={() => FINDINGS_UI.onInspectUrl(f.base_url)}
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-          aria-label="Open in URL Investigation"
-          title="Open in URL Investigation"
-        >
-          <Search className="h-3 w-3" />
-        </button>
+        />
         <CopyUrlButton value={f.base_url} label="Base URL" />
         {FINDINGS_UI.whitelistIndex[f.base_url] ? (
           <Badge variant="warning">Whitelist</Badge>
@@ -601,7 +591,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   }, [findings, uniqueDomainsOnly])
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
         title="Findings"
         description={`${total.toLocaleString()} finding${total !== 1 ? "s" : ""} detected`}
@@ -651,20 +641,17 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
       </PageHeader>
 
       {error && (
-        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            Retry
-          </Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={refetch}>Retry</Button>}>
+          {error}
+        </Callout>
       )}
       {indexError && (
-        <div className="flex items-center gap-3 rounded-md border border-warning/20 bg-warning/10 px-4 py-3 text-xs font-medium text-warning">
-          <span className="flex-1">Some badges may be unavailable — index data failed to load.</span>
-          <Button variant="outline" size="sm" onClick={refetchIndexes}>
-            Retry
-          </Button>
-        </div>
+        <Callout
+          tone="warning"
+          action={<Button variant="outline" size="sm" onClick={refetchIndexes}>Retry</Button>}
+        >
+          Some badges may be unavailable — index data failed to load.
+        </Callout>
       )}
 
       {/* Refetch with rows already on screen: keep them mounted, and report the

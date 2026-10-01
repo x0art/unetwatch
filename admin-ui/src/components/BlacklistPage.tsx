@@ -22,6 +22,8 @@ import {
 import { copyText } from "../lib/utils"
 import {
   Button,
+  IconButton,
+  Callout,
   Card,
   CardContent,
   CardHeader,
@@ -33,8 +35,10 @@ import {
   Input,
   Label,
   LoadingIcon,
+  PageHeader,
   SearchInput,
   Skeleton,
+  Toolbar,
   useToast,
 } from "./ui"
 
@@ -250,15 +254,14 @@ export function FeedCard({
                   {!selectMode && (
                     <span className="flex items-center gap-1">
                       <CopyUrlButton value={kind === "url" ? edlDisplay(value) : value} label="Entry" />
-                      <button
-                        type="button"
+                      <IconButton
+                        icon={Trash2}
+                        label={`Remove ${value} from blacklist`}
                         onClick={() => onDelete(kind, value)}
                         disabled={disabled}
-                        aria-label={`Remove ${value} from blacklist`}
-                        className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:bg-danger/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      </button>
+                        variant="danger"
+                        size="md"
+                      />
                     </span>
                   )}
                 </li>
@@ -541,37 +544,40 @@ export function BlacklistPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="border-b border-border pb-4">
-        <p className="mono-label">Blacklist</p>
-        <h2 className="font-semibold tracking-tight mt-1 text-[26px] sm:text-[30px]">Blacklist</h2>
-        <p className="mt-1.5 max-w-[60ch] text-xs font-medium leading-relaxed text-muted-foreground">
-          Blacklisted destinations, consumed as separate URL and IP feeds by the device firewall (nginx/fail2ban).
-          IP entries are destinations whose host is an IP address.
-        </p>
-      </div>
+    // Page root is the canonical `space-y-5`; the title row is the shared
+    // `PageHeader` so it can never drift from every other page's title again.
+    <div className="space-y-5">
+      <PageHeader
+        title="Blacklist"
+        description="Blacklisted destinations, consumed as separate URL and IP feeds by the device firewall (nginx/fail2ban). IP entries are destinations whose host is an IP address."
+      />
 
       <div className="rounded-md border border-border bg-card shadow-sm space-y-4 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-1 gap-2">
-            <Input
-              value={addValue}
-              onChange={(e) => setAddValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") add()
-              }}
-              placeholder="Add URL or IP — saved as bare host"
-            />
-            <Button onClick={add} disabled={adding || !addValue.trim()}>
-              {adding && <LoadingIcon />}
-              {adding ? "Adding…" : "Add"}
+        <Toolbar
+          aria-label="Blacklist add controls"
+          left={
+            <div className="flex min-w-0 flex-1 gap-2">
+              <Input
+                value={addValue}
+                onChange={(e) => setAddValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") add()
+                }}
+                placeholder="Add URL or IP — saved as bare host"
+              />
+              <Button onClick={add} disabled={adding || !addValue.trim()}>
+                {adding && <LoadingIcon />}
+                {adding ? "Adding…" : "Add"}
+              </Button>
+            </div>
+          }
+          right={
+            <Button variant="outline" onClick={() => setBulkOpen(true)}>
+              <ListPlus className="h-4 w-4" />
+              Bulk add
             </Button>
-          </div>
-          <Button variant="outline" onClick={() => setBulkOpen(true)}>
-            <ListPlus className="h-4 w-4" />
-            Bulk add
-          </Button>
-        </div>
+          }
+        />
 
         {/* Search */}
         <div className="flex flex-wrap items-center gap-3">
@@ -592,23 +598,17 @@ export function BlacklistPage() {
       </div>
 
       {error && !haveEntries ? (
-        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={load}>
-            Retry
-          </Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
+          {error}
+        </Callout>
       ) : (
         <div className="space-y-4">
           {/* A refetch failure with feeds already on screen still shows the
               error, but never hides the data the operator can still act on. */}
           {error && haveEntries && (
-            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-              <span className="flex-1">Refresh failed — {error}</span>
-              <Button variant="outline" size="sm" onClick={load}>
-                Retry
-              </Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
+              Refresh failed — {error}
+            </Callout>
           )}
           <FeedCard
             title="URL blacklist"
@@ -702,6 +702,7 @@ export function BlacklistPage() {
               value={bulkValue}
               onChange={(e) => setBulkValue(e.target.value)}
               placeholder={"http://example.com/foo\n1.2.3.4"}
+              aria-label="Values (one per line)"
               autoFocus
             />
             <p className="mt-1.5 text-xs text-muted-foreground">

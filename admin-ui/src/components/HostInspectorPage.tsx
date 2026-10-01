@@ -15,7 +15,7 @@ import {
   FileText,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
+import { Button, Callout, IconButton, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
@@ -715,15 +715,11 @@ export function HostInspectorPage({
         cell: (r) => (
           <span className="flex items-center gap-1.5">
             <span className="font-mono text-xs text-muted-foreground">{getSrcIp(r) || "—"}</span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in Host Inspector"
               onClick={() => handleOpenHost(getSrcIp(r))}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in Host Inspector"
-              title="Open in Host Inspector"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -736,15 +732,11 @@ export function HostInspectorPage({
         cell: (r) => (
           <span className="flex items-center gap-1.5">
             <span className="font-mono text-xs text-muted-foreground">{getDestIp(r) || "—"}</span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in Host Inspector"
               onClick={() => handleOpenHost(getDestIp(r))}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in Host Inspector"
-              title="Open in Host Inspector"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -759,15 +751,11 @@ export function HostInspectorPage({
             <span className="block max-w-[340px] truncate font-mono text-xs" title={r.url}>
               {r.url}
             </span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in URL Investigation"
               onClick={() => handleOpenUrl(r.url ?? "")}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in URL Investigation"
-              title="Open in URL Investigation"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -788,15 +776,11 @@ export function HostInspectorPage({
               <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={domain}>
                 {domain || "—"}
               </span>
-              <button
-                type="button"
+              <IconButton
+                icon={Search}
+                label="Open in URL Investigation"
                 onClick={() => handleOpenUrl(domain)}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-                aria-label="Open in URL Investigation"
-                title="Open in URL Investigation"
-              >
-                <Search className="h-3 w-3" />
-              </button>
+              />
             </span>
           )
         },
@@ -931,7 +915,7 @@ export function HostInspectorPage({
     { id: "url", slot: "identity", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => (
       <span className="flex items-center gap-1.5">
         <span className="block max-w-[560px] truncate font-mono text-xs" title={r.url}>{r.url}</span>
-        <button type="button" onClick={() => openUrlInInvestigation(r.url)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground" aria-label="Open in URL Investigation"><Search className="h-3 w-3" /></button>
+        <IconButton icon={Search} label="Open in URL Investigation" onClick={() => openUrlInInvestigation(r.url)} />
       </span>
     )},
     { id: "count", slot: "measures", header: "Hits", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
@@ -1069,10 +1053,9 @@ export function HostInspectorPage({
       )}
 
       {!loading && error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
-          <span>{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void lookup(target)}>Try again</Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Retry</Button>}>
+          {error}
+        </Callout>
       )}
 
       {!loading && !error && host && hSource === "live" && (
@@ -1080,7 +1063,7 @@ export function HostInspectorPage({
       )}
 
       {!loading && !error && !host && hasSearched && (
-        <EmptyState icon={SearchX} title="No host found" description={`No data for "${target}" in the selected window.`} action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Search again</Button>} />
+        <EmptyState icon={SearchX} title="No host found" description={`No data for "${target}" in the selected window.`} action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Retry</Button>} />
       )}
 
       {!loading && !error && !host && !hasSearched && (
@@ -1091,10 +1074,9 @@ export function HostInspectorPage({
       {showSections && (
         <>
           {sectionsError && (
-            <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
-              <span>{sectionsError}</span>
-              <Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target) }}>Retry</Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target) }}>Retry</Button>}>
+              {sectionsError}
+            </Callout>
           )}
           {/* Refetch (time-range change / Retry) with sections already loaded:
               keep every panel below mounted and report the read out loud. The
@@ -1117,9 +1099,7 @@ export function HostInspectorPage({
             ) : sections && sections.timeline.length > 0 ? (
               <TrafficTimeline points={sections.timeline} anomalyAnnotation={sections.anomaly} />
             ) : (
-              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                No data in window
-              </p>
+              <EmptyState icon={Activity} title="No data in window" />
             )}
           </Panel>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1171,9 +1151,7 @@ export function HostInspectorPage({
                 ))}
               </div>
             ) : (
-              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                No data in window
-              </p>
+              <EmptyState icon={Link2} title="No data in window" />
             )}
           </Panel>
 
@@ -1206,9 +1184,7 @@ export function HostInspectorPage({
                 />
               </>
             ) : (
-              <p className="py-10 text-center text-xs font-medium text-muted-foreground">
-                No data in window
-              </p>
+              <EmptyState icon={Network} title="No data in window" />
             )}
           </Panel>
 
@@ -1302,10 +1278,9 @@ export function HostInspectorPage({
               </Panel>
 
               {rawError && (
-                <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3 mb-3">
-                  <span>{rawError}</span>
-                  <Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>
-                </div>
+                <Callout className="mb-3" action={<Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>}>
+                  {rawError}
+                </Callout>
               )}
               <Panel title={`Raw Findings — ${report.client_ip}`} icon={Database} description={`${rawTotal.toLocaleString()} docs`}>
                 <div className="mb-3 flex flex-wrap items-center gap-2">

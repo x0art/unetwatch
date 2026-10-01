@@ -1,6 +1,6 @@
 import { Copy, ExternalLink, X } from "lucide-react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { Badge, Button, useToast } from "./ui"
+import { Badge, Button, IconButton, StatusBadge, useToast } from "./ui"
 import { useZone } from "../contexts/ZoneContext"
 import { useFilter } from "../contexts/FilterContext"
 import { formatBytes } from "../api"
@@ -40,15 +40,13 @@ function CopyField({
       <div className="flex items-center justify-between gap-2">
         <p className="mono-label">{label}</p>
         {copyValue ? (
-          <button
-            type="button"
+          <IconButton
+            icon={Copy}
+            label={`Copy ${label}`}
+            size="sm"
             onClick={handleCopy}
-            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-            aria-label={`Copy ${label}`}
-            title={`Copy ${label}`}
-          >
-            <Copy className="h-3 w-3" />
-          </button>
+            className="h-5 w-5 [&>svg]:h-3 [&>svg]:w-3"
+          />
         ) : null}
       </div>
       <div className="mt-1">{children}</div>
@@ -178,24 +176,13 @@ export function EventInspectorSidebar({ row, onClose, onNavigate }: EventInspect
               </DialogPrimitive.Description>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge variant={actionVariant(row.action ?? "")}>{row.action || "—"}</Badge>
-                {isRisky && (
-                  <span className="inline-flex items-center rounded-md border border-danger/20 bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger">
-                    blacklist risk
-                  </span>
-                )}
+                {isRisky && <StatusBadge tone="danger">blacklist risk</StatusBadge>}
                 {(row as unknown as { whitelisted?: boolean }).whitelisted && (
-                  <span className="inline-flex items-center rounded-md border border-success/20 bg-success/10 px-1.5 py-0.5 text-xs font-medium text-success">
-                    whitelist
-                  </span>
+                  <StatusBadge tone="success">whitelist</StatusBadge>
                 )}
               </div>
             </div>
-            <DialogPrimitive.Close
-              aria-label="Close inspector"
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent hover:border-border hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X className="h-4 w-4" />
-            </DialogPrimitive.Close>
+            <IconButton icon={X} label="Close inspector" size="md" onClick={onClose} />
           </div>
 
           {/* Scrollable body */}

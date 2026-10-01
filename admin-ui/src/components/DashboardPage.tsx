@@ -21,9 +21,9 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, EmptyState, Panel, RefreshIntervalSelect, Skeleton, StatCard, useToast } from "./ui"
+import { Button, Callout, EmptyState, PageShell, Panel, RefreshIntervalSelect, SimpleTable, Skeleton, StatCard, StatusBadge, useToast } from "./ui"
 import { CountdownRing } from "./CountdownRing"
-import { useAutoRefresh, usePageVisible } from "../lib/utils"
+import { useAutoRefresh } from "../lib/utils"
 import { LoadingIndicator } from "./loading"
 import { type View } from "./Sidebar"
 
@@ -65,7 +65,6 @@ export function DashboardPage({
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
-  const pageVisible = usePageVisible()
   const { toast } = useToast()
 
   const banner =
@@ -167,40 +166,25 @@ export function DashboardPage({
   }, [onRefresh, fetchRecent])
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
 
+  /* The canonical page shell: `space-y-5` root + the one `PageHeader` title.
+     Actions live in the title row per §2.3; previously this was a bespoke hero
+     card duplicating a title the shell also tried (and failed) to render. */
   return (
-    <div className="space-y-5">
-      {/* ── Header ── */}
-      <div className="rounded-md border border-border bg-card shadow-sm overflow-hidden">
-        <div className="flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 bg-danger border border-border shrink-0" aria-hidden="true" />
-              <span className="mono-label">Dashboard · uNetWatch</span>
-            </div>
-            <h2 className="mt-1 text-[30px] font-semibold tracking-tight sm:text-[36px]">Dashboard</h2>
-            <p className="mt-1 max-w-[52ch] text-xs font-medium text-muted-foreground">
-              Live poll health — findings — redirect watch
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
-              <span className="relative flex h-2.5 w-2.5 border border-border">
-                {pageVisible && isOnline && (
-                  <span className="absolute inset-0 animate-ping bg-foreground" />
-                )}
-                <span className={`absolute inset-0 ${isOnline ? "bg-foreground" : "bg-danger"}`} />
-              </span>
-              {statusLabel}
-            </span>
-            <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium tabular-nums">{formatLastUpdated(lastUpdated)}</span>
-            <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
-            <Button variant="outline" size="sm" onClick={onRefresh}>
-              <RefreshCcw className="h-4 w-4" />
-              Refresh
-            </Button>
-          </div>
-        </div>
-      </div>
+    <PageShell
+      title="Dashboard"
+      description="Live poll health, findings, and redirect watch."
+      actions={
+        <>
+          <StatusBadge tone={isOnline ? "success" : "danger"} dot>{statusLabel}</StatusBadge>
+          <span className="rounded-md border border-border bg-muted px-2 py-1 text-xs font-medium tabular-nums">{formatLastUpdated(lastUpdated)}</span>
+          <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
+          <Button variant="outline" size="sm" onClick={onRefresh}>
+            <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+            Refresh
+          </Button>
+        </>
+      }
+    >
 
       {/* ── Banner ── */}
       {banner && (
@@ -277,16 +261,14 @@ export function DashboardPage({
       {(blacklistError || trackedError) && (
         <div className="space-y-2">
           {blacklistError && (
-            <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
-              <span className="flex-1">Blacklist count failed to load — {blacklistError}</span>
-              <Button variant="outline" size="sm" onClick={() => { void fetchBlacklistCount() }}>Retry</Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchBlacklistCount() }}>Retry</Button>}>
+              Blacklist count failed to load — {blacklistError}
+            </Callout>
           )}
           {trackedError && (
-            <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
-              <span className="flex-1">Tracked count failed to load — {trackedError}</span>
-              <Button variant="outline" size="sm" onClick={() => { void fetchTrackedCount() }}>Retry</Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchTrackedCount() }}>Retry</Button>}>
+              Tracked count failed to load — {trackedError}
+            </Callout>
           )}
         </div>
       )}
@@ -316,31 +298,41 @@ export function DashboardPage({
                 <Skeleton className="h-32 w-full" />
               </div>
             ) : recentFindings.length > 0 ? (
-              <div aria-busy={recentLoading} className="overflow-hidden rounded-md border border-border bg-card">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                      <th className="px-4 py-3 text-left text-xs font-medium">Client IP</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium">Base URL</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium">Detected</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {recentFindings.map((f) => (
-                      <tr key={f.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onNavigate("findings", f.base_url)}>
-                        <td className="px-4 py-3 font-mono font-medium">{f.client_ip}</td>
-                        <td className="max-w-[200px] truncate px-4 py-3 font-mono text-muted-foreground" title={f.base_url}>{f.base_url}</td>
-                        <td className="whitespace-nowrap px-4 py-3 font-mono text-muted-foreground">{formatDetected(f.log_timestamp)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div aria-busy={recentLoading}>
+                <SimpleTable
+                  ariaLabel="Recent findings"
+                  data={recentFindings}
+                  rowKey={(f) => f.id}
+                  onRowClick={(f) => onNavigate("findings", f.base_url)}
+                  columns={[
+                    {
+                      id: "client_ip",
+                      header: "Client IP",
+                      cell: (f) => <span className="font-mono font-medium">{f.client_ip}</span>,
+                    },
+                    {
+                      id: "base_url",
+                      header: "Base URL",
+                      className: "max-w-[200px] truncate font-mono text-muted-foreground",
+                      cell: (f) => (
+                        <span className="block max-w-[200px] truncate" title={f.base_url}>
+                          {f.base_url}
+                        </span>
+                      ),
+                    },
+                    {
+                      id: "detected",
+                      header: "Detected",
+                      className: "whitespace-nowrap font-mono text-muted-foreground",
+                      cell: (f) => formatDetected(f.log_timestamp),
+                    },
+                  ]}
+                />
               </div>
             ) : recentError ? (
-              <div className="flex items-center gap-3 rounded-md border border-danger/30 bg-danger/10 px-4 py-3 text-xs font-medium text-danger">
-                <span className="flex-1">Couldn&apos;t load recent findings — {recentError}</span>
-                <Button variant="outline" size="sm" onClick={fetchRecent}>Retry</Button>
-              </div>
+              <Callout action={<Button variant="outline" size="sm" onClick={fetchRecent}>Retry</Button>}>
+                Couldn&apos;t load recent findings — {recentError}
+              </Callout>
             ) : (
               <EmptyState
                 icon={SearchX}
@@ -401,6 +393,6 @@ export function DashboardPage({
           </button>
         </div>
       </div>
-    </div>
+    </PageShell>
   )
 }

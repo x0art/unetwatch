@@ -15,6 +15,8 @@ import {
 } from "lucide-react"
 import {
   Button,
+  Callout,
+  IconButton,
   Label,
   PageHeader,
   Panel,
@@ -25,6 +27,7 @@ import {
   useToast,
   Badge,
   TimestampCell,
+  Toolbar,
   type SelectOption,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
@@ -346,15 +349,11 @@ export function AnalyticsPage({
             <span className="block max-w-[220px] truncate font-mono text-[13px] font-semibold" title={r.client_ip}>
               {r.client_ip}
             </span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in Host Inspector"
               onClick={() => openHost(r.client_ip)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in Host Inspector"
-              title="Open in Host Inspector"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -401,15 +400,11 @@ export function AnalyticsPage({
         cell: (r) => (
           <span className="flex items-center gap-1.5">
             <span className="font-mono text-xs font-semibold">{r.client_ip}</span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in Host Inspector"
               onClick={() => openHost(r.client_ip)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in Host Inspector"
-              title="Open in Host Inspector"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -424,15 +419,11 @@ export function AnalyticsPage({
             <span className="block max-w-[320px] truncate font-mono text-xs" title={r.url}>
               {r.url}
             </span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in URL Investigation"
               onClick={() => openUrl(r.url)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in URL Investigation"
-              title="Open in URL Investigation"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -445,15 +436,11 @@ export function AnalyticsPage({
         cell: (r) => (
           <span className="flex items-center gap-1.5">
             <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span>
-            <button
-              type="button"
+            <IconButton
+              icon={Search}
+              label="Open in URL Investigation"
               onClick={() => openUrl(r.base_url)}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in URL Investigation"
-              title="Open in URL Investigation"
-            >
-              <Search className="h-3 w-3" />
-            </button>
+            />
           </span>
         ),
       },
@@ -669,10 +656,9 @@ export function AnalyticsPage({
       </div>
 
       {error && (
-        <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3">
-          <span>{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void fetchAll()}>Retry</Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={() => void fetchAll()}>Retry</Button>}>
+          {error}
+        </Callout>
       )}
 
       {/* Refetch with panels already on screen: keep them mounted, report the
@@ -798,32 +784,39 @@ export function AnalyticsPage({
         icon={Database}
         description={`${rawTotal.toLocaleString()} docs · ${rangeLabel(range)} window`}
       >
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <SearchInput
-            placeholder="Filter raw data (IP / URL)..."
-            value={rawSearch}
-            onChange={(v) => { setRawSearch(v); setRawPage(0) }}
-            className="w-64"
-            aria-label="Filter raw findings"
-          />
-          <Button
-            variant={rawUniqueDomains ? "default" : "outline"}
-            size="sm"
-            onClick={() => setRawUniqueDomains((v) => !v)}
-            aria-pressed={rawUniqueDomains}
-          >
-            Unique domains
-          </Button>
-          <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            <ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />
-            Findings are ALLOW risk rows only (ADR 0001)
-          </span>
-        </div>
+        <Toolbar
+          aria-label="Raw findings controls"
+          className="mb-3"
+          left={
+            <>
+              <SearchInput
+                placeholder="Filter raw data (IP / URL)..."
+                value={rawSearch}
+                onChange={(v) => { setRawSearch(v); setRawPage(0) }}
+                className="w-64"
+                aria-label="Filter raw findings"
+              />
+              <Button
+                variant={rawUniqueDomains ? "default" : "outline"}
+                size="sm"
+                onClick={() => setRawUniqueDomains((v) => !v)}
+                aria-pressed={rawUniqueDomains}
+              >
+                Unique domains
+              </Button>
+            </>
+          }
+          right={
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <ArrowDownToLine className="h-3.5 w-3.5" aria-hidden="true" />
+              Findings are ALLOW risk rows only (ADR 0001)
+            </span>
+          }
+        />
         {rawError ? (
-          <div className="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger flex items-center justify-between gap-3 mb-3">
-            <span>{rawError}</span>
-            <Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>
-          </div>
+          <Callout className="mb-3" action={<Button variant="outline" size="sm" onClick={() => void fetchRaw()}>Retry</Button>}>
+            {rawError}
+          </Callout>
         ) : (
           <DataTable
             columns={rawColumns}

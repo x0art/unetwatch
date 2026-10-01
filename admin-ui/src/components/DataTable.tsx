@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "../lib/utils"
-import { Button, EmptyState, Pagination, Skeleton, useToast } from "./ui"
+import { Button, EmptyState, Pagination, Skeleton, Toolbar, useToast } from "./ui"
 import { EASE, Stagger, StaggerItem } from "./motion"
 import { ProgressHint } from "./loading/ProgressHint"
 import { useDelayedVisible, LOADER_DELAY_MS, LOADER_MIN_VISIBLE_MS } from "./loading/useDelayedVisible"
@@ -976,7 +976,11 @@ export function DataTable<T>({
   return (
     <div className={className}>
       {/* Toolbar (§5a) — always rendered so density is always available. */}
-      <div className="mb-2 flex flex-wrap items-center gap-2">
+      <Toolbar
+        aria-label="Table controls"
+        className="mb-2"
+        left={
+          <>
         {enableQuickFilter && (
           <input
             type="search"
@@ -1012,7 +1016,10 @@ export function DataTable<T>({
             <span className="sr-only">{loadingLabel}</span>
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1.5">
+          </>
+        }
+        right={
+          <>
           {toolbarRight}
           {onRefresh && (
             <Button
@@ -1072,9 +1079,10 @@ export function DataTable<T>({
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               <span className="hidden sm:inline">Reset</span>
             </Button>
-          )}
-        </div>
-      </div>
+        )}
+          </>
+        }
+      />
 
       {filterBuilder && <div className="mb-2">{filterBuilder}</div>}
 
@@ -1092,7 +1100,7 @@ export function DataTable<T>({
             aria-label="Bulk actions"
           >
             <span className="tabular-nums">{selected.size} selected</span>
-            <span className="h-4 w-px bg-border/20" aria-hidden="true" />
+            <span className="h-4 w-px bg-border" aria-hidden="true" />
             {bulkActions.map((action) => {
               const Icon = action.icon
               return (
@@ -1136,7 +1144,7 @@ export function DataTable<T>({
       >
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b border-border text-muted-foreground">
+            <tr className="border-b border-border bg-muted/50 text-muted-foreground">
               {selectable && (
                 <th
                   scope="col"

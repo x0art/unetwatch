@@ -239,8 +239,6 @@ function AppRoutes() {
         currentView={view === "report-host" ? "host" : view === "report-url" ? "url" : view}
         onNavigate={handleNavigate}
         onLogout={handleLogout}
-        title="uNetWatch"
-        description="Pattern console"
         actions={
           <>
             <AddJaillistButton onOpen={() => setJaillistDialogOpen(true)} />

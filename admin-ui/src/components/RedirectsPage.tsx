@@ -26,6 +26,7 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   ConfirmDialog,
   CopyUrlButton,
   Dialog,
@@ -654,7 +655,7 @@ export function RedirectsPage() {
   const columns: DataTableColumn<TrackedUrl>[] = REDIRECTS_COLUMNS
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
       <PageHeader
         title="Redirect Tracker"
@@ -732,12 +733,9 @@ export function RedirectsPage() {
           </div>
         ) : graphError ? (
           <div className="p-4">
-            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-              <span className="flex-1">{graphError}</span>
-              <Button variant="outline" size="sm" onClick={() => loadGraph()}>
-                Retry
-              </Button>
-            </div>
+            <Callout action={<Button variant="outline" size="sm" onClick={() => loadGraph()}>Retry</Button>}>
+              {graphError}
+            </Callout>
           </div>
         ) : graphEmpty ? (
           <EmptyState
@@ -826,12 +824,9 @@ export function RedirectsPage() {
         )}
 
         {tableError ? (
-          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-            <span className="flex-1">{tableError}</span>
-            <Button variant="outline" size="sm" onClick={() => reload()}>
-              Retry
-            </Button>
-          </div>
+          <Callout action={<Button variant="outline" size="sm" onClick={() => reload()}>Retry</Button>}>
+            {tableError}
+          </Callout>
         ) : tableEmpty ? (
           <EmptyState
             icon={SearchX}
@@ -931,12 +926,9 @@ export function RedirectsPage() {
             <Skeleton className="h-40 w-full" />
           </div>
         ) : historyError ? (
-          <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-            <span className="flex-1">{historyError}</span>
-            <Button variant="outline" size="sm" onClick={() => historyTarget && openHistory(historyTarget)}>
-              Retry
-            </Button>
-          </div>
+          <Callout action={<Button variant="outline" size="sm" onClick={() => historyTarget && openHistory(historyTarget)}>Retry</Button>}>
+            {historyError}
+          </Callout>
         ) : history && history.edges.length > 0 ? (
           <div className="space-y-2">
             {history.edges.map((edge, i) => (

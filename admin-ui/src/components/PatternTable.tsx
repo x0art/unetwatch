@@ -10,6 +10,7 @@ import {
   Button,
   Input,
   Badge,
+  Callout,
   Dialog,
   Select,
   Label,
@@ -336,7 +337,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
 
   /* ── Render ─────────────────────────────────────────────────────── */
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* ── Header + Toolbar ── */}
       <PageHeader
         title="Patterns"
@@ -370,12 +371,9 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
 
       {/* ── Error banner ── */}
       {error && (
-        <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
-          <span className="flex-1">{error}</span>
-          <Button variant="outline" size="sm" onClick={fetchPatterns}>
-            Retry
-          </Button>
-        </div>
+        <Callout action={<Button variant="outline" size="sm" onClick={fetchPatterns}>Retry</Button>}>
+          {error}
+        </Callout>
       )}
 
       {/* Refetch with rows already on screen: keep them mounted and report the
