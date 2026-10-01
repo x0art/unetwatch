@@ -27,6 +27,9 @@ export function JaillistPage() {
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // A refetch keeps the jail list mounted and reports itself quietly; a
+  // refetch ERROR keeps it too, so a transient failure never blanks the feed.
+  const haveEntries = ips.length > 0
   const [addValue, setAddValue] = useState("")
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -292,7 +295,7 @@ export function JaillistPage() {
         </div>
       </div>
 
-      {error ? (
+      {error && !haveEntries ? (
         <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
           <span className="flex-1">{error}</span>
           <Button variant="outline" size="sm" onClick={load}>
@@ -301,6 +304,16 @@ export function JaillistPage() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* A refetch failure with entries already on screen still shows the
+              error, but never hides the feed the operator can still act on. */}
+          {error && haveEntries && (
+            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+              <span className="flex-1">Refresh failed — {error}</span>
+              <Button variant="outline" size="sm" onClick={load}>
+                Retry
+              </Button>
+            </div>
+          )}
           <FeedCard
             title="Jailed client IPs"
             path="/api/jaillist/ips.txt"
@@ -309,6 +322,7 @@ export function JaillistPage() {
             totalEntries={ips.length}
             searchActive={!!q}
             loading={loading}
+            refreshing={loading && haveEntries}
             onRefresh={load}
             onCopy={() => copy(ips.join("\n"), "IPs")}
             onDelete={requestDelete}

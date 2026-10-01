@@ -64,6 +64,8 @@ interface FeedCardProps {
   totalEntries?: number
   searchActive?: boolean
   loading: boolean
+  /** A refetch with entries already loaded: keep the list and show a quiet cue. */
+  refreshing?: boolean
   onRefresh: () => void
   onCopy: () => void
   onDelete: (kind: "url" | "ip", value: string) => void
@@ -100,6 +102,7 @@ export function FeedCard({
   totalEntries,
   searchActive,
   loading,
+  refreshing = false,
   onRefresh,
   onCopy,
   onDelete,
@@ -205,8 +208,22 @@ export function FeedCard({
           </div>
         ) : null}
 
-        {loading ? (
-          <Skeleton className="h-40 w-full" />
+        {/* A refetch with entries already on screen: keep the list mounted and
+            say so. The skeleton above is reserved for the first read. */}
+        {refreshing && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <LoadingIcon className="h-3.5 w-3.5" />
+            Refreshing feed…
+          </span>
+        )}
+
+        {loading && entries.length === 0 ? (
+          <div className="space-y-3" aria-busy="true">
+            <Skeleton className="h-40 w-full" />
+          </div>
         ) : entries.length > 0 ? (
           <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border bg-muted/30 shadow-sm">
             {entries.map((value) => {
@@ -284,6 +301,10 @@ export function BlacklistPage() {
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // True once the first feed read finished. A later refetch keeps the lists
+  // mounted and reports itself quietly; a refetch ERROR keeps them too, so a
+  // transient failure never blanks a populated feed.
+  const haveEntries = urls.length > 0 || ips.length > 0
   const [addValue, setAddValue] = useState("")
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -570,7 +591,7 @@ export function BlacklistPage() {
         </div>
       </div>
 
-      {error ? (
+      {error && !haveEntries ? (
         <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
           <span className="flex-1">{error}</span>
           <Button variant="outline" size="sm" onClick={load}>
@@ -579,6 +600,16 @@ export function BlacklistPage() {
         </div>
       ) : (
         <div className="space-y-4">
+          {/* A refetch failure with feeds already on screen still shows the
+              error, but never hides the data the operator can still act on. */}
+          {error && haveEntries && (
+            <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
+              <span className="flex-1">Refresh failed — {error}</span>
+              <Button variant="outline" size="sm" onClick={load}>
+                Retry
+              </Button>
+            </div>
+          )}
           <FeedCard
             title="URL blacklist"
             path="/api/blacklist/urls.txt"
@@ -587,6 +618,7 @@ export function BlacklistPage() {
             totalEntries={urls.length}
             searchActive={!!q}
             loading={loading}
+            refreshing={loading && haveEntries}
             onRefresh={load}
             note="EDL form — each host terminated with a trailing slash"
             onCopy={() => copy(urls.map(edlDisplay).join("\n"), "URLs")}
@@ -611,6 +643,7 @@ export function BlacklistPage() {
             totalEntries={ips.length}
             searchActive={!!q}
             loading={loading}
+            refreshing={loading && haveEntries}
             onRefresh={load}
             onCopy={() => copy(ips.join("\n"), "IPs")}
             onDelete={requestDelete}

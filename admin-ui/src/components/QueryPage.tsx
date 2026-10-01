@@ -49,6 +49,7 @@ import { DataTable, type ColumnFilterValue, type DataTableColumn, isActiveFilter
 import { ListActionCell } from "./ListActionDropdown"
 import { SankeyDiagram } from "./SankeyDiagram"
 import { EventInspectorSidebar } from "./EventInspectorSidebar"
+import { LoadingIndicator, useElapsed } from "./loading"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -594,6 +595,13 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   const [result, setResult] = useState<QueryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Anti-flicker anchor: the epoch-ms the current query left for ES. Reset on
+  // each new run so the elapsed figure never inherits a previous query's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  // True only while the very first query is in flight — drives the skeleton.
+  // A refetch keeps the populated panels mounted and shows the quiet banner.
+  const [firstLoad, setFirstLoad] = useState(true)
+  const { elapsed: queryElapsed } = useElapsed(loading)
   const [drawerRow, setDrawerRow] = useState<LogRow | null>(null)
   // Sankey adaptive controls — Focus + Detail (Track A)
   const [sankeyTopN, setSankeyTopN] = useState<10 | 20 | 50>(20)
@@ -636,6 +644,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     abortRef.current = controller
     let cancelled = false
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     setError(null)
     const q = debouncedEsSearch.trim() || undefined
     runQuery(timeRangeToMinutesLive(timeRange), {
@@ -661,7 +670,10 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          setFirstLoad(false)
+        }
       })
     return () => {
       cancelled = true
@@ -870,6 +882,18 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             Flagged only
           </button>
         </div>
+        {/* Quiet header status: what's happening and for how long, without a
+            toast or a layout shift. The banner below carries the announced
+            sentence; this mirror stays aria-hidden. */}
+        {loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <LoadingIcon className="h-3.5 w-3.5" />
+            Querying Elasticsearch · <span className="font-mono tabular-nums">{queryElapsed}</span>
+          </span>
+        )}
         <Button onClick={handleRun} disabled={loading}>
           {loading ? <LoadingIcon /> : <Play className="h-4 w-4" />}
           {loading ? "Running…" : "Run"}
@@ -926,28 +950,56 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
         />
       </div>
 
-      {loading ? (
-        <div className="space-y-3" aria-busy="true">
-          <Skeleton className="h-40 w-full" />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Skeleton className="h-56 w-full" />
-            <Skeleton className="h-56 w-full" />
-            <Skeleton className="h-56 w-full" />
-          </div>
-        </div>
-      ) : error ? (
-        <EmptyState
-          icon={SearchX}
-          title="Query failed"
-          description={error}
-          action={
-            <Button variant="outline" onClick={handleRun}>
-              Try again
-            </Button>
-          }
-        />
-      ) : !result ? null : (
+      {/* A query can run 10-60s against ES. An elapsed figure says more than a
+          bare skeleton, and a refetch must never blank the panels the operator
+          is already reading — so the skeleton is reserved for the first load;
+          later runs keep the content mounted under a quiet banner. */}
+      {firstLoad ? (
         <>
+          <LoadingIndicator
+            label="Querying Elasticsearch"
+            active={loading}
+            startedAt={loadingStartedAt}
+            className="max-w-md"
+          />
+          {loading && (
+            <div className="space-y-3" aria-busy="true">
+              <Skeleton className="h-40 w-full" />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                <Skeleton className="h-56 w-full" />
+                <Skeleton className="h-56 w-full" />
+                <Skeleton className="h-56 w-full" />
+              </div>
+            </div>
+          )}
+        </>
+      ) : !result ? (
+        /* The request has finished and there is nothing to show. A failure is a
+           failure, never "no results"; a success with no result object stays
+           blank rather than lying with an empty state. */
+        error ? (
+          <EmptyState
+            icon={SearchX}
+            title="Query failed"
+            description={error}
+            action={
+              <Button variant="outline" onClick={handleRun}>
+                Try again
+              </Button>
+            }
+          />
+        ) : null
+      ) : (
+        <div className="space-y-6" aria-busy={loading}>
+          {/* Refetch in flight — everything below stays mounted. The elapsed
+              figure is the honest part: ES reads here routinely run 10-60s. */}
+          {loading && (
+            <LoadingIndicator
+              label="Refreshing query"
+              startedAt={loadingStartedAt}
+              className="max-w-md"
+            />
+          )}
           {/* Timeline chart */}
           <Panel title="Requests over time" icon={Network}>
             {result.timeline.length > 0 ? (
@@ -1186,7 +1238,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
               ariaLabel="Query results"
             />
           </Panel>
-        </>
+        </div>
       )}
 
       {/* Deep row inspection (was Live Monitor) — click a row to open. */}

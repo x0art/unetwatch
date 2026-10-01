@@ -24,6 +24,9 @@ import {
 import { cn } from "../lib/utils"
 import { Button, EmptyState, Pagination, Skeleton, useToast } from "./ui"
 import { EASE, Stagger, StaggerItem } from "./motion"
+import { ProgressHint } from "./loading/ProgressHint"
+import { useDelayedVisible, LOADER_DELAY_MS, LOADER_MIN_VISIBLE_MS } from "./loading/useDelayedVisible"
+import { useElapsed } from "./loading/useElapsed"
 import {
   clearPersisted,
   isEnumFilter,
@@ -215,6 +218,17 @@ interface DataTableProps<T> {
   data: T[]
   rowId: (row: T) => string | number
   loading?: boolean
+  /** Epoch-ms anchor for the in-flight read, so the toolbar hint can show a
+   * truthful elapsed figure. Optional; see `useElapsed`. */
+  loadingStartedAt?: number
+  /** Real download fraction, when the parent can supply one. A determinate
+   * bar renders only when `total` is present; otherwise the hint shows an
+   * indeterminate track and a plain count — never a fabricated percentage. */
+  loadingProgress?: { loaded: number; total?: number }
+  /** Noun for the progress line, e.g. "events" / "findings". Default "rows". */
+  loadingNoun?: string
+  /** What the toolbar hint announces it is waiting on. Default "Loading". */
+  loadingLabel?: string
   skeletonRows?: number
   /** When true, a checkbox column + bulk action bar are rendered. */
   selectable?: boolean
@@ -397,6 +411,10 @@ export function DataTable<T>({
   rowId,
   loading = false,
   skeletonRows = 8,
+  loadingStartedAt,
+  loadingProgress,
+  loadingNoun = "rows",
+  loadingLabel = "Loading",
   selectable = false,
   bulkActions = [],
   busy = false,
@@ -940,6 +958,21 @@ export function DataTable<T>({
   const anyTagged = useMemo(() => columns.some((c) => c.slot !== undefined), [columns])
   const colSpan = visibleColumns.length + (selectable ? 1 : 0)
 
+  /* ── Loading treatment ──────────────────────────────────────────────
+   * A REFETCH while rows already exist must not blow the rows away: keeping
+   * the last good data on screen is the single biggest perceived-performance
+   * win here. We mark the region aria-busy, dim it quietly, and surface the
+   * toolbar hint. Full skeleton rows are reserved for the genuinely-empty
+   * first load (`data.length === 0`), where there is nothing to keep. */
+  const showToolbarHint = useDelayedVisible(loading, {
+    delayMs: LOADER_DELAY_MS,
+    minVisibleMs: LOADER_MIN_VISIBLE_MS,
+  })
+  const { elapsed } = useElapsed(loading, loadingStartedAt)
+  const dimInFlight = loading && !showToolbarHint
+  // The dim is a quiet, opacity-only fade — never a blur or a colour change.
+  const inFlightClass = loading && data.length > 0 ? (dimInFlight ? "opacity-60" : "opacity-50") : ""
+
   return (
     <div className={className}>
       {/* Toolbar (§5a) — always rendered so density is always available. */}
@@ -966,6 +999,19 @@ export function DataTable<T>({
             else chipAnchors.current.delete(id)
           }}
         />
+        {/* Toolbar-level progress hint — the shared, honest "still working"
+            surface. Anti-flickered, and shown only once a read is actually
+            slow enough to warrant it. aria-live is NOT used here: the
+            DataTable's own aria-busy on the region is the announcement. */}
+        {showToolbarHint && (
+          <span className="animate-in inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono text-[11px] tabular-nums" aria-hidden="true">
+              {elapsed}
+            </span>
+            <ProgressHint progress={loadingProgress} noun={loadingNoun} />
+            <span className="sr-only">{loadingLabel}</span>
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-1.5">
           {toolbarRight}
           {onRefresh && (
@@ -975,10 +1021,18 @@ export function DataTable<T>({
               className="h-8 gap-1.5 px-2.5"
               disabled={loading}
               onClick={onRefresh}
-              aria-label="Refresh"
+              aria-label={loading ? "Refreshing" : "Refresh"}
+              aria-busy={loading || undefined}
             >
-              <RotateCcw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
-              <span className="hidden sm:inline">Refresh</span>
+              {/* The spin is a CSS animation, so index.css:170 (data-paused) and
+                  index.css:173 (prefers-reduced-motion) already cover it. The
+                  elapsed figure in the toolbar hint carries the information
+                  for a reduced-motion user. */}
+              <RotateCcw
+                className={cn("h-3.5 w-3.5", loading && "animate-spin")}
+                aria-hidden="true"
+              />
+              <span className="hidden sm:inline">{loading ? "Refreshing" : "Refresh"}</span>
             </Button>
           )}
           <DensityToggle density={density} onChange={columnState.setDensity} />
@@ -1068,9 +1122,17 @@ export function DataTable<T>({
         )}
       </AnimatePresence>
 
+      {/* `aria-busy` + a quiet opacity fade while a REFETCH is in flight
+          (rows still present). Opacity only — no blur, no layout shift. When
+          there is no data yet the fade is skipped and skeleton rows take
+          over below instead. Never `backdrop-blur` a scrolling container. */}
       <div
         ref={scrollRef}
-        className="overflow-x-auto rounded-md border border-border bg-card shadow-none"
+        aria-busy={loading || undefined}
+        className={cn(
+          "overflow-x-auto rounded-md border border-border bg-card shadow-none transition-opacity duration-200",
+          inFlightClass,
+        )}
       >
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
@@ -1148,7 +1210,10 @@ export function DataTable<T>({
               })}
             </tr>
           </thead>
-          {loading ? (
+          {/* Skeleton only when there is genuinely nothing to keep. A refetch
+              over existing rows falls through to the live rows below, which
+              the region above dims via `aria-busy` + opacity. */}
+          {loading && data.length === 0 ? (
             <tbody>
               {Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i} className="border-b border-border">

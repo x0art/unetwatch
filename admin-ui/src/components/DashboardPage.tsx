@@ -24,6 +24,7 @@ import {
 import { Button, EmptyState, Panel, RefreshIntervalSelect, Skeleton, StatCard, useToast } from "./ui"
 import { CountdownRing } from "./CountdownRing"
 import { useAutoRefresh, usePageVisible } from "../lib/utils"
+import { LoadingIndicator } from "./loading"
 import { type View } from "./Sidebar"
 
 interface DashboardPageProps {
@@ -93,7 +94,7 @@ export function DashboardPage({
   const [recentFindings, setRecentFindings] = useState<Finding[]>([])
   const [recentLoading, setRecentLoading] = useState(true)
   const [recentError, setRecentError] = useState<string | null>(null)
-
+  const [recentLoadingStartedAt, setRecentLoadingStartedAt] = useState<number | undefined>(undefined)
   const fetchBlacklistCount = useCallback(() => {
     let cancelled = false
     setBlacklistError(null)
@@ -138,6 +139,7 @@ export function DashboardPage({
     let cancelled = false
     setRecentLoading(true)
     setRecentError(null)
+    setRecentLoadingStartedAt(Date.now())
     getFindings({ limit: 5 })
       .then((data) => {
         if (!cancelled) setRecentFindings(data.items)
@@ -150,7 +152,9 @@ export function DashboardPage({
         }
       })
       .finally(() => {
-        if (!cancelled) setRecentLoading(false)
+        if (!cancelled) {
+          setRecentLoading(false)
+        }
       })
     return () => { cancelled = true }
   }, [toast])
@@ -298,10 +302,21 @@ export function DashboardPage({
       {/* ── Recent findings ── */}
       <Panel title="Recent findings" icon={SearchX} action={<Button variant="outline" size="sm" onClick={() => onNavigate("findings")}>View all <ArrowRight className="h-3.5 w-3.5" /></Button>}>
           <div className="space-y-2">
-            {recentLoading ? (
-              <Skeleton className="h-32 w-full" />
+          <LoadingIndicator
+            label="Loading recent findings"
+            active={recentLoading}
+            startedAt={recentLoadingStartedAt}
+            className="max-w-md"
+          />
+            {/* First load blanks to a skeleton; later reads keep the table mounted
+                and show the quiet banner so the operator sees the read is still
+                running. */}
+            {recentLoading && recentFindings.length === 0 ? (
+              <div className="space-y-3" aria-busy="true">
+                <Skeleton className="h-32 w-full" />
+              </div>
             ) : recentFindings.length > 0 ? (
-              <div className="overflow-hidden rounded-md border border-border bg-card">
+              <div aria-busy={recentLoading} className="overflow-hidden rounded-md border border-border bg-card">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border bg-muted/50 text-muted-foreground">

@@ -30,6 +30,7 @@ import {
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { TrendCharts, type TrendPoint } from "./TrendCharts"
 import { formatInstant, useAutoRefresh } from "../lib/utils"
+import { LoadingIndicator, useElapsed } from "./loading"
 import { useFilter } from "../contexts/FilterContext"
 import { useZone } from "../contexts/ZoneContext"
 import {
@@ -149,10 +150,20 @@ export function AnalyticsPage({
   const [rawPage, setRawPage] = useState(0)
   const [rawUniqueDomains, setRawUniqueDomains] = useState(false)
   const [rawError, setRawError] = useState<string | null>(null)
+  // Epoch-ms the current analytics aggregate left for ES; reset per run so the
+  // elapsed figure never inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  // True once the first summary has painted. A later refetch (range/compare
+  // change or the auto-refresh tick) keeps every panel mounted and lights the
+  // quiet banner instead of re-skeletoning.
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const { elapsed } = useElapsed(loading)
+  const refreshing = loading && hasLoaded
   const rawPageSize = 50
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     try {
       const [s, b, e, td, tc] = await Promise.all([
         getAnalyticsSummary({ range, compare }),
@@ -173,6 +184,7 @@ export function AnalyticsPage({
       toast({ title: "Analytics load failed", description: msg, variant: "error" })
     } finally {
       setLoading(false)
+      setHasLoaded(true)
     }
   }, [range, compare, toast])
 
@@ -615,6 +627,17 @@ export function AnalyticsPage({
         <span className="text-xs font-medium text-muted-foreground">
           {rangeLabel(range)} · {summary?.source === "es" ? "live ES" : "findings table"}
         </span>
+        {/* The auto-refresh tick is silent by design, so surface it beside the
+            range label — the banner below carries the announced sentence. */}
+        {loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <Activity className="h-3.5 w-3.5 animate-pulse" />
+            Loading analytics · <span className="font-mono tabular-nums">{elapsed}</span>
+          </span>
+        )}
         <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF">
           <Printer className="h-4 w-4" aria-hidden="true" />
           Export PDF
@@ -650,6 +673,16 @@ export function AnalyticsPage({
           <span>{error}</span>
           <Button variant="outline" size="sm" onClick={() => void fetchAll()}>Retry</Button>
         </div>
+      )}
+
+      {/* Refetch with panels already on screen: keep them mounted, report the
+          read out loud. First load still shows the skeleton grid below. */}
+      {refreshing && (
+        <LoadingIndicator
+          label="Refreshing analytics aggregates"
+          startedAt={loadingStartedAt}
+          className="max-w-md"
+        />
       )}
 
       {/* ── High-level usage metrics ───────────────────────────────── */}
@@ -796,7 +829,8 @@ export function AnalyticsPage({
             columns={rawColumns}
             data={rawUniqueDomains ? dedupeByDomain(raw) : raw}
             rowId={(r) => String(r.id)}
-            loading={rawLoading}
+            loading={rawLoading && raw.length === 0}
+            busy={rawLoading}
             total={rawTotal}
             page={rawPage}
             pageSize={rawPageSize}

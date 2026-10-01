@@ -41,6 +41,7 @@ import {
 import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { useAutoRefresh, useDebounce } from "../lib/utils"
+import { LoadingIndicator, useElapsed } from "./loading"
 import { useFilter } from "../contexts/FilterContext"
 
 const DEFAULT_PAGE_SIZE = 25
@@ -327,6 +328,14 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   // empty table doesn't re-skeleton on every interval tick.
   const loadedRef = useRef(false)
 
+  // Epoch-ms the current getFindings read left for the API. Reset each run so
+  // the elapsed figure never inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  // True while any getFindings read is in flight — including the silent
+  // auto-refresh, which must still be visible to the operator.
+  const [refreshing, setRefreshing] = useState(false)
+  const { elapsed } = useElapsed(loading || refreshing)
+
   // Allow the Graph view to deep-link into findings filtered by an IP/URL.
   // `search` is intentionally excluded from deps: including it would reset
   // the user's typing back to the initial filter on every keystroke.
@@ -340,7 +349,12 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
 
   const refetch = useCallback(() => {
     let cancelled = false
+    // First load blanks to a skeleton; every later run (interval tick, filter
+    // change, page change) keeps the rows on screen and only lights the quiet
+    // "Refreshing" cue, so a populated table is never blanked.
     if (!loadedRef.current) setLoading(true)
+    setRefreshing(true)
+    setLoadingStartedAt(Date.now())
     setError(null)
     getFindings({
       search: debouncedSearch || undefined,
@@ -363,6 +377,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         if (!cancelled) {
           loadedRef.current = true
           setLoading(false)
+          setRefreshing(false)
         }
       })
     return () => {
@@ -616,6 +631,18 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
           <Eraser className="h-4 w-4" />
           Clear all
         </Button>
+        {/* The auto-refresh tick is silent by design, so surface it: a quiet,
+            non-destructive "what + how long" cue beside the controls. The
+            banner below owns the announced sentence; this is its mirror. */}
+        {refreshing && !loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
+            Refreshing findings · <span className="font-mono tabular-nums">{elapsed}</span>
+          </span>
+        )}
         <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
         <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
           <RefreshCcw className="h-4 w-4" />
@@ -639,6 +666,19 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
           </Button>
         </div>
       )}
+
+      {/* Refetch with rows already on screen: keep them mounted, and report the
+          read out loud. Reserved for the non-first-load case so the banner never
+          competes with the DataTable skeleton. */}
+      {refreshing && (
+        <LoadingIndicator
+          label="Refreshing findings"
+          startedAt={loadingStartedAt}
+          className="max-w-md"
+        />
+      )}
+
+      <div aria-busy={refreshing}>
 
       <Panel
   title="Findings"
@@ -686,6 +726,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         ariaLabel="Findings"
       />
 </Panel>
+      </div>
 
       <ConfirmDialog
         open={!!deleteTarget}

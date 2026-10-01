@@ -41,6 +41,7 @@ import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./D
 import { ListActionCell } from "./ListActionDropdown"
 import { NetworkGraphDiagram, type NetworkNode, type NetworkLink } from "./NetworkGraphDiagram"
 import { cn, useDebounce } from "../lib/utils"
+import { LoadingIndicator, useElapsed } from "./loading"
 
 const DEFAULT_PAGE_SIZE = 25
 
@@ -327,12 +328,17 @@ export function RedirectsPage() {
   const [history, setHistory] = useState<UrlRedirectHistory | null>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
+  // Epoch-ms the current tracked-URL read left for the API; reset per run so
+  // the elapsed figure never inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  const { elapsed } = useElapsed(loading)
 
   const debouncedSearch = useDebounce(search, 300)
 
   const loadTable = useCallback(() => {
     let cancelled = false
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     setTableError(null)
     listTrackedUrls({
       search: debouncedSearch || undefined,
@@ -667,6 +673,18 @@ export function RedirectsPage() {
             aria-label="Add URL to redirect tracking"
           />
         </div>
+        {/* The "Check now" poll and the auto-reload are background work; name
+            them here and count the seconds. The banner below is the announced
+            mirror, so this stays aria-hidden. */}
+        {loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
+            Loading tracked URLs · <span className="font-mono tabular-nums">{elapsed}</span>
+          </span>
+        )}
         <Button onClick={handleAdd} disabled={busy || !addUrl.trim()}>
           Track URL
         </Button>
@@ -706,7 +724,9 @@ export function RedirectsPage() {
           )}
         </div>
 
-        {graphLoading ? (
+        {/* Only the first graph read blanks to a skeleton; a reload keeps the
+            loaded diagram mounted while `graphLoading` re-fetches it. */}
+        {graphLoading && !graph ? (
           <div className="space-y-3 p-4" aria-busy="true">
             <Skeleton className="h-64 w-full" />
           </div>
@@ -795,6 +815,16 @@ export function RedirectsPage() {
           />
         </div>
 
+        {/* Refetch with rows already on screen: keep them mounted and report
+            the read out loud. First load still shows the DataTable skeleton. */}
+        {loading && items.length > 0 && (
+          <LoadingIndicator
+            label="Loading tracked URLs"
+            startedAt={loadingStartedAt}
+            className="mb-3 max-w-md"
+          />
+        )}
+
         {tableError ? (
           <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
             <span className="flex-1">{tableError}</span>
@@ -817,9 +847,9 @@ export function RedirectsPage() {
             columns={columns}
             data={items}
             rowId={REDIRECTS_ROW_ID}
-            loading={loading}
+            loading={loading && items.length === 0}
             selectable
-            busy={busy}
+            busy={busy || loading}
             bulkActions={[
               {
                 label: "Check",

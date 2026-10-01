@@ -39,6 +39,7 @@ import {
   type ClientReport,
   type Finding,
 } from "../api"
+import { LoadingIndicator, useElapsed } from "./loading"
 import { SankeyDiagram } from "./SankeyDiagram"
 import {
   getDestDomain,
@@ -358,6 +359,14 @@ export function HostInspectorPage({
   const [rawError, setRawError] = useState<string | null>(null)
   const rawPageSize = 50
 
+  // Epoch-ms anchors for the two expensive ES reads on this page — the host
+  // profile lookup and the per-host log/analytics sections. Reset per run so
+  // neither elapsed figure inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  const [sectionsStartedAt, setSectionsStartedAt] = useState<number | undefined>(undefined)
+  useElapsed(loading)
+  useElapsed(sectionsLoading)
+
   // Jailed client IPs for the header badge — best-effort, fail-closed to no
   // badge (mirrors the Query/Findings per-row pattern).
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
@@ -401,6 +410,7 @@ export function HostInspectorPage({
     if (!host || loading) return
     if (hSource === "findings") {
       setReportLoading(true)
+      setLoadingStartedAt(Date.now())
       void getClientReport((host as unknown as { primaryIp: string }).primaryIp || target)
         .then((data) => {
           setReport(data)
@@ -421,6 +431,7 @@ export function HostInspectorPage({
     if (!host || loading) return
     if (hSource === "live" && !sections) {
       setSectionsLoading(true)
+      setSectionsStartedAt(Date.now())
       const ip = (host as unknown as { primaryIp: string }).primaryIp || target
       void fetchHostSections(ip, timeRange, "live")
         .then((data) => setSections(data))
@@ -458,6 +469,7 @@ export function HostInspectorPage({
   // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
   const fetchSections = useCallback(async (clean: string) => {
     setSectionsLoading(true)
+    setSectionsStartedAt(Date.now())
     setSectionsError(null)
     try {
       const data = await fetchHostSections(clean, timeRange, hSource)
@@ -479,6 +491,7 @@ export function HostInspectorPage({
       return
     }
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     setError(null)
     setHasSearched(true)
     setHost(null)
@@ -1037,11 +1050,22 @@ export function HostInspectorPage({
         </div>
       </div>
 
+      {/* A lookup clears the previous host first, so this is always a genuine
+          first load — the elapsed figure is the honest part: live ES reads on
+          a wide window routinely run 10-60s. */}
       {loading && (
-        <div className="space-y-3">
-          <Skeleton className="h-40 w-full" />
-          <Skeleton className="h-24 w-full" />
-        </div>
+        <>
+          <LoadingIndicator
+            label="Resolving host profile from Elasticsearch"
+            active={loading}
+            startedAt={loadingStartedAt}
+            className="max-w-md"
+          />
+          <div className="space-y-3" aria-busy="true">
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        </>
       )}
 
       {!loading && error && (
@@ -1072,13 +1096,23 @@ export function HostInspectorPage({
               <Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target) }}>Retry</Button>
             </div>
           )}
+          {/* Refetch (time-range change / Retry) with sections already loaded:
+              keep every panel below mounted and report the read out loud. The
+              per-panel skeletons only appear on the first sections load. */}
+          {sectionsLoading && sections && (
+            <LoadingIndicator
+              label="Refreshing host sections"
+              startedAt={sectionsStartedAt}
+              className="max-w-md"
+            />
+          )}
           {/* 1) Visual Traffic Timeline & Anomaly Heatmap */}
           <Panel
             title="Visual Traffic Timeline & Anomaly Heatmap"
             icon={Activity}
             description={sections ? `${sections.logTotal.toLocaleString()} req · ${windowLabel(sections.window)} window` : "—"}
           >
-            {sectionsLoading ? (
+            {sectionsLoading && !sections ? (
               <Skeleton className="h-60 w-full" />
             ) : sections && sections.timeline.length > 0 ? (
               <TrafficTimeline points={sections.timeline} anomalyAnnotation={sections.anomaly} />
@@ -1088,10 +1122,6 @@ export function HostInspectorPage({
               </p>
             )}
           </Panel>
-
-          {/* Domain coverage — how many of this host's rows a block pattern
-              caught BY DESTINATION DOMAIN (a subset, never total traffic).
-              "—" when an older backend does not report the figure. */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <StatCard
               icon={Globe}
@@ -1103,7 +1133,7 @@ export function HostInspectorPage({
           </div>
 
           {/* 2) Top Destinations & Rule Matches */}
-          {sectionsLoading ? (
+          {sectionsLoading && !sections ? (
             <Skeleton className="h-64 w-full" />
           ) : sections ? (
             <TopDestinations
@@ -1119,7 +1149,7 @@ export function HostInspectorPage({
             icon={Link2}
             description="Click a URL to investigate who else reached it"
           >
-            {sectionsLoading ? (
+            {sectionsLoading && !sections ? (
               <Skeleton className="h-48 w-full" />
             ) : sections && sections.topUrls.length > 0 ? (
               <div className="divide-y divide-border">
@@ -1153,7 +1183,7 @@ export function HostInspectorPage({
             icon={Network}
             description="Pattern → this client → Domain → destination · hover traces a path · click isolates it"
           >
-            {sectionsLoading ? (
+            {sectionsLoading && !sections ? (
               <Skeleton className="h-64 w-full" />
             ) : behaviourFlow && behaviourFlow.links.length > 0 ? (
               <>
@@ -1203,7 +1233,8 @@ export function HostInspectorPage({
               columns={logColumns}
               data={pageRows}
               rowId={getRowId}
-              loading={sectionsLoading}
+              loading={sectionsLoading && pageRows.length === 0}
+              busy={sectionsLoading}
               empty={{
                 icon: SearchX,
                 title: "No log entries",
@@ -1281,7 +1312,7 @@ export function HostInspectorPage({
                   <SearchInput placeholder="Filter (URL)..." value={rawSearch} onChange={(v) => { setRawSearch(v); setRawPage(0) }} className="w-64" aria-label="Filter raw findings" />
                   <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">findings table · whitelist-excluded</span>
                 </div>
-                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} viewKey="host-raw" loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Raw findings" />
+                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} viewKey="host-raw" loading={rawLoading && raw.length === 0} busy={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window", description: "Try a broader date range or clear the filter.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Raw findings" />
               </Panel>
             </>
           ) : null}

@@ -325,6 +325,13 @@ export function Skeleton({ className }: { className?: string }) {
   )
 }
 
+/* ── LoadingIndicator — honest elapsed-time feedback ─────────────
+ * Re-exported here so every consumer can reach it from the same module as
+ * the rest of the primitives. Additive only: no existing export moves or
+ * changes shape. See `components/loading/index.tsx` for the state table. */
+export { LoadingIndicator } from "./loading"
+export type { LoadingIndicatorProps, LoadingProgress } from "./loading"
+
 /* ── Dialog — soft slab ───────────────────────────────────────── */
 
 export function Dialog({

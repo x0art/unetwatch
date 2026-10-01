@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import {
   type Pattern,
   listPatterns,
@@ -20,6 +20,7 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { useDebounce } from "../lib/utils"
+import { LoadingIndicator, useElapsed } from "./loading"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
 import {
   Upload,
@@ -144,6 +145,13 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
   const [sortBy, setSortBy] = useState<SortKey | null>("id")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [busy, setBusy] = useState(false)
+  // Epoch-ms the current listPatterns read left for the API; reset per run so
+  // the elapsed figure never inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  // Only the first read blanks to a skeleton. A search, filter, sort or page
+  // change keeps the populated rows mounted and surfaces the quiet banner.
+  const loadedRef = useRef(false)
+  const { elapsed } = useElapsed(loading)
 
   // ── Edit dialog ──
   const [editOpen, setEditOpen] = useState(false)
@@ -177,6 +185,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
   /* ── Data fetching ──────────────────────────────────────────────── */
   const fetchPatterns = useCallback(async () => {
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     setError(null)
     try {
       const data = await listPatterns({
@@ -191,6 +200,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
     } catch (e) {
       setError((e as Error).message)
     } finally {
+      loadedRef.current = true
       setLoading(false)
     }
   }, [debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
@@ -345,6 +355,17 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
           <Upload className="h-4 w-4 mr-1.5" />
           Bulk import
         </Button>
+        {/* Quiet "what + how long" cue — the banner below carries the announced
+            sentence, so this mirror stays aria-hidden. */}
+        {loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading patterns · <span className="font-mono tabular-nums">{elapsed}</span>
+          </span>
+        )}
       </PageHeader>
 
       {/* ── Error banner ── */}
@@ -357,14 +378,24 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
         </div>
       )}
 
+      {/* Refetch with rows already on screen: keep them mounted and report the
+          read out loud. First load still shows the DataTable skeleton. */}
+      {loading && loadedRef.current && patterns.length > 0 && (
+        <LoadingIndicator
+          label="Loading patterns"
+          startedAt={loadingStartedAt}
+          className="max-w-md"
+        />
+      )}
+
       {/* ── Table ── */}
       <DataTable
         columns={columns}
         data={patterns}
         rowId={PATTERNS_ROW_ID}
-        loading={loading}
+        loading={loading && patterns.length === 0}
         selectable
-        busy={busy}
+        busy={busy || loading}
         bulkActions={[
           {
             label: "Delete",

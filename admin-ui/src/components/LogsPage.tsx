@@ -41,6 +41,7 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { cn, formatInstant, useDebounce } from "../lib/utils"
+import { LoadingIndicator, useElapsed } from "./loading"
 import { useZone } from "../contexts/ZoneContext"
 
 const DEFAULT_PAGE_SIZE = 25
@@ -554,10 +555,19 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const [pendingBulk, setPendingBulk] = useState<Set<string | number> | null>(null)
   const [retryingProvider, setRetryingProvider] = useState<"webhook" | "msteams" | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  // Epoch-ms the current listLogs read left for the API; reset per run so the
+  // elapsed figure never inherits a previous read's clock.
+  const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
+  // Only the very first read blanks the region to a skeleton. Later reads —
+  // page, kind, search, sort or an explicit Refresh — keep the rows mounted and
+  // surface the quiet banner instead, so a populated table never flickers.
+  const loadedRef = useRef(false)
+  const { elapsed } = useElapsed(loading)
 
   const load = useCallback(() => {
     let cancelled = false
     setLoading(true)
+    setLoadingStartedAt(Date.now())
     setLoadError(null)
     listLogs({
       kind: (kind || undefined) as "poll" | "query" | undefined,
@@ -580,7 +590,10 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          loadedRef.current = true
+          setLoading(false)
+        }
       })
     return () => {
       cancelled = true
@@ -671,6 +684,17 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           className="w-56"
           aria-label="Search logs"
         />
+        {/* Quiet "what + how long" cue — the banner below carries the announced
+            sentence, so this mirror stays aria-hidden. */}
+        {loading && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+            aria-hidden="true"
+          >
+            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
+            Loading logs · <span className="font-mono tabular-nums">{elapsed}</span>
+          </span>
+        )}
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
           <RefreshCcw className="h-4 w-4" />
           Refresh
@@ -686,6 +710,16 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           Clear all
         </Button>
       </PageHeader>
+
+      {/* Refetch with rows already on screen: keep them mounted and say what is
+          happening. First load still shows the skeleton below. */}
+      {loading && items.length > 0 && (
+        <LoadingIndicator
+          label="Loading logs"
+          startedAt={loadingStartedAt}
+          className="max-w-md"
+        />
+      )}
 
       {loadError ? (
         <div className="flex items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-xs font-medium text-destructive">
@@ -715,9 +749,9 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           columns={columns}
           data={items}
           rowId={LOGS_ROW_ID}
-          loading={loading}
+          loading={loading && items.length === 0}
           selectable
-          busy={busy}
+          busy={busy || loading}
           bulkActions={[
             {
               label: "Delete",
