@@ -94,15 +94,8 @@ const REDIRECTS_ROW_ID = (i: TrackedUrl) => i.id
  * DataTable never re-sorts/re-renders when RedirectsPage re-renders. */
 const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
   {
-    id: "id",
-    header: "ID",
-    filterType: "number",
-    accessor: (i) => i.id,
-    cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.id}</span>,
-    width: "w-14",
-  },
-  {
     id: "url",
+    slot: "identity",
     header: "URL",
     filterType: "text",
     accessor: (i) => i.url,
@@ -117,31 +110,8 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     ),
   },
   {
-    id: "status",
-    header: "Status",
-    filterType: "enum",
-    accessor: (i) => i.status,
-    defaultSortDir: "asc",
-    cell: (i) => (
-      <Badge variant={STATUS_META[i.status].variant}>{STATUS_META[i.status].label}</Badge>
-    ),
-    width: "w-28",
-  },
-  {
-    id: "http_status",
-    header: "HTTP",
-    filterType: "number",
-    accessor: (i) => i.http_status,
-    cell: (i) => (
-      <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
-        {i.http_status ?? "—"}
-      </span>
-    ),
-    align: "right",
-    width: "w-16",
-  },
-  {
     id: "final_url",
+    slot: "object",
     header: "Final URL",
     filterType: "text",
     accessor: (i) => i.final_url,
@@ -158,7 +128,34 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
       ),
   },
   {
+    id: "status",
+    slot: "verdict",
+    header: "Status",
+    filterType: "enum",
+    accessor: (i) => i.status,
+    defaultSortDir: "asc",
+    cell: (i) => (
+      <Badge variant={STATUS_META[i.status].variant}>{STATUS_META[i.status].label}</Badge>
+    ),
+    width: "w-28",
+  },
+  {
+    id: "http_status",
+    slot: "verdict",
+    header: "HTTP",
+    filterType: "number",
+    accessor: (i) => i.http_status,
+    cell: (i) => (
+      <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">
+        {i.http_status ?? "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-16",
+  },
+  {
     id: "source",
+    slot: "evidence",
     header: "Source",
     filterType: "enum",
     accessor: (i) => i.source,
@@ -167,7 +164,28 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     width: "w-24",
   },
   {
+    id: "id",
+    slot: "evidence",
+    defaultHidden: true,
+    header: "ID",
+    filterType: "number",
+    accessor: (i) => i.id,
+    cell: (i) => <span className="font-mono text-xs text-muted-foreground">{i.id}</span>,
+    width: "w-14",
+  },
+  {
+    id: "history_count",
+    slot: "measures",
+    header: "Redirects",
+    filterType: "number",
+    accessor: (i) => i.history_count,
+    cell: (i) => <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
+    align: "right",
+    width: "w-16",
+  },
+  {
     id: "last_checked_at",
+    slot: "measures",
     header: "Last checked",
     filterType: "datetime",
     accessor: (i) => i.last_checked_at,
@@ -177,16 +195,8 @@ const REDIRECTS_COLUMNS: DataTableColumn<TrackedUrl>[] = [
     width: "w-40",
   },
   {
-    id: "history_count",
-    header: "Targets",
-    filterType: "number",
-    accessor: (i) => i.history_count,
-    cell: (i) => <span className="whitespace-nowrap font-mono tabular-nums text-xs text-muted-foreground">{i.history_count}</span>,
-    align: "right",
-    width: "w-16",
-  },
-  {
     id: "actions",
+    slot: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
@@ -304,7 +314,7 @@ export function RedirectsPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState("")
-  const [sortBy, setSortBy] = useState<SortKey | null>("id")
+  const [sortBy, setSortBy] = useState<SortKey | null>("last_checked_at")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [addUrl, setAddUrl] = useState("")
   const [busy, setBusy] = useState(false)
@@ -328,7 +338,7 @@ export function RedirectsPage() {
       search: debouncedSearch || undefined,
       limit: pageSize,
       offset: page * pageSize,
-      sort_by: (sortBy ?? "id") as "id" | "url" | "source" | "status" | "last_checked_at",
+      sort_by: (sortBy ?? "last_checked_at") as "id" | "url" | "source" | "status" | "last_checked_at",
       sort_order: sortDir,
     })
       .then((data) => {
@@ -843,6 +853,7 @@ export function RedirectsPage() {
             onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
             total={total}
             onPageChange={setPage}
+            viewKey="redirects"
             ariaLabel="Tracked URLs"
           />
         )}

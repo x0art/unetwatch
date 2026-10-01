@@ -445,3 +445,39 @@ def test_query_run_minutes_ceiling(client):
     assert client.get("/api/query/run?minutes=0").status_code == 200
     assert client.get("/api/query/run?minutes=525601").status_code == 422
     assert client.get("/api/query/run?minutes=-1").status_code == 422
+
+
+async def test_logs_stored_sort_groups_query_rows_apart_from_polls(client):
+    """Sorting by ``stored`` never interleaves a query row among poll numbers.
+
+    WHY: the grid renders ``—`` for ``stored`` on a non-poll run, but the row
+    still persists ``stored = 0`` — so a raw ``ORDER BY stored`` ties a query
+    row with a *real* poll that also stored 0, and the two kinds interleave by
+    insertion order (defect D3). The effective value is what the sort must use:
+    a query row sorts as NULL (grouped at one end), so a poll that legitimately
+    stored 0 still sorts among the polls, next to its real numbers.
+    """
+    from app.services.logs import write_log
+
+    # A poll that genuinely stored 0 sits among the polls, NOT among the
+    # query rows that also carry stored = 0. Insert queries first so an
+    # insertion-ordered (or id-ordered) sort would place this poll wrongly.
+    await write_log({"kind": "query", "minutes": 60, "matches": 0, "stored": 0})
+    await write_log({"kind": "query", "minutes": 60, "matches": 0, "stored": 0})
+    await write_log({"kind": "poll", "minutes": 10, "matches": 0, "stored": 0})
+    await write_log({"kind": "poll", "minutes": 10, "matches": 1, "stored": 5})
+
+    asc = client.get("/api/logs/?sort_by=stored&sort_order=asc&limit=50").json()
+    kinds = [r["kind"] for r in asc["items"]]
+    # NULLs (query) first for ASC; both polls follow contiguously by value 0, 5.
+    assert kinds == ["query", "query", "poll", "poll"], kinds
+    assert [r["stored"] for r in asc["items"] if r["kind"] == "poll"] == [0, 5]
+
+    desc = client.get("/api/logs/?sort_by=stored&sort_order=desc&limit=50").json()
+    kinds_desc = [r["kind"] for r in desc["items"]]
+    assert kinds_desc == ["poll", "poll", "query", "query"], kinds_desc
+    assert [r["stored"] for r in desc["items"] if r["kind"] == "poll"] == [5, 0]
+
+    # A non-stored sort is unchanged except for the stable id tiebreaker.
+    by_matches = client.get("/api/logs/?sort_by=matches&sort_order=asc").json()
+    assert by_matches["total"] == 4

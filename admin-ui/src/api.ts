@@ -232,12 +232,14 @@ export interface QueryDoc {
   rule_name?: string
   user_id?: string
   /**
-   * New/enforcement split, derived from `action` at store time:
-   * "enforcement" for DENY (the proxy already handled it — evidence the policy
-   * worked, NOT a new finding), "new" for everything else. Distinct from a
-   * REACH/ATTEMPT reading: a DENY is an ATTEMPT that is also an enforcement.
+   * New/enforcement split, derived from `action` at store time and returned on
+   * EVERY Query row: "enforcement" for DENY (the proxy already handled it —
+   * evidence the policy worked, NOT a new finding), "new" for everything else.
+   * Distinct from a REACH/ATTEMPT reading: a DENY is an ATTEMPT that is also an
+   * enforcement. Always present, so the grid's composite row id can rely on it
+   * to disambiguate a `new`/`enforcement` pair for the same request.
    */
-  accounting_tag?: "new" | "enforcement" | string | null
+  accounting_tag: "new" | "enforcement" | string
 }
 
 export interface QueryTopUrl {
@@ -1886,15 +1888,16 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
 
 export interface AnalyticsSummary {
   has_data: boolean
-  totalVolume: number // bytes (approximate when duration_seconds absent — see backend docstring)
+  /** Bytes; null when no byte counter was recorded (never estimated). */
+  totalVolume: number | null
   /** ADR 0001: ALLOW pattern-matches — the requests that need attention. */
   totalRisk: number
   /** Blacklisted destinations still ALLOWed — highest-risk subset of totalRisk. */
   totalBlacklistedRisk?: number
-  /** DENY/FLAG — the proxy already handled these (not risk). */
-  totalEnforcements: number
+  /** DENY/FLAG — the proxy already handled these. null = not computed. */
+  totalEnforcements: number | null
   /** Back-compat alias of totalEnforcements for older consumers. */
-  totalBlocked: number
+  totalBlocked: number | null
   topBandwidthHost: string
   peakTrafficTime: string
   range: string
@@ -1941,7 +1944,8 @@ export interface TopDomainRow {
   domain: string
   count: number // requests
   volume: number // bytes
-  pct: number // % of window total
+  /** % of the window total; null when the window has no measured volume. */
+  pct: number | null
 }
 
 export interface AnalyticsTopDomains {

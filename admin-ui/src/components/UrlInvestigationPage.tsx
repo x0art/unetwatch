@@ -189,6 +189,7 @@ export function UrlInvestigationPage({
   const columns: DataTableColumn<UrlClientCount>[] = [
     {
       id: "client_ip",
+      slot: "identity",
       header: "Client IP",
       filterType: "text",
       accessor: (r) => r.client_ip,
@@ -208,7 +209,8 @@ export function UrlInvestigationPage({
     },
     {
       id: "count",
-      header: "Accesses",
+      slot: "measures",
+      header: "Requests",
       filterType: "number",
       accessor: (r) => r.count,
       align: "right",
@@ -217,6 +219,7 @@ export function UrlInvestigationPage({
     },
     {
       id: "last_seen",
+      slot: "measures",
       header: "Last seen",
       filterType: "datetime",
       accessor: (r) => r.last_seen,
@@ -346,6 +349,7 @@ export function UrlInvestigationPage({
               loading={false}
               defaultSortBy="count"
               defaultSortDir="desc"
+              viewKey="url-clients"
               ariaLabel="Clients accessing this URL"
               empty={{
                 icon: SearchX,

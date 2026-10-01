@@ -465,7 +465,7 @@ async def _es_summary(minutes: int) -> dict | None:
 
         from app.config import get_settings
         from app.database import get_db
-        from app.services.es_client import es_client
+        from app.services.es_client import es_client, es_hits_total
         from app.services.monitor import (
             _build_pattern_regex,
             build_logs_query,
@@ -518,15 +518,11 @@ async def _es_summary(minutes: int) -> dict | None:
 
         # The proxy's own count of DENY/FLAG rows in the window — a measurement
         # over the enforcement population, independent of the pattern clause.
-        # Read defensively: if ES cannot answer it (a stub, or an index that
-        # predates the field) the count is unavailable, not 0.
-        enforcement_hits = enf_res.get("hits", {}) if isinstance(enf_res, dict) else {}
-        enforcement_total = enforcement_hits.get("total")
-        total_enforcements: int | None
-        if isinstance(enforcement_total, dict):
-            total_enforcements = int(enforcement_total.get("value", 0))
-        else:
-            total_enforcements = None
+        # ``es_hits_total`` reads the elasticsearch-py ``ObjectApiResponse``
+        # correctly (a bare ``isinstance(res, dict)`` is always false — see the
+        # helper docstring). ``None`` means the count could not be answered:
+        # unavailable, never a confident 0.
+        total_enforcements: int | None = es_hits_total(enf_res)
 
         hits = res.get("hits", {}).get("hits", [])
         if not hits:

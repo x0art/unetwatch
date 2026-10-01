@@ -46,6 +46,7 @@ import {
   getDurationMs,
   getMatchedRule,
   getRowId,
+  getSrcIp,
   actionVariant,
   hostOfUrl,
   type LogRow,
@@ -679,6 +680,7 @@ export function HostInspectorPage({
     () => [
       {
         id: "timestamp",
+        slot: "identity",
         header: "Timestamp",
         filterType: "datetime",
         accessor: (r) => r.timestamp,
@@ -687,8 +689,56 @@ export function HostInspectorPage({
         defaultSortDir: "desc" as const,
       },
       {
+        /* Source attribution — §3.4/§3.3.6(a) place Client IP immediately after
+         * the time anchor (Subject slot). The grid is scoped to one host, so
+         * the value is constant here, but a screenshot or CSV export of this
+         * grid must name the source the row came from, exactly as the Query and
+         * Findings grids do. */
+        id: "client_ip",
+        slot: "subject",
+        header: "Client IP",
+        filterType: "text",
+        accessor: (r) => getSrcIp(r),
+        cell: (r) => (
+          <span className="flex items-center gap-1.5">
+            <span className="font-mono text-xs text-muted-foreground">{getSrcIp(r) || "—"}</span>
+            <button
+              type="button"
+              onClick={() => handleOpenHost(getSrcIp(r))}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in Host Inspector"
+              title="Open in Host Inspector"
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          </span>
+        ),
+      },
+      {
+        id: "dest_ip",
+        slot: "object",
+        header: "Dest IP",
+        filterType: "text",
+        accessor: (r) => getDestIp(r),
+        cell: (r) => (
+          <span className="flex items-center gap-1.5">
+            <span className="font-mono text-xs text-muted-foreground">{getDestIp(r) || "—"}</span>
+            <button
+              type="button"
+              onClick={() => handleOpenHost(getDestIp(r))}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+              aria-label="Open in Host Inspector"
+              title="Open in Host Inspector"
+            >
+              <Search className="h-3 w-3" />
+            </button>
+          </span>
+        ),
+      },
+      {
         id: "url",
-        header: "Full URL / dest domain",
+        slot: "object",
+        header: "URL",
         filterType: "text",
         accessor: (r) => r.url,
         cell: (r) => (
@@ -709,88 +759,13 @@ export function HostInspectorPage({
         ),
       },
       {
-        id: "dest_ip",
-        header: "Dest IP",
-        filterType: "text",
-        accessor: (r) => getDestIp(r),
-        cell: (r) => (
-          <span className="flex items-center gap-1.5">
-            <span className="font-mono text-xs text-muted-foreground">{getDestIp(r) || "—"}</span>
-            <button
-              type="button"
-              onClick={() => handleOpenHost(getDestIp(r))}
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
-              aria-label="Open in Host Inspector"
-              title="Open in Host Inspector"
-            >
-              <Search className="h-3 w-3" />
-            </button>
-          </span>
-        ),
-      },
-      /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
-      {
-        id: "method",
-        header: "Method",
-        filterType: "enum",
-        accessor: (r) => r.http_method,
-        cell: (r) => <span className="text-xs">{r.http_method || "—"}</span>,
-        width: "w-20",
-      },
-      {
-        id: "status",
-        header: "Status",
-        filterType: "number",
-        accessor: (r) => r.http_status_code,
-        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.http_status_code ?? "—"}</span>,
-        width: "w-20",
-        align: "right" as const,
-      },
-      {
-        id: "bytes",
-        header: "↓/↑ Bytes",
-        filterType: "number",
-        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
-        cell: (r) => {
-          const dn = Number(r.bytes_downloaded) || 0
-          const up = Number(r.bytes_uploaded) || 0
-          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
-          return (
-            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
-              {formatBytes(dn + up)}
-            </span>
-          )
-        },
-        align: "right" as const,
-        width: "w-24",
-      },
-      {
-        id: "duration",
-        header: "Duration",
-        filterType: "number",
-        accessor: (r) => getDurationMs(r),
-        cell: (r) => {
-          const ms = getDurationMs(r)
-          return <span className="font-mono text-xs tabular-nums">{ms != null ? `${ms}ms` : "—"}</span>
-        },
-        align: "right" as const,
-        width: "w-24",
-      },
-      {
-        id: "country",
-        header: "Country",
-        filterType: "enum",
-        accessor: (r) => r.country_code,
-        cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
-        width: "w-20",
-      },
-      {
         /* Dest domain — the destination the operator acts on. Resolved from
          * `base_url` (else derived from `url`), never from the matched pattern;
          * a domain-level pattern match shows in "Triggered pattern" via
          * `blocked_by`, so this column always answers "where did it go". */
         id: "domain",
-        header: "Dest domain",
+        slot: "object",
+        header: "Destination",
         filterType: "text",
         accessor: (r) => getDestDomain(r),
         cell: (r) => {
@@ -814,11 +789,20 @@ export function HostInspectorPage({
         },
         width: "w-28",
       },
-      /* ── Enforcement & audit columns — always the LAST columns ──
-       * Action, Triggered pattern, Category and Rule answer "whether the policy
-       * fired and on what". They must stay at the tail of this table. */
+      /* ── Rich flat proxy fields (logstash-proxy-* schema) ── */
+      {
+        id: "method",
+        slot: "object",
+        header: "Method",
+        filterType: "enum",
+        accessor: (r) => r.http_method,
+        cell: (r) => <span className="text-xs">{r.http_method || "—"}</span>,
+        width: "w-20",
+      },
+      /* ── Verdict column — Action answers "whether the policy fired". ── */
       {
         id: "action",
+        slot: "verdict",
         header: "Action",
         filterType: "enum",
         accessor: (r) => r.action,
@@ -826,7 +810,32 @@ export function HostInspectorPage({
         width: "w-24",
       },
       {
+        id: "status",
+        slot: "verdict",
+        header: "Status",
+        filterType: "number",
+        accessor: (r) => r.http_status_code,
+        cell: (r) => <span className="font-mono text-xs tabular-nums">{r.http_status_code ?? "—"}</span>,
+        width: "w-20",
+        align: "right" as const,
+      },
+      {
+        id: "rule",
+        slot: "verdict",
+        defaultHidden: true,
+        header: "Rule",
+        filterType: "text",
+        accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
+        cell: (r) => {
+          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
+          return <span className="block max-w-[140px] truncate text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+        },
+        width: "w-28",
+      },
+      {
         id: "pattern",
+        slot: "evidence",
+        defaultHidden: true,
         header: "Triggered pattern",
         filterType: "text",
         accessor: (r) => getMatchedRule(r),
@@ -838,6 +847,8 @@ export function HostInspectorPage({
       },
       {
         id: "category",
+        slot: "evidence",
+        defaultHidden: true,
         header: "Category",
         filterType: "enum",
         accessor: (r) => r.category,
@@ -845,15 +856,46 @@ export function HostInspectorPage({
         width: "w-24",
       },
       {
-        id: "rule",
-        header: "Rule",
-        filterType: "text",
-        accessor: (r) => r.rule_name ?? r.rule_info ?? "—",
+        id: "country",
+        slot: "evidence",
+        defaultHidden: true,
+        header: "Country",
+        filterType: "enum",
+        accessor: (r) => r.country_code,
+        cell: (r) => <span className="text-xs">{r.country_code || "—"}</span>,
+        width: "w-20",
+      },
+      {
+        id: "bytes",
+        slot: "measures",
+        header: "Bytes",
+        filterType: "number",
+        accessor: (r) => (Number(r.bytes_downloaded) || 0) + (Number(r.bytes_uploaded) || 0),
         cell: (r) => {
-          const rule = r.rule_name && r.rule_name !== "-" ? r.rule_name : r.rule_info
-          return <span className="block max-w-[140px] truncate text-xs text-muted-foreground" title={rule}>{rule || "—"}</span>
+          const dn = Number(r.bytes_downloaded) || 0
+          const up = Number(r.bytes_uploaded) || 0
+          if (!dn && !up) return <span className="text-xs text-muted-foreground">—</span>
+          return (
+            <span className="font-mono text-xs tabular-nums" title={`↓ ${dn.toLocaleString()} / ↑ ${up.toLocaleString()}`}>
+              {formatBytes(dn + up)}
+            </span>
+          )
         },
-        width: "w-28",
+        align: "right" as const,
+        width: "w-24",
+      },
+      {
+        id: "duration",
+        slot: "measures",
+        header: "Duration",
+        filterType: "number",
+        accessor: (r) => getDurationMs(r),
+        cell: (r) => {
+          const ms = getDurationMs(r)
+          return <span className="font-mono text-xs tabular-nums">{ms != null ? `${ms}ms` : "—"}</span>
+        },
+        align: "right" as const,
+        width: "w-24",
       },
     ],
     [handleOpenHost, handleOpenUrl],
@@ -861,32 +903,32 @@ export function HostInspectorPage({
 
   /* ── Findings branch columns (ported from Client Report) ── */
   const domainColumns = useMemo<DataTableColumn<{ domain: string; count: number; volume: number; pct: number }>[]>(() => [
-    { id: "domain", header: "Domain", filterType: "text", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
-    { id: "count", header: "Requests", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
-    { id: "volume", header: "Volume", filterType: "number", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
-    { id: "pct", header: "% total", filterType: "number", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
+    { id: "domain", slot: "identity", header: "Domain", filterType: "text", accessor: (r) => r.domain, cell: (r) => <span className="block max-w-[240px] truncate font-mono text-[13px] font-semibold" title={r.domain}>{r.domain}</span> },
+    { id: "count", slot: "measures", header: "Requests", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+    { id: "volume", slot: "measures", header: "Volume", filterType: "number", accessor: (r) => r.volume, align: "right", cell: (r) => <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(r.volume)}</span>, width: "w-28" },
+    { id: "pct", slot: "measures", header: "Share", filterType: "number", accessor: (r) => r.pct, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>, width: "w-20" },
   ], [])
 
   const patternColumns = useMemo<DataTableColumn<{ pattern: string; hits: number }>[]>(() => [
-    { id: "pattern", header: "Pattern", filterType: "text", accessor: (r) => r.pattern, cell: (r) => <span className="block max-w-[280px] truncate font-mono text-xs" title={r.pattern}>{r.pattern}</span> },
-    { id: "hits", header: "Hits", filterType: "number", accessor: (r) => r.hits, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.hits.toLocaleString()}</span>, width: "w-24" },
+    { id: "pattern", slot: "identity", header: "Pattern", filterType: "text", accessor: (r) => r.pattern, cell: (r) => <span className="block max-w-[280px] truncate font-mono text-xs" title={r.pattern}>{r.pattern}</span> },
+    { id: "hits", slot: "measures", header: "Hits", filterType: "number", accessor: (r) => r.hits, align: "right", cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.hits.toLocaleString()}</span>, width: "w-24" },
   ], [])
 
   const urlColumns = useMemo<DataTableColumn<{ url: string; base_url: string; count: number; last_seen: string }>[]>(() => [
-    { id: "url", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => (
+    { id: "url", slot: "identity", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => (
       <span className="flex items-center gap-1.5">
         <span className="block max-w-[560px] truncate font-mono text-xs" title={r.url}>{r.url}</span>
         <button type="button" onClick={() => openUrlInInvestigation(r.url)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground" aria-label="Open in URL Investigation"><Search className="h-3 w-3" /></button>
       </span>
     )},
-    { id: "count", header: "Hits", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
+    { id: "count", slot: "measures", header: "Hits", filterType: "number", accessor: (r) => r.count, align: "right", cell: (r) => <span className="font-mono text-xs tabular-nums">{r.count.toLocaleString()}</span>, width: "w-20" },
   ], [openUrlInInvestigation])
 
   const rawColumns = useMemo<DataTableColumn<Finding>[]>(() => [
-    { id: "log_timestamp", header: "Timestamp", filterType: "datetime", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
-    { id: "url", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
-    { id: "base_url", header: "Domain", filterType: "text", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
-    { id: "pattern", header: "Pattern", filterType: "text", enableSorting: false, accessor: (r) => { try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; return Array.isArray(p) ? p : [] } catch { return [] } }, cell: (r) => {
+    { id: "log_timestamp", slot: "identity", header: "Timestamp", filterType: "datetime", accessor: (r) => r.log_timestamp, cell: (r) => <TimestampCell value={r.log_timestamp} />, width: "w-44", defaultSortDir: "desc" },
+    { id: "url", slot: "object", header: "URL", filterType: "text", accessor: (r) => r.url, cell: (r) => <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>{r.url}</span> },
+    { id: "base_url", slot: "object", header: "Destination", filterType: "text", accessor: (r) => r.base_url, cell: (r) => <span className="block max-w-[200px] truncate font-mono text-xs text-muted-foreground" title={r.base_url}>{r.base_url}</span> },
+    { id: "pattern", slot: "evidence", header: "Pattern", filterType: "text", enableSorting: false, accessor: (r) => { try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; return Array.isArray(p) ? p : [] } catch { return [] } }, cell: (r) => {
       let pats: string[] = []
       try { const p = r.matched_patterns ? JSON.parse(r.matched_patterns) : []; pats = Array.isArray(p) ? p : [] } catch {}
       // Findings-backed report: every finding was stored because it matched a block pattern.
@@ -902,7 +944,7 @@ export function HostInspectorPage({
         </span>
       )
     } },
-    { id: "volume", header: "Volume", filterType: "number", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
+    { id: "volume", slot: "measures", header: "Volume", filterType: "number", accessor: (r) => { const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; if (dn || up) return dn + up; const dur = Number(r.duration_seconds) || 0; return dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192 }, align: "right", cell: (r) => {
       const dn = Number(r.bytes_downloaded) || 0; const up = Number(r.bytes_uploaded) || 0; const hasBytes = !!(dn || up); const dur = Number(r.duration_seconds) || 0; const vol = hasBytes ? dn + up : dur > 0 ? Math.max(1, Math.round(dur)) * 8192 : 8192
       return <span className="inline-flex items-center gap-1.5" title={hasBytes ? `Real: ↓${dn}+↑${up}` : `Est: ${dur}s×8KiB`}><span className="font-mono text-xs tabular-nums">{formatBytes(vol)}</span><Badge variant={hasBytes ? "success" : "secondary"}>{hasBytes ? "Real" : "Estimated"}</Badge></span>
     }, width: "w-32" },
@@ -1174,6 +1216,7 @@ export function HostInspectorPage({
               pageSize={pageSize}
               total={displayTotal}
               onPageChange={setPage}
+              viewKey="host-log"
               ariaLabel="Host request logs"
             />
           </Panel>
@@ -1216,15 +1259,15 @@ export function HostInspectorPage({
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <Panel title="Top domains" icon={Globe}>
-                  <DataTable columns={domainColumns} data={report.top_domains} rowId={(r) => r.domain} empty={{ icon: Globe, title: "No domains in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top domains" />
+                  <DataTable columns={domainColumns} data={report.top_domains} rowId={(r) => r.domain} viewKey="host-domains" empty={{ icon: Globe, title: "No domains in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top domains" />
                 </Panel>
                 <Panel title="Top patterns" icon={Link2}>
-                  <DataTable columns={patternColumns} data={report.top_patterns} rowId={(r) => r.pattern} empty={{ icon: SearchX, title: "No patterns in window", description: "No matched patterns.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top patterns" />
+                  <DataTable columns={patternColumns} data={report.top_patterns} rowId={(r) => r.pattern} viewKey="host-patterns" empty={{ icon: SearchX, title: "No patterns in window", description: "No matched patterns.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top patterns" />
                 </Panel>
               </div>
 
               <Panel title="Top URLs" icon={Link2} description="Click to investigate">
-                <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} empty={{ icon: SearchX, title: "No URLs in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top URLs" />
+                <DataTable columns={urlColumns} data={report.top_urls} rowId={(r) => r.url} viewKey="host-urls" empty={{ icon: SearchX, title: "No URLs in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Top URLs" />
               </Panel>
 
               {rawError && (
@@ -1238,7 +1281,7 @@ export function HostInspectorPage({
                   <SearchInput placeholder="Filter (URL)..." value={rawSearch} onChange={(v) => { setRawSearch(v); setRawPage(0) }} className="w-64" aria-label="Filter raw findings" />
                   <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">findings table · whitelist-excluded</span>
                 </div>
-                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Raw findings" />
+                <DataTable columns={rawColumns} data={raw} rowId={(r) => String(r.id)} viewKey="host-raw" loading={rawLoading} total={rawTotal} page={rawPage} pageSize={rawPageSize} onPageChange={setRawPage} empty={{ icon: SearchX, title: "No findings in window", description: "Try a broader date range.", action: <Button variant="outline" size="sm" onClick={() => setTimeRange("30d")}>Broaden range</Button> }} ariaLabel="Raw findings" />
               </Panel>
             </>
           ) : null}

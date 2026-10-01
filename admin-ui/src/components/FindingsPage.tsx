@@ -84,15 +84,17 @@ const FINDINGS_ROW_ID = (f: Finding) => f.id
  * auto-refresh ticks, busy flips). State reads go through FINDINGS_UI. */
 const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   {
-    id: "id",
-    header: "ID",
-    filterType: "number",
-    accessor: (f) => f.id,
-    cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
-    width: "w-14",
+    id: "log_timestamp",
+    slot: "identity",
+    header: "Detected",
+    filterType: "datetime",
+    accessor: (f) => f.log_timestamp,
+    cell: (f) => <TimestampCell value={f.log_timestamp} />,
+    defaultSortDir: "desc",
   },
   {
     id: "client_ip",
+    slot: "subject",
     header: "Client IP",
     filterType: "text",
     accessor: (f) => f.client_ip,
@@ -118,6 +120,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   },
   {
     id: "server_ip",
+    slot: "object",
     header: "Server IP",
     filterType: "text",
     accessor: (f) => f.server_ip,
@@ -131,6 +134,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   },
   {
     id: "url",
+    slot: "object",
     header: "URL",
     filterType: "text",
     accessor: (f) => f.url,
@@ -164,6 +168,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   },
   {
     id: "base_url",
+    slot: "object",
     header: "Base URL",
     filterType: "text",
     accessor: (f) => f.base_url,
@@ -190,7 +195,27 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     ),
   },
   {
+    /* Read straight off the persisted `accounting_tag` — never re-derived from
+     * `action` here, so the UI cannot disagree with what the backend stored.
+     * A DENY row is an "enforcement" (the proxy already handled it, so it is
+     * evidence the policy worked rather than a new finding); everything else
+     * is a "new" finding to act on. */
+    id: "accounting_tag",
+    slot: "verdict",
+    header: "Enforcement",
+    filterType: "enum",
+    accessor: (f) => f.accounting_tag,
+    cell: (f) =>
+      f.accounting_tag === "enforcement" ? (
+        <Badge variant="secondary">Enforcement</Badge>
+      ) : (
+        <Badge variant="outline">New</Badge>
+      ),
+    width: "w-32",
+  },
+  {
     id: "pattern",
+    slot: "evidence",
     header: "Pattern",
     enableSorting: false,
     filterType: "text",
@@ -220,33 +245,18 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     width: "w-40",
   },
   {
-    /* Read straight off the persisted `accounting_tag` — never re-derived from
-     * `action` here, so the UI cannot disagree with what the backend stored.
-     * A DENY row is an "enforcement" (the proxy already handled it, so it is
-     * evidence the policy worked rather than a new finding); everything else
-     * is a "new" finding to act on. */
-    id: "accounting_tag",
-    header: "Type",
-    filterType: "enum",
-    accessor: (f) => f.accounting_tag,
-    cell: (f) =>
-      f.accounting_tag === "enforcement" ? (
-        <Badge variant="secondary">Enforcement</Badge>
-      ) : (
-        <Badge variant="outline">New</Badge>
-      ),
-    width: "w-32",
-  },
-  {
-    id: "log_timestamp",
-    header: "Detected",
-    filterType: "datetime",
-    accessor: (f) => f.log_timestamp,
-    cell: (f) => <TimestampCell value={f.log_timestamp} />,
-    defaultSortDir: "desc",
+    id: "id",
+    slot: "evidence",
+    defaultHidden: true,
+    header: "ID",
+    filterType: "number",
+    accessor: (f) => f.id,
+    cell: (f) => <span className="font-mono text-xs text-muted-foreground">{f.id}</span>,
+    width: "w-14",
   },
   {
     id: "actions",
+    slot: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
@@ -665,13 +675,14 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
             </Button>
           ),
         }}
-        defaultSortBy="id"
+        defaultSortBy="log_timestamp"
         defaultSortDir="desc"
         page={page}
         pageSize={pageSize}
         onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
         total={total}
         onPageChange={setPage}
+        viewKey="findings"
         ariaLabel="Findings"
       />
 </Panel>

@@ -22,6 +22,24 @@ _SORTABLE = (
 )
 
 
+def _order_clause(sort_by: str, sort_order: str) -> str:
+    """Deterministic ORDER BY for the monitor-log grid.
+
+    ``stored`` is meaningful only for a ``poll`` run; the grid renders ``—``
+    for a ``query`` row (see ``LOGS_COLUMNS`` in the UI). Ordering on the raw
+    column ties every row — a query row also persists ``stored = 0`` — so the
+    two kinds interleaved by insertion order. Order on the *effective* value
+    instead: non-poll rows sort as NULL (SQLite groups NULLs together, first
+    for ASC and last for DESC), so a query row's ``—`` never interleaves among
+    real poll numbers. ``id`` is appended as a stable tiebreaker so equal
+    values never order arbitrarily.
+    """
+    if sort_by == "stored":
+        key = "CASE WHEN kind = 'poll' THEN stored END"
+        return f" ORDER BY {key} {sort_order.upper()}, id DESC LIMIT ? OFFSET ?"
+    return f" ORDER BY {sort_by} {sort_order.upper()}, id DESC LIMIT ? OFFSET ?"
+
+
 @router.get("/")
 async def list_logs(
     db=Depends(get_db_conn),
@@ -51,8 +69,7 @@ async def list_logs(
     total = (await count_cursor.fetchone())["total"]
 
     cursor = await db.execute(
-        f"SELECT * FROM monitor_logs {clause}"
-        f" ORDER BY {sort_by} {sort_order.upper()} LIMIT ? OFFSET ?",
+        f"SELECT * FROM monitor_logs {clause}{_order_clause(sort_by, sort_order)}",
         (*params, limit, offset),
     )
     rows = await cursor.fetchall()

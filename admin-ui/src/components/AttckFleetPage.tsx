@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react"
 import {
   RefreshCcw,
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
 } from "lucide-react"
-import { type FleetMapping, getFleetAttckMapping } from "../api"
+import {
+  type FleetHostSummary,
+  type FleetMapping,
+  type FleetTechnique,
+  getFleetAttckMapping,
+} from "../api"
 import { useFilter } from "../contexts/FilterContext"
+import { DataTable, type DataTableColumn } from "./DataTable"
 import {
   Badge,
   Button,
   EmptyState,
-  PageHeader,
   Panel,
+  PageHeader,
   Select,
   Skeleton,
   StatCard,
@@ -43,6 +49,144 @@ function formatDate(iso: string): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 }
 
+/* ── Techniques fleet-wide (§3.3.8) ──────────────────────────────── *
+ * Module-scope so the array identity is referentially stable; the
+ * `example_hosts` cell reads `openHost` through a shared handle that is
+ * refreshed after commit (the codebase's `*_UI` pattern). */
+const TECHNIQUES_UI: { openHost: (ip: string) => void } = { openHost: () => {} }
+
+const TECHNIQUE_COLUMNS: DataTableColumn<FleetTechnique>[] = [
+  {
+    id: "technique_id",
+    header: "Technique ID",
+    slot: "identity",
+    filterType: "text",
+    accessor: (t) => t.technique_id,
+    cell: (t) => (
+      <span className="font-mono text-xs text-muted-foreground">{t.technique_id}</span>
+    ),
+    exportValue: (t) => t.technique_id,
+  },
+  {
+    id: "name",
+    header: "Name",
+    slot: "object",
+    filterType: "text",
+    accessor: (t) => t.name,
+    cell: (t) => <span title={t.description}>{t.name}</span>,
+    exportValue: (t) => t.name,
+  },
+  {
+    id: "severity",
+    header: "Severity",
+    slot: "verdict",
+    filterType: "enum",
+    accessor: (t) => t.severity,
+    cell: (t) => <Badge variant={severityVariant(t.severity)}>{t.severity}</Badge>,
+    exportValue: (t) => t.severity,
+  },
+  {
+    id: "example_hosts",
+    header: "Example hosts",
+    slot: "evidence",
+    filterType: "text",
+    accessor: (t) => t.example_hosts,
+    cell: (t) => (
+      <div className="flex flex-wrap gap-1">
+        {t.example_hosts.map((ip) => (
+          <button
+            key={ip}
+            type="button"
+            className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-foreground"
+            onClick={() => TECHNIQUES_UI.openHost(ip)}
+            title={`Investigate ${ip}`}
+          >
+            {ip}
+          </button>
+        ))}
+        {t.host_count > t.example_hosts.length && (
+          <span className="px-1 py-0.5 text-[11px] text-muted-foreground/60">
+            +{t.host_count - t.example_hosts.length} more
+          </span>
+        )}
+      </div>
+    ),
+  },
+  {
+    id: "host_count",
+    header: "Hosts",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs",
+    accessor: (t) => t.host_count,
+    exportValue: (t) => t.host_count,
+  },
+]
+
+/* ── Hosts with techniques (§3.3.8) ───────────────────────────────── */
+const HOSTS_UI: { openHost: (ip: string) => void } = { openHost: () => {} }
+
+const FLEET_HOST_COLUMNS: DataTableColumn<FleetHostSummary>[] = [
+  {
+    id: "client_ip",
+    header: "Host",
+    slot: "identity",
+    filterType: "text",
+    accessor: (h) => h.client_ip,
+    cell: (h) => (
+      <button
+        type="button"
+        className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
+        onClick={() => HOSTS_UI.openHost(h.client_ip)}
+      >
+        {h.client_ip}
+      </button>
+    ),
+    exportValue: (h) => h.client_ip,
+  },
+  {
+    id: "techniques",
+    header: "Techniques",
+    slot: "evidence",
+    filterType: "text",
+    accessor: (h) => h.techniques,
+    cell: (h) => (
+      <div className="flex flex-wrap gap-1">
+        {h.techniques.map((tid) => (
+          <Badge key={tid} variant="outline">
+            {tid}
+          </Badge>
+        ))}
+      </div>
+    ),
+  },
+  {
+    id: "risk_share",
+    header: "Risk share",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs",
+    accessor: (h) => h.risk_share,
+    cell: (h) => `${(h.risk_share * 100).toFixed(1)}%`,
+    exportValue: (h) => (h.risk_share * 100).toFixed(1),
+  },
+  {
+    id: "total_requests",
+    header: "Requests",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs",
+    accessor: (h) => h.total_requests,
+    exportValue: (h) => h.total_requests,
+  },
+]
+
 interface Props {
   /** Clicking a host row drills into that host's investigation page. */
   onNavigate?: (view: "host") => void
@@ -70,6 +214,14 @@ export function AttckFleetPage({ onNavigate }: Props) {
     [setGlobalFilter, onNavigate],
   )
 
+  // Hand the stable `openHost` to the module-scope column cells after commit
+  // (the codebase's `*_UI` pattern; a layout effect avoids the render-phase
+  // side effect React Strict Mode double-invokes).
+  useLayoutEffect(() => {
+    TECHNIQUES_UI.openHost = openHost
+    HOSTS_UI.openHost = openHost
+  }, [openHost])
+
   const fetchFleet = useCallback(() => {
     setLoading(true)
     setError(null)
@@ -88,6 +240,14 @@ export function AttckFleetPage({ onNavigate }: Props) {
 
   const suppressed = useMemo(
     () => (mapping?.suppressed ?? []).filter((s) => !!s?.id && !!s?.reason),
+    [mapping],
+  )
+
+  // Host rows for the fleet grid: only hosts that matched at least one
+  // technique. Memoized so `DataTable`'s filter/sort memos see a stable array
+  // identity across unrelated re-renders.
+  const hostRows = useMemo(
+    () => (mapping?.host_summaries ?? []).filter((h) => h.techniques.length > 0),
     [mapping],
   )
 
@@ -205,108 +365,40 @@ export function AttckFleetPage({ onNavigate }: Props) {
                 description="No host in the window met a technique's predicate. This is not a statement that the traffic is clean."
               />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th scope="col" className="pb-2 pr-4 font-medium">Technique ID</th>
-                      <th scope="col" className="pb-2 pr-4 font-medium">Name</th>
-                      <th scope="col" className="pb-2 pr-4 font-medium">Severity</th>
-                      <th scope="col" className="pb-2 pr-4 font-medium">Hosts</th>
-                      <th scope="col" className="pb-2 font-medium">Example hosts</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {mapping.techniques.map((tech) => (
-                      <tr key={tech.technique_id} className="group">
-                        <td className="py-2 pr-4 font-mono text-xs text-muted-foreground align-top">
-                          {tech.technique_id}
-                        </td>
-                        <td className="py-2 pr-4 font-medium align-top">
-                          <span title={tech.description}>{tech.name}</span>
-                        </td>
-                        <td className="py-2 pr-4 align-top">
-                          <Badge variant={severityVariant(tech.severity)}>
-                            {tech.severity}
-                          </Badge>
-                        </td>
-                        <td className="py-2 pr-4 align-top font-mono text-xs">
-                          {tech.host_count}
-                        </td>
-                        <td className="py-2 align-top">
-                          <div className="flex flex-wrap gap-1">
-                            {tech.example_hosts.map((ip) => (
-                              <button
-                                key={ip}
-                                type="button"
-                                className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-foreground"
-                                onClick={() => openHost(ip)}
-                                title={`Investigate ${ip}`}
-                              >
-                                {ip}
-                              </button>
-                            ))}
-                            {tech.host_count > tech.example_hosts.length && (
-                              <span className="px-1 py-0.5 text-[11px] text-muted-foreground/60">
-                                +{tech.host_count - tech.example_hosts.length} more
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={TECHNIQUE_COLUMNS}
+                data={mapping.techniques}
+                rowId={(t) => t.technique_id}
+                defaultSortBy="host_count"
+                defaultSortDir="desc"
+                viewKey="attck-techniques"
+                ariaLabel="Fleet ATT&CK techniques"
+                empty={{
+                  icon: ShieldCheck,
+                  title: "No ATT&CK techniques detected fleet-wide",
+                  description:
+                    "No host in the window met a technique's predicate. This is not a statement that the traffic is clean.",
+                }}
+              />
             )}
           </Panel>
 
           {mapping.host_summaries.some((h) => h.techniques.length > 0) && (
             <Panel title="Hosts with techniques" icon={ShieldQuestion}>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th scope="col" className="pb-2 pr-4 font-medium">Host</th>
-                      <th scope="col" className="pb-2 pr-4 font-medium">Requests</th>
-                      <th scope="col" className="pb-2 pr-4 font-medium">Risk share</th>
-                      <th scope="col" className="pb-2 font-medium">Techniques</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {mapping.host_summaries
-                      .filter((h) => h.techniques.length > 0)
-                      .map((host) => (
-                        <tr key={host.client_ip} className="group">
-                          <td className="py-2 pr-4 align-top">
-                            <button
-                              type="button"
-                              className="font-mono text-xs text-muted-foreground hover:text-foreground hover:underline"
-                              onClick={() => openHost(host.client_ip)}
-                            >
-                              {host.client_ip}
-                            </button>
-                          </td>
-                          <td className="py-2 pr-4 align-top font-mono text-xs">
-                            {host.total_requests}
-                          </td>
-                          <td className="py-2 pr-4 align-top font-mono text-xs">
-                            {(host.risk_share * 100).toFixed(1)}%
-                          </td>
-                          <td className="py-2 align-top">
-                            <div className="flex flex-wrap gap-1">
-                              {host.techniques.map((tid) => (
-                                <Badge key={tid} variant="outline">
-                                  {tid}
-                                </Badge>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={FLEET_HOST_COLUMNS}
+                data={hostRows}
+                rowId={(h) => h.client_ip}
+                defaultSortBy="risk_share"
+                defaultSortDir="desc"
+                viewKey="attck-hosts"
+                ariaLabel="Fleet hosts with techniques"
+                empty={{
+                  icon: ShieldQuestion,
+                  title: "No hosts matched a technique",
+                  description: "No host in the window met a technique's predicate.",
+                }}
+              />
             </Panel>
           )}
 

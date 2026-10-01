@@ -680,6 +680,13 @@ def build_items(
         }
         rich["bytes_downloaded"] = safe_number(row.get("bytes_downloaded"))
         rich["bytes_uploaded"] = safe_number(row.get("bytes_uploaded"))
+        # The new/enforcement split (ADR 0001), derived exactly as the
+        # persisted findings path derives it (``accounting_tag_for_action``),
+        # so the Query grid can key rows and render the Enforcement badge. It
+        # is emitted for EVERY row — an ALLOW is a "new" finding, not the
+        # absence of a tag — because the grid's row id is built from it and a
+        # missing value would collapse two rows of one request onto one key.
+        action = str(row.get("action") or "")
         items.append(
             {
                 "timestamp": normalize_timestamp(row.get("@timestamp"), now),
@@ -688,7 +695,8 @@ def build_items(
                 "url": url,
                 "base_url": base_url,
                 "duration_seconds": safe_number(row.get("duration_seconds")),
-                "action": str(row.get("action") or ""),
+                "action": action,
+                "accounting_tag": accounting_tag_for_action(action.strip().upper()),
                 "blocked_by": blocked_by,
                 "whitelisted": whitelisted,
                 "blacklisted": blacklisted,

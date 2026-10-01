@@ -119,7 +119,7 @@ const queryUI: {
 
 /** Stable row identity for the query-results table + bulk actions. */
 function queryRowId(d: QueryDoc): string {
-  return `${d.timestamp}|${d.client_ip}|${d.url}`
+  return `${d.timestamp}|${d.client_ip}|${d.url}|${d.accounting_tag}`
 }
 
 /** Copy button wrapped so its click never bubbles to the row's inspector sidebar. */
@@ -154,6 +154,7 @@ function QuickNavCell({ kind, value, label }: { kind: "host" | "url"; value: str
 const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   {
     id: "timestamp",
+    slot: "identity",
     header: "Timestamp",
     filterType: "datetime",
     accessor: (d) => d.timestamp,
@@ -164,6 +165,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   },
   {
     id: "client_ip",
+    slot: "subject",
     header: "Client IP",
     filterType: "text",
     accessor: (d) => d.client_ip,
@@ -181,6 +183,7 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   },
   {
     id: "server_ip",
+    slot: "object",
     header: "Server IP",
     filterType: "text",
     accessor: (d) => d.server_ip,
@@ -193,117 +196,13 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     ),
   },
   {
-    id: "url",
-    header: "URL",
-    filterType: "text",
-    accessor: (d) => d.url,
-    defaultSortDir: "asc",
-    cell: (d) => (
-      <span className="flex items-center gap-1.5">
-        <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
-          {d.url}
-        </span>
-        <QuickNavCell kind="url" value={d.url} label="Open in URL Investigation" />
-        <CopyCell value={d.url} label="URL" />
-      </span>
-    ),
-  },
-  {
-    id: "base_url",
-    header: "Base URL",
-    filterType: "text",
-    accessor: (d) => d.base_url || d.category,
-    defaultSortDir: "asc",
-    cell: (d) => (
-      <span className="flex items-center gap-1.5">
-        <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url || d.category}>
-          {d.base_url || d.category}
-        </span>
-        <QuickNavCell kind="url" value={d.base_url || d.category || ""} label="Open in URL Investigation" />
-        <CopyCell value={d.base_url || d.category || ""} label="Base URL" />
-      </span>
-    ),
-  },
-  {
-    id: "bytes_downloaded",
-    header: "↓ Bytes",
-    filterType: "number",
-    accessor: (d) => d.bytes_downloaded,
-    align: "right",
-    cell: (d) => {
-      const b = Number(d.bytes_downloaded) || 0
-      return b > 0 ? (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )
-    },
-    width: "w-24",
-  },
-  {
-    id: "bytes_uploaded",
-    header: "↑ Bytes",
-    filterType: "number",
-    accessor: (d) => d.bytes_uploaded,
-    align: "right",
-    cell: (d) => {
-      const b = Number(d.bytes_uploaded) || 0
-      return b > 0 ? (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )
-    },
-    width: "w-24",
-  },
-  {
-    id: "duration",
-    header: "Duration",
-    filterType: "number",
-    accessor: (d) => d.duration_seconds,
-    cell: (d) =>
-      d.duration_seconds === null || d.duration_seconds === undefined ? (
-        <span className="text-muted-foreground">—</span>
-      ) : (
-        <span className="font-mono tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
-      ),
-    align: "right",
-    width: "w-20",
-  },
-  {
-    id: "action",
-    header: "Action",
-    filterType: "enum",
-    accessor: (d) => d.action,
-    cell: (d) => (
-      <Badge variant={d.action === "ALLOW" ? "success" : "warning"}>{d.action}</Badge>
-    ),
-    width: "w-24",
-  },
-  {
-    /* The new/enforcement split, read straight off the persisted
-     * `accounting_tag` — never re-derived from `action` here, so the UI cannot
-     * drift from what the backend stored. A DENY row is an "enforcement"
-     * (the proxy already handled it), everything else is a "new" finding. */
-    id: "accounting_tag",
-    header: "Type",
-    filterType: "enum",
-    accessor: (d) => d.accounting_tag,
-    cell: (d) =>
-      d.accounting_tag === "enforcement" ? (
-        <Badge variant="secondary">Enforcement</Badge>
-      ) : (
-        <Badge variant="outline">New</Badge>
-      ),
-    width: "w-28",
-  },
-  {
     /* Dest domain — the domain the row actually went to (`base_url`, else
      * derived from `url`), so a flagged row is readable at DOMAIN level. Not
      * derived from the matched pattern: a domain-level pattern match is
      * reported through `blocked_by` and shown in the Pattern column. */
     id: "domain",
-    header: "Dest domain",
+    slot: "object",
+    header: "Destination",
     filterType: "text",
     accessor: (d) => getDestDomain(d),
     defaultSortDir: "asc",
@@ -321,7 +220,72 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     },
   },
   {
+    id: "url",
+    slot: "object",
+    header: "URL",
+    filterType: "text",
+    accessor: (d) => d.url,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[340px] truncate font-mono text-xs" title={d.url}>
+          {d.url}
+        </span>
+        <QuickNavCell kind="url" value={d.url} label="Open in URL Investigation" />
+        <CopyCell value={d.url} label="URL" />
+      </span>
+    ),
+  },
+  {
+    id: "base_url",
+    slot: "object",
+    defaultHidden: true,
+    header: "Base URL",
+    filterType: "text",
+    accessor: (d) => d.base_url || d.category,
+    defaultSortDir: "asc",
+    cell: (d) => (
+      <span className="flex items-center gap-1.5">
+        <span className="block max-w-[220px] truncate font-mono text-xs text-muted-foreground" title={d.base_url || d.category}>
+          {d.base_url || d.category}
+        </span>
+        <QuickNavCell kind="url" value={d.base_url || d.category || ""} label="Open in URL Investigation" />
+        <CopyCell value={d.base_url || d.category || ""} label="Base URL" />
+      </span>
+    ),
+  },
+  {
+    id: "action",
+    slot: "verdict",
+    header: "Action",
+    filterType: "enum",
+    accessor: (d) => d.action,
+    cell: (d) => (
+      <Badge variant={d.action === "ALLOW" ? "success" : "warning"}>{d.action}</Badge>
+    ),
+    width: "w-24",
+  },
+  {
+    /* The new/enforcement split, read straight off the persisted
+     * `accounting_tag` — never re-derived from `action` here, so the UI cannot
+     * drift from what the backend stored. A DENY row is an "enforcement"
+     * (the proxy already handled it), everything else is a "new" finding. */
+    id: "accounting_tag",
+    slot: "verdict",
+    header: "Enforcement",
+    filterType: "enum",
+    accessor: (d) => d.accounting_tag,
+    cell: (d) =>
+      d.accounting_tag === "enforcement" ? (
+        <Badge variant="secondary">Enforcement</Badge>
+      ) : (
+        <Badge variant="outline">New</Badge>
+      ),
+    width: "w-28",
+  },
+  {
     id: "pattern",
+    slot: "evidence",
     header: "Pattern",
     filterType: "text",
     accessor: (d) => (d.blocked_by ?? []),
@@ -335,7 +299,9 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
   },
   {
     id: "coverage",
-    header: "Lists",
+    slot: "evidence",
+    defaultHidden: true,
+    header: "List match",
     filterType: "enum",
     accessor: (d) =>
       d.blacklisted && d.action === "ALLOW"
@@ -387,7 +353,58 @@ const QUERY_COLUMNS: DataTableColumn<QueryDoc>[] = [
     width: "w-44",
   },
   {
+    id: "bytes_downloaded",
+    slot: "measures",
+    header: "Downloaded",
+    filterType: "number",
+    accessor: (d) => d.bytes_downloaded,
+    align: "right",
+    cell: (d) => {
+      const b = Number(d.bytes_downloaded) || 0
+      return b > 0 ? (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+    width: "w-24",
+  },
+  {
+    id: "bytes_uploaded",
+    slot: "measures",
+    defaultHidden: true,
+    header: "Uploaded",
+    filterType: "number",
+    accessor: (d) => d.bytes_uploaded,
+    align: "right",
+    cell: (d) => {
+      const b = Number(d.bytes_uploaded) || 0
+      return b > 0 ? (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{formatBytes(b)}</span>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      )
+    },
+    width: "w-24",
+  },
+  {
+    id: "duration",
+    slot: "measures",
+    header: "Duration",
+    filterType: "number",
+    accessor: (d) => d.duration_seconds,
+    cell: (d) =>
+      d.duration_seconds === null || d.duration_seconds === undefined ? (
+        <span className="text-muted-foreground">—</span>
+      ) : (
+        <span className="font-mono tabular-nums text-xs">{d.duration_seconds.toFixed(2)}s</span>
+      ),
+    align: "right",
+    width: "w-20",
+  },
+  {
     id: "actions",
+    slot: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
@@ -447,7 +464,14 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
       y: y(max * f),
       label: Math.round(max * f).toLocaleString(),
     }))
-    const xLabels = [0, Math.floor((points.length - 1) / 2), points.length - 1]
+    // Label at the start / middle / end. For a short timeline these indices
+    // collapse (n===1 -> [0,0,0], n===0 -> [0,-1,-1]), which produced
+    // duplicate React keys and, at n===0, an out-of-range points[i]. Keep the
+    // list strictly unique and in range.
+    const xLabels: number[] = []
+    for (const i of [0, Math.floor((points.length - 1) / 2), points.length - 1]) {
+      if (i >= 0 && i < points.length && !xLabels.includes(i)) xLabels.push(i)
+    }
     return { max, x, y, linePath, areaPath, gridLines, xLabels, innerW, innerH }
   }, [points])
 
@@ -1106,16 +1130,6 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 </ListBadge>
                 host or destination IP on the blacklist
               </span>
-              {activeHeaderFilterCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setColumnFilters({})}
-                  className="ml-auto inline-flex items-center gap-1.5 rounded border border-border bg-card px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted"
-                  aria-label={`Clear ${activeHeaderFilterCount} header filter${activeHeaderFilterCount === 1 ? "" : "s"}`}
-                >
-                  {activeHeaderFilterCount} header filter{activeHeaderFilterCount === 1 ? "" : "s"} active · Clear
-                </button>
-              )}
             </div>
             <DataTable
               columns={columns}
@@ -1168,6 +1182,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
               onPageChange={setPage}
               onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
               onRowClick={handleRowClick}
+              viewKey="query"
               ariaLabel="Query results"
             />
           </Panel>

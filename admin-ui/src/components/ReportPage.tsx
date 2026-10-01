@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { AlertTriangle, ArrowLeft, Copy, FileText, Info, ShieldQuestion } from "lucide-react"
 import {
   getClientReport,
@@ -8,14 +8,19 @@ import {
   getUrlEnrichment,
   probeEsHealth,
   type ClientReport,
+  type ClientReportTopDomain,
+  type ClientReportTopPattern,
+  type ClientReportTopUrl,
   type EnrichHost,
   type EnrichUrl,
   type HostProfile,
   type HostRiskExplained,
   type HostRiskUnavailable,
   type UrlBreakdown,
+  type UrlClientCount,
 } from "../api"
 import { copyText } from "../lib/utils"
+import { DataTable, type DataTableColumn } from "./DataTable"
 import {
   Badge,
   Button,
@@ -56,50 +61,129 @@ function lookupError(status: string, error: string | null | undefined): string |
 }
 
 
-/** Shared indicator table for report section 03. All four tables (host
- * domains/patterns/urls, url clients) were byte-identical markup differing
- * only in column labels and cell rendering, so they share one implementation
- * — this is also what keeps their empty states consistent. */
-function IndicatorTable<T>({
-  title, columns, rows, emptyLabel, renderRow, rowKey,
-}: {
-  title: string
-  columns: { label: string; align?: "left" | "right" }[]
-  rows: T[]
-  emptyLabel: string
-  renderRow: (row: T) => ReactNode
-  rowKey: (row: T, index: number) => string
-}) {
-  return (
-    <div>
-      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h4>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              {columns.map((c) => (
-                <th key={c.label} scope="col" className={c.align === "right" ? "pb-2 text-right font-medium" : "pb-2 pr-4 font-medium"}>
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="py-8 text-center text-sm text-muted-foreground">
-                  {emptyLabel}
-                </td>
-              </tr>
-            ) : (
-              rows.map((row, i) => <tr key={rowKey(row, i)}>{renderRow(row)}</tr>)
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+/* ── Indicator grids (§3.3.9) ─────────────────────────────────────── *
+ * Module-scope so their array identity is referentially stable — the
+ * `DataTable` sort/filter memos key off `columns`. */
+const TOP_DOMAIN_COLUMNS: DataTableColumn<ClientReportTopDomain>[] = [
+  {
+    id: "domain",
+    header: "Domain",
+    slot: "object",
+    filterType: "text",
+    accessor: (r) => r.domain,
+    cell: (r) => <span className="font-mono text-xs">{r.domain}</span>,
+    exportValue: (r) => r.domain,
+  },
+  {
+    id: "count",
+    header: "Requests",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs tabular-nums",
+    accessor: (r) => r.count,
+    cell: (r) => r.count.toLocaleString(),
+    exportValue: (r) => r.count,
+  },
+  {
+    id: "pct",
+    header: "Share",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs tabular-nums",
+    accessor: (r) => r.pct,
+    cell: (r) => `${r.pct.toFixed(1)}%`,
+    exportValue: (r) => r.pct,
+  },
+]
+
+const TOP_PATTERN_COLUMNS: DataTableColumn<ClientReportTopPattern>[] = [
+  {
+    id: "pattern",
+    header: "Pattern",
+    slot: "object",
+    filterType: "text",
+    accessor: (r) => r.pattern,
+    cell: (r) => <span className="font-mono text-xs">{r.pattern}</span>,
+    exportValue: (r) => r.pattern,
+  },
+  {
+    id: "hits",
+    header: "Hits",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs tabular-nums",
+    accessor: (r) => r.hits,
+    cell: (r) => r.hits.toLocaleString(),
+    exportValue: (r) => r.hits,
+  },
+]
+
+const TOP_URL_COLUMNS: DataTableColumn<ClientReportTopUrl>[] = [
+  {
+    id: "url",
+    header: "URL",
+    slot: "object",
+    filterType: "text",
+    accessor: (r) => r.url,
+    cell: (r) => (
+      <span className="block max-w-[420px] truncate font-mono text-xs" title={r.url}>
+        {r.url}
+      </span>
+    ),
+    exportValue: (r) => r.url,
+  },
+  {
+    id: "count",
+    header: "Requests",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs tabular-nums",
+    accessor: (r) => r.count,
+    cell: (r) => r.count.toLocaleString(),
+    exportValue: (r) => r.count,
+  },
+]
+
+const CLIENT_COLUMNS: DataTableColumn<UrlClientCount>[] = [
+  {
+    id: "client_ip",
+    header: "Client IP",
+    slot: "identity",
+    filterType: "text",
+    accessor: (r) => r.client_ip,
+    cell: (r) => <span className="font-mono text-xs">{r.client_ip}</span>,
+    exportValue: (r) => r.client_ip,
+  },
+  {
+    id: "count",
+    header: "Requests",
+    slot: "measures",
+    filterType: "number",
+    defaultSortDir: "desc",
+    align: "right",
+    className: "font-mono text-xs tabular-nums",
+    accessor: (r) => r.count,
+    cell: (r) => r.count.toLocaleString(),
+    exportValue: (r) => r.count,
+  },
+  {
+    id: "last_seen",
+    header: "Last seen",
+    slot: "measures",
+    filterType: "datetime",
+    accessor: (r) => r.last_seen,
+    cell: (r) => <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">{r.last_seen}</span>,
+    exportValue: (r) => r.last_seen,
+  },
+]
 
 /** Section 02's body — the risk summary, WITH its justification.
  *
@@ -401,46 +485,45 @@ export function ReportPage({ kind, value, onBack }: Props) {
               </p>
             ) : (
             <div className="space-y-5">
-              <IndicatorTable
-                title="Top domains"
-                emptyLabel="No data in window"
-                columns={[{ label: "Domain" }, { label: "Count", align: "right" }, { label: "Share", align: "right" }]}
-                rows={report.data.top_domains.slice(0, 10)}
-                rowKey={(r) => r.domain}
-                renderRow={(r) => (
-                  <>
-                    <td className="py-2 pr-4 font-mono text-xs">{r.domain}</td>
-                    <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">{r.count.toLocaleString()}</td>
-                    <td className="py-2 text-right font-mono text-xs tabular-nums">{r.pct.toFixed(1)}%</td>
-                  </>
-                )}
-              />
-              <IndicatorTable
-                title="Top patterns"
-                emptyLabel="No data in window"
-                columns={[{ label: "Pattern" }, { label: "Hits", align: "right" }]}
-                rows={report.data.top_patterns.slice(0, 10)}
-                rowKey={(r) => r.pattern}
-                renderRow={(r) => (
-                  <>
-                    <td className="py-2 pr-4 font-mono text-xs">{r.pattern}</td>
-                    <td className="py-2 text-right font-mono text-xs tabular-nums">{r.hits.toLocaleString()}</td>
-                  </>
-                )}
-              />
-              <IndicatorTable
-                title="Top URLs"
-                emptyLabel="No data in window"
-                columns={[{ label: "URL" }, { label: "Count", align: "right" }]}
-                rows={report.data.top_urls.slice(0, 10)}
-                rowKey={(r) => r.url}
-                renderRow={(r) => (
-                  <>
-                    <td className="max-w-[420px] truncate py-2 pr-4 font-mono text-xs" title={r.url}>{r.url}</td>
-                    <td className="py-2 text-right font-mono text-xs tabular-nums">{r.count.toLocaleString()}</td>
-                  </>
-                )}
-              />
+              <section>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Top domains
+                </h4>
+                <DataTable
+                  columns={TOP_DOMAIN_COLUMNS}
+                  data={report.data.top_domains.slice(0, 10)}
+                  rowId={(r) => r.domain}
+                  viewKey="report-domains"
+                  ariaLabel="Top domains"
+                  empty={{ icon: ShieldQuestion, title: "No data in window" }}
+                />
+              </section>
+              <section>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Top patterns
+                </h4>
+                <DataTable
+                  columns={TOP_PATTERN_COLUMNS}
+                  data={report.data.top_patterns.slice(0, 10)}
+                  rowId={(r) => r.pattern}
+                  viewKey="report-patterns"
+                  ariaLabel="Top patterns"
+                  empty={{ icon: ShieldQuestion, title: "No data in window" }}
+                />
+              </section>
+              <section>
+                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Top URLs
+                </h4>
+                <DataTable
+                  columns={TOP_URL_COLUMNS}
+                  data={report.data.top_urls.slice(0, 10)}
+                  rowId={(r) => r.url}
+                  viewKey="report-urls"
+                  ariaLabel="Top URLs"
+                  empty={{ icon: ShieldQuestion, title: "No data in window" }}
+                />
+              </section>
             </div>
             )
           ) : (
@@ -452,20 +535,19 @@ export function ReportPage({ kind, value, onBack }: Props) {
             <Skeleton className="h-40 w-full" />
           </div>
         ) : breakdown.data ? (
-          <IndicatorTable
-            title="Clients"
-            emptyLabel="No data in window"
-            columns={[{ label: "Client IP" }, { label: "Accesses", align: "right" }, { label: "Last seen" }]}
-            rows={breakdown.data.clients.slice(0, 25)}
-            rowKey={(r) => r.client_ip}
-            renderRow={(r) => (
-              <>
-                <td className="py-2 pr-4 font-mono text-xs">{r.client_ip}</td>
-                <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">{r.count.toLocaleString()}</td>
-                <td className="whitespace-nowrap py-2 font-mono text-xs text-muted-foreground">{r.last_seen}</td>
-              </>
-            )}
-          />
+          <section>
+            <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Clients
+            </h4>
+            <DataTable
+              columns={CLIENT_COLUMNS}
+              data={breakdown.data.clients.slice(0, 25)}
+              rowId={(r) => r.client_ip}
+              viewKey="report-clients"
+              ariaLabel="Clients"
+              empty={{ icon: FileText, title: "No data in window" }}
+            />
+          </section>
         ) : (
           <p className="text-sm text-muted-foreground">Section unavailable: {breakdown.error ?? "no breakdown"}</p>
         )}

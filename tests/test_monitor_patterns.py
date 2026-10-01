@@ -457,3 +457,56 @@ def test_block_pattern_clause_skips_blank_patterns():
         == "(url : *porn* OR base_url : *porn*)"
         " OR (url : *nonton* OR base_url : *nonton*)"
     )
+
+
+def test_build_items_carries_accounting_tag_on_every_row():
+    """Every Query row carries the new/enforcement split (ADR 0001).
+
+    WHY: the Query grid keys rows by
+    ``timestamp|client_ip|url|accounting_tag``. A request that produced both a
+    ``new`` and an ``enforcement`` row shares timestamp+client+url, so a
+    missing tag collapses the two onto one React key and one selection id
+    (D4). The tag must therefore be present on EVERY row — an ALLOW is a
+    "new" finding, not the absence of a tag.
+    """
+    from app.services.result_processor import build_items
+
+    df = pd.DataFrame(
+        [
+            {
+                "url": "https://x.example/a",
+                "@timestamp": "2026-10-01T00:00:00+00:00",
+                "client_ip": "10.0.0.5",
+                "action": "DENY",
+            },
+            {  # the D4 twin: same ts/client/url, different action
+                "url": "https://x.example/a",
+                "@timestamp": "2026-10-01T00:00:00+00:00",
+                "client_ip": "10.0.0.5",
+                "action": "ALLOW",
+            },
+            {  # a blank action is still a "new" finding
+                "url": "https://x.example/b",
+                "@timestamp": "2026-10-01T00:00:01+00:00",
+                "client_ip": "10.0.0.5",
+                "action": "",
+            },
+        ]
+    )
+    items = build_items(
+        df,
+        50,
+        block_patterns=["*x*"],
+        whitelist_regex="",
+        blacklist_urls=set(),
+        blacklist_ips=set(),
+    )
+
+    assert [it["accounting_tag"] for it in items] == ["enforcement", "new", "new"]
+
+    ids = [
+        f"{it['timestamp']}|{it['client_ip']}|{it['url']}|{it['accounting_tag']}"
+        for it in items
+    ]
+    # The twin pair no longer collides.
+    assert len(ids) == len(set(ids))

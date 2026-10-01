@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react"
 import * as echarts from "echarts/core"
 import { BarChart, LineChart } from "echarts/charts"
-import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components"
+import { GridComponent, LegendComponent, TitleComponent, TooltipComponent } from "echarts/components"
 import { CanvasRenderer } from "echarts/renderers"
 import type {
   ECharts,
@@ -17,7 +17,7 @@ import {
   resolveColor,
 } from "../lib/echartsTheme"
 
-echarts.use([BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+echarts.use([BarChart, LineChart, GridComponent, TitleComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 /** One x-axis bucket with one value per series (e.g. inbound/outbound or allow/deny). */
 export interface TrendPoint {

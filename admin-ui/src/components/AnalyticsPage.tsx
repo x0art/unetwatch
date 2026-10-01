@@ -212,9 +212,16 @@ export function AnalyticsPage({
   /* ── Stat card values ──────────────────────────────────────────────── */
 
   const hasRealData = !!summary?.has_data
-  const volumeValue = hasRealData ? formatBytes(summary!.totalVolume) : "—"
-  const riskValue = hasRealData ? summary!.totalRisk.toLocaleString() : "—"
-  const enforcedValue = hasRealData ? summary!.totalEnforcements.toLocaleString() : "—"
+  // Counts are nullable: the backend reports "not computed" as null (e.g. an
+  // ES window whose enforcement count could not be answered), which is a
+  // legitimate state distinct from 0. Never dereference a maybe-null count —
+  // render "—" instead.
+  const countOrDash = (v: number | null | undefined): string =>
+    typeof v === "number" ? v.toLocaleString() : "—"
+  const hasVolume = typeof summary?.totalVolume === "number"
+  const volumeValue = hasRealData && hasVolume ? formatBytes(summary!.totalVolume as number) : "—"
+  const riskValue = hasRealData ? countOrDash(summary!.totalRisk) : "—"
+  const enforcedValue = hasRealData ? countOrDash(summary!.totalEnforcements) : "—"
   const hostValue = hasRealData && summary!.topBandwidthHost ? summary!.topBandwidthHost : "—"
   const peakValue = hasRealData && summary!.peakTrafficTime ? summary!.peakTrafficTime : "—"
 
@@ -259,6 +266,7 @@ export function AnalyticsPage({
     () => [
       {
         id: "domain",
+        slot: "identity",
         header: "Domain",
         filterType: "text",
         accessor: (r) => r.domain,
@@ -270,6 +278,7 @@ export function AnalyticsPage({
       },
       {
         id: "count",
+        slot: "measures",
         header: "Requests",
         filterType: "number",
         accessor: (r) => r.count,
@@ -279,6 +288,7 @@ export function AnalyticsPage({
       },
       {
         id: "volume",
+        slot: "measures",
         header: "Volume",
         filterType: "number",
         accessor: (r) => r.volume,
@@ -292,11 +302,19 @@ export function AnalyticsPage({
       },
       {
         id: "pct",
-        header: "% total",
+        slot: "measures",
+        header: "Share",
         filterType: "number",
         accessor: (r) => r.pct,
         align: "right",
-        cell: (r) => <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>,
+        // `pct` is null when the window has no measured volume — "not
+        // computed", never 0 and never a crash (see `pct` in the backend).
+        cell: (r) =>
+          typeof r.pct === "number" ? (
+            <span className="font-mono text-xs font-bold tabular-nums">{r.pct.toFixed(1)}%</span>
+          ) : (
+            <span className="text-xs text-muted-foreground/60">—</span>
+          ),
         width: "w-20",
       },
     ],
@@ -307,6 +325,7 @@ export function AnalyticsPage({
     () => [
       {
         id: "client_ip",
+        slot: "identity",
         header: "Client IP",
         filterType: "text",
         accessor: (r) => r.client_ip,
@@ -329,6 +348,7 @@ export function AnalyticsPage({
       },
       {
         id: "count",
+        slot: "measures",
         header: "Requests",
         filterType: "number",
         accessor: (r) => r.count,
@@ -338,6 +358,7 @@ export function AnalyticsPage({
       },
       {
         id: "last_seen",
+        slot: "measures",
         header: "Last seen",
         filterType: "datetime",
         accessor: (r) => r.last_seen,
@@ -351,6 +372,7 @@ export function AnalyticsPage({
     () => [
       {
         id: "log_timestamp",
+        slot: "identity",
         header: "Timestamp",
         filterType: "datetime",
         accessor: (r) => r.log_timestamp,
@@ -360,6 +382,7 @@ export function AnalyticsPage({
       },
       {
         id: "client_ip",
+        slot: "subject",
         header: "Client IP",
         filterType: "text",
         accessor: (r) => r.client_ip,
@@ -380,6 +403,7 @@ export function AnalyticsPage({
       },
       {
         id: "url",
+        slot: "object",
         header: "URL",
         filterType: "text",
         accessor: (r) => r.url,
@@ -402,7 +426,8 @@ export function AnalyticsPage({
       },
       {
         id: "base_url",
-        header: "Domain",
+        slot: "object",
+        header: "Destination",
         filterType: "text",
         accessor: (r) => r.base_url,
         cell: (r) => (
@@ -422,6 +447,7 @@ export function AnalyticsPage({
       },
       {
         id: "action",
+        slot: "verdict",
         header: "Action",
         filterType: "enum",
         accessor: (r) => r.action,
@@ -430,6 +456,7 @@ export function AnalyticsPage({
       },
       {
         id: "pattern",
+        slot: "evidence",
         header: "Pattern",
         enableSorting: false,
         filterType: "text",
@@ -460,6 +487,7 @@ export function AnalyticsPage({
       },
       {
         id: "volume",
+        slot: "measures",
         header: "Volume",
         filterType: "number",
         accessor: (r) => {
@@ -490,6 +518,7 @@ export function AnalyticsPage({
       },
       {
         id: "duration",
+        slot: "measures",
         header: "Duration",
         filterType: "number",
         accessor: (r) => r.duration_seconds,
@@ -708,6 +737,7 @@ export function AnalyticsPage({
               description: "Try a broader date range.",
               action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
+            viewKey="analytics-domains"
             ariaLabel="Top bandwidth consuming domains"
           />
         </Panel>
@@ -723,6 +753,7 @@ export function AnalyticsPage({
               description: "Client IPs with findings appear here.",
               action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
+            viewKey="analytics-clients"
             ariaLabel="Top findings clients"
           />
         </Panel>
@@ -766,7 +797,6 @@ export function AnalyticsPage({
             data={rawUniqueDomains ? dedupeByDomain(raw) : raw}
             rowId={(r) => String(r.id)}
             loading={rawLoading}
-            internalPagination
             total={rawTotal}
             page={rawPage}
             pageSize={rawPageSize}
@@ -777,6 +807,7 @@ export function AnalyticsPage({
               description: "Try a broader date range or clear the filter.",
               action: <Button variant="outline" size="sm" onClick={() => setRange("30d")}>Broaden range</Button>,
             }}
+            viewKey="analytics-raw"
             ariaLabel="Raw findings"
           />
         )}

@@ -52,7 +52,7 @@ import pandas as pd
 from app.config import get_settings
 from app.database import get_db
 from app.services import es_fields
-from app.services.es_client import es_client
+from app.services.es_client import es_client, es_hits_total
 from app.services.logline import LogLine, parse_line, parse_rule_codes
 from app.services.monitor import (
     build_logs_query,
@@ -1474,17 +1474,12 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
                 )
 
         # The proxy's own count of DENY/FLAG rows for this host, independent of
-        # whether any of those rows matched a block pattern. Read defensively:
-        # a response with no `total` (e.g. a stub, or an index that predates
-        # `track_total_hits`) leaves it None — unavailable, not 0.
-        enforcement_total = (
-            enf_res.get("hits", {}).get("total") if isinstance(enf_res, dict) else None
-        )
-        enforcements: int | None
-        if isinstance(enforcement_total, dict):
-            enforcements = int(enforcement_total.get("value", 0))
-        else:
-            enforcements = None
+        # whether any of those rows matched a block pattern. ``es_hits_total``
+        # reads the elasticsearch-py ``ObjectApiResponse`` correctly (a bare
+        # ``isinstance(res, dict)`` is always false — see its docstring); no
+        # usable ``total`` (a stub, or an index without ``track_total_hits``)
+        # leaves it None — unavailable, not 0.
+        enforcements: int | None = es_hits_total(enf_res)
 
         # Apply the proxy's own enforcement count to the signal before any
         # early return, so a host that was DENIED repeatedly but reached no
@@ -1961,16 +1956,10 @@ async def map_url(url: str, source: str = "live", limit: int = 50) -> AttckMappi
                     summary="Elasticsearch unavailable.",
                 )
 
-        # The proxy's own count of DENY/FLAG rows for this URL token. Read
-        # defensively: no `total` block leaves it unavailable (None), not 0.
-        enforcement_total = (
-            enf_res.get("hits", {}).get("total") if isinstance(enf_res, dict) else None
-        )
-        enforcements: int | None
-        if isinstance(enforcement_total, dict):
-            enforcements = int(enforcement_total.get("value", 0))
-        else:
-            enforcements = None
+        # The proxy's own count of DENY/FLAG rows for this URL token. Read via
+        # ``es_hits_total`` (an elasticsearch-py ``ObjectApiResponse`` is not a
+        # ``dict``); no usable ``total`` leaves it unavailable (None), not 0.
+        enforcements: int | None = es_hits_total(enf_res)
 
         # Apply the measured count before any early return, so a URL DENIED
         # repeatedly but never matched by a block pattern still reports its real

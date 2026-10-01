@@ -51,15 +51,8 @@ const PATTERNS_ROW_ID = (p: Pattern) => p.id
  * DataTable never re-sorts/re-renders when PatternTable re-renders. */
 const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   {
-    id: "id",
-    header: "ID",
-    filterType: "number",
-    accessor: (p) => p.id,
-    cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
-    width: "w-14",
-  },
-  {
     id: "pattern",
+    slot: "identity",
     header: "Pattern",
     filterType: "text",
     accessor: (p) => p.pattern,
@@ -72,6 +65,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   },
   {
     id: "pattern_type",
+    slot: "verdict",
     header: "Type",
     filterType: "enum",
     accessor: (p) => p.pattern_type,
@@ -84,7 +78,18 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     width: "w-24",
   },
   {
+    id: "id",
+    slot: "evidence",
+    defaultHidden: true,
+    header: "ID",
+    filterType: "number",
+    accessor: (p) => p.id,
+    cell: (p) => <span className="font-mono text-xs text-muted-foreground">{p.id}</span>,
+    width: "w-14",
+  },
+  {
     id: "created_at",
+    slot: "measures",
     header: "Created",
     filterType: "datetime",
     accessor: (p) => p.created_at,
@@ -97,6 +102,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   },
   {
     id: "actions",
+    slot: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
@@ -391,6 +397,7 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
         hasNext={patterns.length === pageSize}
         onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
         onPageChange={setPage}
+        viewKey="patterns"
         ariaLabel="Patterns"
       />
 

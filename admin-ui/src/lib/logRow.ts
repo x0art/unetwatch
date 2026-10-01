@@ -28,10 +28,18 @@ export function getDurationMs(r: LogRow): number | null {
 }
 
 export function getRowId(r: LogRow): string {
-  const q = r as unknown as QueryDoc
-  const id = (r as { id?: unknown }).id
-  if (typeof id === "string" || typeof id === "number") return String(id)
-  return `${q.timestamp}|${q.client_ip ?? getSrcIp(r)}|${q.url}`
+  if (typeof r.id === "string" || typeof r.id === "number") return String(r.id)
+  // Discriminate the new/enforcement twin of one request, exactly as
+  // `queryRowId` does for the Query grid: without this the two rows share a
+  // React key and a selection id. `accounting_tag` is the derived split (the
+  // preferred discriminator); when a looser row carries no tag, fall back to
+  // `action` — also stable per row and, like the tag, the thing that tells a
+  // DENY row apart from the ALLOW row of the same request. Both may be empty
+  // on a malformed row, so the trailing `|` is a last resort rather than a
+  // silent collapse.
+  const tag = typeof r.accounting_tag === "string" ? r.accounting_tag : ""
+  const action = typeof r.action === "string" ? r.action : ""
+  return `${r.timestamp}|${r.client_ip ?? getSrcIp(r)}|${r.url}|${tag || action}`
 }
 
 export function getMatchedRule(r: LogRow): string {

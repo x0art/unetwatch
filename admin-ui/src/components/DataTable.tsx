@@ -1,10 +1,56 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { createPortal } from "react-dom"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
+import * as PopoverPrimitive from "@radix-ui/react-popover"
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
 import { AnimatePresence, motion } from "framer-motion"
-import { ArrowDown, ArrowUp, ArrowUpDown, Filter, X, type LucideIcon } from "lucide-react"
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Download,
+  GripVertical,
+  RotateCcw,
+  Rows3,
+  X,
+  type LucideIcon,
+} from "lucide-react"
 import { cn } from "../lib/utils"
-import { Button, EmptyState, Pagination, Select, Skeleton } from "./ui"
+import { Button, EmptyState, Pagination, Skeleton, useToast } from "./ui"
 import { EASE, Stagger, StaggerItem } from "./motion"
+import {
+  clearPersisted,
+  isEnumFilter,
+  isEnumFilterActive,
+  orderBySlot,
+  readPersisted,
+  writePersisted,
+  type ColumnSlot,
+  type ContextMenuItem,
+  type Density,
+  type ExportPayload,
+  type ExportScope,
+  type PersistedTableState,
+  type SavedView,
+} from "./table/types"
+import { useColumnState, type ColumnStateDefaults } from "./table/useColumnState"
+import {
+  cellExportValue,
+  defaultExportFilename,
+  downloadCsv,
+  exportHeaderOf,
+  payloadToCsv,
+  toCsv,
+} from "./table/exportCsv"
+import { ColumnChooser } from "./table/ColumnChooser"
+import { FilterBuilder, FilterChips, FilterEditor, summarizeFilter, type FilterChipModel } from "./table/FilterBuilder"
+import { RowDetailPanel } from "./table/RowDetailPanel"
 
 /* ════════════════════════════════════════════════════════════════
  * DataTable — reusable, sortable table with bulk actions
@@ -15,6 +61,12 @@ import { EASE, Stagger, StaggerItem } from "./motion"
  *  - row selection + a bulk action bar (select-all, indeterminate,
  *    per-action buttons, clear)
  *  - loading skeleton rows, empty states, pagination slot
+ *  - column visibility / resize / reorder with `viewKey` persistence
+ *  - density (Comfortable | Compact), CSV export, toolbar
+ *  - tri-state per-column filters + persistent filter chips
+ *  - slot-based canonical column order (§3.1) — **inert unless a
+ *    column sets `slot`**, so un-adopted call sites render unchanged
+ *  - sticky header, row context menu, and a details side panel
  *
  *   <DataTable
  *     columns={columns}               // DataTableColumn<T>[]
@@ -50,21 +102,28 @@ export interface NumberFilter {
   max: string
 }
 
-/** A column filter value: scalar for `enum`/`text`, range object for `datetime`/`number`. */
-export type ColumnFilterValue = string | DatetimeFilter | NumberFilter
+/** Tri-state enum filter: Include / Exclude option lists. */
+export interface EnumFilter {
+  include: string[]
+  exclude: string[]
+}
+
+/** A column filter value: scalar for `enum`/`text`, object for the rest. */
+export type ColumnFilterValue = string | DatetimeFilter | NumberFilter | EnumFilter
 
 export function isActiveFilter(value: ColumnFilterValue | undefined): boolean {
   if (value === undefined) return false
   if (typeof value === "string") return value.trim() !== ""
+  if (isEnumFilter(value)) return isEnumFilterActive(value)
   return Object.values(value).some((v) => v.trim() !== "")
 }
 
 function isDatetimeFilter(value: ColumnFilterValue): value is DatetimeFilter {
-  return typeof value === "object" && "from" in value
+  return typeof value === "object" && value !== null && "from" in value
 }
 
 function isNumberFilter(value: ColumnFilterValue): value is NumberFilter {
-  return typeof value === "object" && "min" in value
+  return typeof value === "object" && value !== null && "min" in value
 }
 
 function emptyFilterFor(type: FilterType): ColumnFilterValue {
@@ -72,6 +131,9 @@ function emptyFilterFor(type: FilterType): ColumnFilterValue {
   if (type === "number") return { min: "", max: "" }
   return ""
 }
+
+/** Column slot in the canonical grammar (§3.1). */
+export type { ColumnSlot } from "./table/types"
 
 export interface DataTableColumn<T> {
   /** Unique key; used for sorting. */
@@ -96,6 +158,47 @@ export interface DataTableColumn<T> {
   width?: string
   /** Hide this column's contents visually but keep it for screen readers? */
   srOnly?: boolean
+
+  /* ── new: order + visibility (§4.1) ──────────────────────────── */
+  /** Canonical slot (§3). When no column sets a slot the renderer falls
+   * back to declaration order, so un-adopted call sites are unchanged. */
+  slot?: ColumnSlot
+  /** Default true; false pins the column (chooser renders it locked). */
+  hideable?: boolean
+  /** Hidden until the operator reveals it via the column chooser. */
+  defaultHidden?: boolean
+
+  /* ── new: sizing (§4.1) ──────────────────────────────────────── */
+  /** px floor for drag-resize; default 64. */
+  minWidth?: number
+  /** px ceiling; default 640. */
+  maxWidth?: number
+  /** Default true. */
+  resizable?: boolean
+
+  /* ── new: pinning / sortability ──────────────────────────────── */
+  /** Default: slot "select"/"identity" ⇒ left, slot "actions" ⇒ right. */
+  sticky?: "left" | "right"
+  /** Alias of `enableSorting`; the stricter value wins. */
+  sortable?: boolean
+
+  /* ── new: filtering + search ─────────────────────────────────── */
+  /** Participates in the toolbar search box. */
+  quickFilter?: boolean
+  /** Alias of `quickFilter`. */
+  searchable?: boolean
+  /** Static enum options, superseding `ENUM_FALLBACKS[id]`. */
+  filterOptions?: string[]
+
+  /* ── new: presentation + export ──────────────────────────────── */
+  /** Merged onto the `<td>`, not the `<th>`. */
+  cellClass?: string
+  /** Tooltip on the header label. */
+  headerTitle?: string
+  /** CSV cell value; defaults to the stringified accessor. */
+  exportValue?: (row: T) => string | number | null
+  /** CSV header; defaults to `String(header)`. */
+  exportHeader?: string
 }
 
 export interface DataTableBulkAction {
@@ -162,6 +265,54 @@ interface DataTableProps<T> {
   internalPagination?: boolean
   className?: string
   ariaLabel?: string
+
+  /* ── new: capability flags (all opt-out, defaults preserve today) ─ */
+  enableColumnVisibility?: boolean
+  enableReorder?: boolean
+  enableResize?: boolean
+  enableExport?: boolean
+  stickyHeader?: boolean
+  enableContextMenu?: boolean
+  enableQuickFilter?: boolean
+  enableSavedViews?: boolean
+
+  /* ── new: toolbar + surfaces ─────────────────────────────────── */
+  density?: Density
+  defaultDensity?: Density
+  onDensityChange?: (density: Density) => void
+  /** Left cluster, after the search box. */
+  toolbar?: ReactNode
+  /** Right cluster, before the built-in controls. */
+  toolbarRight?: ReactNode
+  /** Persistent filter row (page-provided). */
+  filterBuilder?: ReactNode
+  /** Persistence key — the ONLY switch that turns on persistence. */
+  viewKey?: string
+  /** Right-click menu items for a row. */
+  rowMenu?: (row: T) => ContextMenuItem[]
+  /** Side-panel body for the selected row. */
+  rowDetail?: (row: T) => ReactNode
+  /** Controlled panel open state. */
+  rowDetailOpen?: boolean
+  onRowDetailOpenChange?: (open: boolean) => void
+  /** Double-click / Enter activation (defaults to opening the detail panel). */
+  onRowActivate?: (row: T) => void
+  /** Server-side full export. */
+  onExport?: (scope: ExportScope) => Promise<ExportPayload | void>
+  exportFilename?: string
+  onRefresh?: () => void
+  /** Controlled column state (opt-in; beats everything below it). */
+  columnOrder?: string[]
+  onColumnOrderChange?: (order: string[]) => void
+  columnVisibility?: Record<string, boolean>
+  onColumnVisibilityChange?: (visibility: Record<string, boolean>) => void
+  columnWidths?: Record<string, number>
+  onColumnWidthsChange?: (widths: Record<string, number>) => void
+  /** Saved views (opt-in, `enableSavedViews`). */
+  savedViews?: SavedView[]
+  onSavedViewsChange?: (views: SavedView[]) => void
+  activeViewId?: string | null
+  onActiveViewChange?: (id: string | null) => void
 }
 
 function compareValues(a: unknown, b: unknown): number {
@@ -191,7 +342,8 @@ function accessorValues(v: unknown): string[] {
 
 /**
  * Static enum fallbacks keyed by column id, unioned after the dynamic values
- * so server-paginated tables still offer every known value.
+ * so server-paginated tables still offer every known value. Retained as a
+ * fallback for one release — `column.filterOptions` supersedes it (§4.1).
  */
 const ENUM_FALLBACKS: Record<string, string[]> = {
   action: ["ALLOW", "DENY", "FLAG"],
@@ -199,233 +351,16 @@ const ENUM_FALLBACKS: Record<string, string[]> = {
   coverage: ["Blacklist risk", "Whitelist", "Blacklist", "None"],
 }
 
-/**
- * HeaderFilter — popover filter anchored in the `th`, with the type-matched
- * control + Clear/Apply. Draft state lives locally until Apply commits it via
- * `onApply`, so typing never refilters mid-keystroke.
- */
-function HeaderFilter<T>({
-  col,
-  value,
-  onApply,
-  options,
-}: {
-  col: DataTableColumn<T>
-  value: ColumnFilterValue | undefined
-  onApply: (value: ColumnFilterValue) => void
-  options: { value: string; label: string }[]
-}) {
-  const type = col.filterType ?? "enum"
-  const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<ColumnFilterValue>(value ?? emptyFilterFor(type))
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  // Portal the popover to document.body — the table wrapper is
-  // overflow-x-auto, which forces overflow-y to auto and would clip an
-  // absolutely-positioned panel inside the th on wide/scrolled tables.
-  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
-  useLayoutEffect(() => {
-    if (!open) {
-      setPanelPos(null)
-      return
-    }
-    const place = () => {
-      const r = triggerRef.current?.getBoundingClientRect()
-      if (!r) return
-      // Clamp horizontally so right-edge columns never run off-viewport
-      // (panel is w-56 = 224px).
-      setPanelPos({
-        top: r.bottom + window.scrollY + 4,
-        left: Math.max(8, Math.min(r.left + window.scrollX, window.innerWidth - 232)),
-      })
-    }
-    place()
-    window.addEventListener("scroll", place, true)
-    window.addEventListener("resize", place)
-    return () => {
-      window.removeEventListener("scroll", place, true)
-      window.removeEventListener("resize", place)
-    }
-  }, [open ])
+const DENSITY_PAD: Record<Density, { th: string; td: string }> = {
+  comfortable: { th: "px-4 py-3", td: "px-4 py-3" },
+  compact: { th: "px-3 py-2", td: "px-3 py-1.5" },
+}
 
-  // Resync the draft when the committed filter changes from outside
-  // (Clear from the trigger state, parent-controlled resets).
-  const committedKey = JSON.stringify(value ?? null)
-  useEffect(() => {
-    setDraft(value ?? emptyFilterFor(type))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [committedKey])
-
-  // Dismiss on outside click / Escape.
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (e: PointerEvent) => {
-      const t = e.target as Node
-      if (panelRef.current?.contains(t) || triggerRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
-    }
-    document.addEventListener("pointerdown", onPointer)
-    document.addEventListener("keydown", onKey)
-    return () => {
-      document.removeEventListener("pointerdown", onPointer)
-      document.removeEventListener("keydown", onKey)
-    }
-  }, [open ])
-
-  const active = isActiveFilter(value)
-  const label = String(col.header)
-  const inputClass =
-    "h-8 w-full rounded border border-border bg-card px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-
-  return (
-    <span className="relative inline-flex">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-label={`Filter by ${label}`}
-        aria-expanded={open}
-        aria-pressed={active}
-        title={`Filter by ${label}`}
-        className={cn(
-          "inline-flex h-6 w-6 items-center justify-center rounded border border-transparent transition-colors hover:border-border hover:bg-muted",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          active ? "text-primary" : "text-muted-foreground/60 hover:text-muted-foreground",
-          open && "border-border bg-muted",
-        )}
-      >
-        <Filter className={cn("h-3 w-3", active && "fill-current")} aria-hidden="true" />
-        {active && (
-          <span
-            className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
-            aria-hidden="true"
-          />
-        )}
-      </button>
-      {open && panelPos && createPortal(
-        <div
-          ref={panelRef}
-          role="dialog"
-          aria-label={`Filter by ${label}`}
-          style={{ top: panelPos.top, left: panelPos.left }}
-          className="fixed z-50 mt-1 w-56 rounded-md border border-border bg-card p-3 text-left shadow-md"
-        >
-          {type === "enum" && (options.length === 0 && (ENUM_FALLBACKS[col.id]?.length ?? 0) === 0 ? (
-            <div>
-              <p className="mb-2 text-xs text-muted-foreground">
-                No values in loaded rows — broaden the time window
-              </p>
-              <fieldset disabled className="opacity-50">
-                <Select
-                  value={typeof draft === "string" ? draft : ""}
-                  onChange={() => {}}
-                  options={[{ value: "", label: "All" }]}
-                  placeholder="All"
-                  size="sm"
-                  aria-label={`Filter by ${label}`}
-                  className="w-full"
-                />
-              </fieldset>
-            </div>
-          ) : (
-            <Select
-              value={typeof draft === "string" ? draft : ""}
-              onChange={(v) => setDraft(v)}
-              options={[{ value: "", label: "All" }, ...options]}
-              placeholder="All"
-              size="sm"
-              aria-label={`Filter by ${label}`}
-              className="w-full"
-            />
-          ))}
-          {type === "text" && (
-            <input
-              type="search"
-              value={typeof draft === "string" ? draft : ""}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Filter"
-              aria-label={`Filter by ${label}`}
-              className={inputClass}
-            />
-          )}
-          {type === "datetime" && (
-            <div className="space-y-2">
-              <label className="mono-label block">
-                From
-                <input
-                  type="datetime-local"
-                  value={isDatetimeFilter(draft) ? draft.from : ""}
-                  onChange={(e) =>
-                    setDraft({ from: e.target.value, to: isDatetimeFilter(draft) ? draft.to : "" })
-                  }
-                  aria-label={`Filter by ${label}, from`}
-                  className={cn(inputClass, "mt-1")}
-                />
-              </label>
-              <label className="mono-label block">
-                To
-                <input
-                  type="datetime-local"
-                  value={isDatetimeFilter(draft) ? draft.to : ""}
-                  onChange={(e) =>
-                    setDraft({ to: e.target.value, from: isDatetimeFilter(draft) ? draft.from : "" })
-                  }
-                  aria-label={`Filter by ${label}, to`}
-                  className={cn(inputClass, "mt-1")}
-                />
-              </label>
-            </div>
-          )}
-          {type === "number" && (
-            <div className="flex items-center gap-2">
-              <label className="mono-label flex-1">
-                Min
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={isNumberFilter(draft) ? draft.min : ""}
-                  onChange={(e) =>
-                    setDraft({ min: e.target.value, max: isNumberFilter(draft) ? draft.max : "" })
-                  }
-                  aria-label={`Filter by ${label}, minimum`}
-                  className={cn(inputClass, "mt-1")}
-                />
-              </label>
-              <label className="mono-label flex-1">
-                Max
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={isNumberFilter(draft) ? draft.max : ""}
-                  onChange={(e) =>
-                    setDraft({ max: e.target.value, min: isNumberFilter(draft) ? draft.min : "" })
-                  }
-                  aria-label={`Filter by ${label}, maximum`}
-                  className={cn(inputClass, "mt-1")}
-                />
-              </label>
-            </div>
-          )}
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => { setDraft(emptyFilterFor(type)); onApply(emptyFilterFor(type)); setOpen(false) }}>
-              Clear
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => { onApply(draft); setOpen(false) }}
-            >
-              Apply
-            </Button>
-          </div>
-        </div>,
-        document.body,
-      )}
-    </span>
-  )
+/** Parse a Tailwind px width (`w-[320px]`) into a number, else undefined. */
+function parsePxWidth(width: string | undefined): number | undefined {
+  if (!width) return undefined
+  const m = /(\d+)px/.exec(width)
+  return m ? Number(m[1]) : undefined
 }
 
 function Checkbox({
@@ -486,7 +421,41 @@ export function DataTable<T>({
   internalPagination = false,
   className,
   ariaLabel = "Data table",
+  enableColumnVisibility = true,
+  enableReorder = true,
+  enableResize = true,
+  enableExport = true,
+  stickyHeader = true,
+  enableContextMenu = true,
+  enableQuickFilter = false,
+  // `enableSavedViews` is accepted for API compatibility; saved views ship in Step 12.
+  density: controlledDensity,
+  defaultDensity = "comfortable",
+  onDensityChange,
+  toolbar,
+  toolbarRight,
+  filterBuilder,
+  viewKey,
+  rowMenu,
+  rowDetail,
+  rowDetailOpen,
+  onRowDetailOpenChange,
+  onRowActivate,
+  onExport,
+  exportFilename,
+  onRefresh,
+  columnOrder: controlledOrder,
+  onColumnOrderChange,
+  columnVisibility: controlledVisibility,
+  onColumnVisibilityChange,
+  columnWidths: controlledWidths,
+  onColumnWidthsChange,
+  savedViews: _savedViews,
+  onSavedViewsChange: _onSavedViewsChange,
+  activeViewId: _activeViewId,
+  onActiveViewChange: _onActiveViewChange,
 }: DataTableProps<T>) {
+  const { toast } = useToast()
   const controlled = !!onSortChange
   const [internalSort, setInternalSort] = useState<{ key: SortKey | null; dir: SortDir }>({
     key: defaultSortBy,
@@ -496,14 +465,36 @@ export function DataTable<T>({
     ? { key: sortBy ?? null, dir: sortDir ?? "asc" }
     : internalSort
   const filtersControlled = controlledFilters !== undefined
-  const [internalFilters, setInternalFilters] = useState<Record<string, ColumnFilterValue>>({})
+  const [internalFilters, setInternalFilters] = useState<Record<string, ColumnFilterValue>>(() => persistedOf(viewKey, "filters") ?? {})
   const filters = filtersControlled ? controlledFilters : internalFilters
   const setFilter = (id: string, value: ColumnFilterValue) => {
     const next = { ...filters, [id]: value }
     if (!isActiveFilter(value)) delete next[id]
     if (filtersControlled) onColumnFiltersChange?.(next)
-    else setInternalFilters(next)
+    else {
+      setInternalFilters(next)
+      writePersisted(viewKey, { filters: next })
+    }
   }
+  const setAllFilters = (next: Record<string, ColumnFilterValue>) => {
+    if (filtersControlled) onColumnFiltersChange?.(next)
+    else {
+      setInternalFilters(next)
+      writePersisted(viewKey, { filters: next })
+    }
+  }
+
+  // ── D1 hazard guard (§4.5): internalPagination + total + onPageChange ──
+  useEffect(() => {
+    if (import.meta.env.DEV && internalPagination && total !== undefined && onPageChange) {
+      console.warn(
+        "[DataTable] `internalPagination` is set together with `total` and `onPageChange`. " +
+          "The component will slice an already-server-paged array, so pages ≥ 2 render empty (defect D1). " +
+          "Drop `internalPagination` when the parent owns pagination.",
+      )
+    }
+  }, [internalPagination, total, onPageChange])
+
   // A changed column filter can shrink the result set below the current page —
   // jump back to page 0 so the table never lands on a now-empty page. Compare
   // by serialized key so parents re-creating the filters object every render
@@ -526,20 +517,20 @@ export function DataTable<T>({
 
   // Drop selections for rows that are no longer in the current data set
   // (page change, refetch, filter…), so the bulk bar never counts ghosts.
+  const ids = useMemo(() => data.map((r) => rowId(r)), [data, rowId])
   useEffect(() => {
     setSelected((prev) => {
       if (prev.size === 0) return prev
-      const visible = new Set(data.map((r) => rowIdRef.current(r)))
+      const visible = new Set(ids)
       const next = new Set([...prev].filter((id) => visible.has(id)))
       return next.size === prev.size ? prev : next
     })
-  }, [data])
+  }, [ids])
 
   useEffect(() => {
     onSelectionChange?.(selected)
   }, [selected, onSelectionChange])
 
-  const ids = useMemo(() => data.map((r) => rowId(r)), [data, rowId])
   const allSelected = data.length > 0 && ids.every((id) => selected.has(id))
   const someSelected = selected.size > 0 && !allSelected
 
@@ -556,6 +547,78 @@ export function DataTable<T>({
     })
   }
 
+  /* ── Column engine (§3 slot grammar + §5.7 visibility/resize/order) ── */
+
+  const slotOrdered = useMemo(() => orderBySlot(columns), [columns])
+
+  const defaults: ColumnStateDefaults = useMemo(() => {
+    const defaultVisibility: Record<string, boolean> = {}
+    const defaultWidths: Record<string, number> = {}
+    const pinned: string[] = []
+    const reorderable: string[] = []
+    for (const col of slotOrdered) {
+      const displayable = !col.srOnly
+      if (col.defaultHidden) defaultVisibility[col.id] = false
+      if (displayable) {
+        if (col.hideable === false) pinned.push(col.id)
+        if (col.hideable !== false && col.slot !== "actions") reorderable.push(col.id)
+      }
+      const px = parsePxWidth(col.width)
+      if (px !== undefined) defaultWidths[col.id] = px
+    }
+    return { ids: slotOrdered.map((c) => c.id), pinned, defaultVisibility, defaultWidths, reorderable }
+  }, [slotOrdered])
+
+  const columnState = useColumnState({
+    viewKey,
+    defaults,
+    order: controlledOrder,
+    onOrderChange: onColumnOrderChange,
+    visibility: controlledVisibility,
+    onVisibilityChange: onColumnVisibilityChange,
+    widths: controlledWidths,
+    onWidthsChange: onColumnWidthsChange,
+    density: controlledDensity,
+    defaultDensity,
+    onDensityChange,
+    enableVisibility: enableColumnVisibility,
+    enableReorder,
+    enableResize,
+  })
+  const density = columnState.density
+
+  const orderIndex = useMemo(() => {
+    const m = new Map<string, number>()
+    columnState.state.order.forEach((id, i) => m.set(id, i))
+    return m
+  }, [columnState.state.order])
+
+  const orderedColumns = useMemo(() => {
+    return [...slotOrdered].sort(
+      (a, b) => (orderIndex.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (orderIndex.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    )
+  }, [slotOrdered, orderIndex])
+
+  const visibleColumns = useMemo(() => {
+    return orderedColumns.filter((col) => {
+      if (col.srOnly) return true
+      return columnState.state.visibility[col.id] ?? !col.defaultHidden
+    })
+  }, [orderedColumns, columnState.state.visibility])
+
+  /* ── Quick filter (§5a) ───────────────────────────────────────── */
+  const [quickQuery, setQuickQuery] = useState<string>(() => persistedOf(viewKey, "quickFilter") ?? "")
+  const [debouncedQuery, setDebouncedQuery] = useState(quickQuery)
+  useEffect(() => {
+    const id = window.setTimeout(() => setDebouncedQuery(quickQuery), 250)
+    return () => window.clearTimeout(id)
+  }, [quickQuery])
+
+  const quickColumns = useMemo(
+    () => visibleColumns.filter((c) => c.quickFilter || c.searchable),
+    [visibleColumns],
+  )
+
   /* ── Sorting ───────────────────────────────────────────────────── */
 
   const handleSort = (col: DataTableColumn<T>) => {
@@ -567,7 +630,10 @@ export function DataTable<T>({
       dir = col.defaultSortDir ?? "desc"
     }
     if (controlled) onSortChange(key, dir)
-    else setInternalSort({ key, dir })
+    else {
+      setInternalSort({ key, dir })
+      writePersisted(viewKey, { sort: { key, dir } })
+    }
   }
 
   const sortKey = sortState.key
@@ -585,10 +651,10 @@ export function DataTable<T>({
 
   // ── Per-column filtering (runs before sorting) ─────────────────────
   // The control is picked per column by `filterType` (default `enum`):
-  // enum = exact match, text = case-insensitive substring, datetime/number =
-  // open-ended range match. NOTE: filterability is intentionally decoupled
-  // from sortability — a column opts out of filtering with srOnly or
-  // enableColumnFilter={false} (enableSorting has no effect on filters).
+  // enum = exact match (or tri-state Include/NOT), text = case-insensitive
+  // substring, datetime/number = open-ended range match. NOTE: filterability
+  // is intentionally decoupled from sortability — a column opts out of
+  // filtering with srOnly or enableColumnFilter={false}.
   const filterMatches = (row: T, filters: Record<string, ColumnFilterValue>): boolean => {
     const ids = Object.keys(filters)
     if (ids.length === 0) return true
@@ -605,6 +671,18 @@ export function DataTable<T>({
         const values = accessorValues(raw)
         if (type === "text") return values.some((hay) => hay.toLowerCase().includes(needle))
         return values.some((hay) => hay.toLowerCase() === needle)
+      }
+      if (isEnumFilter(want)) {
+        const values = accessorValues(raw).map((v) => v.toLowerCase())
+        if (want.include.length > 0) {
+          const inc = want.include.map((v) => v.toLowerCase())
+          if (!values.some((v) => inc.includes(v))) return false
+        }
+        if (want.exclude.length > 0) {
+          const exc = want.exclude.map((v) => v.toLowerCase())
+          if (values.some((v) => exc.includes(v))) return false
+        }
+        return true
       }
       if (isDatetimeFilter(want)) {
         if (Array.isArray(raw)) return false
@@ -653,6 +731,22 @@ export function DataTable<T>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, controlledFilters, internalFilters, filtersControlled, columns])
 
+  const quickFilteredData = useMemo(() => {
+    const needle = debouncedQuery.trim().toLowerCase()
+    if (!needle || quickColumns.length === 0) return filteredData
+    return filteredData.filter((row) =>
+      quickColumns.some((col) =>
+        accessorValues(col.accessor ? col.accessor(row) : renderCellValue(col, row)).some((v) =>
+          v.toLowerCase().includes(needle),
+        ),
+      ),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredData, debouncedQuery, quickColumns])
+
+  const quickFilteredRef = useRef(quickFilteredData)
+  quickFilteredRef.current = quickFilteredData
+
   // Distinct values per enum-filterable column over `filterSourceData` (or
   // the current `data` when absent), for the dropdown options. Built once
   // per source/filter-column set; normalized accessor values are
@@ -672,7 +766,7 @@ export function DataTable<T>({
           if (!seen.has(key)) seen.set(key, s)
         }
       }
-      for (const fb of ENUM_FALLBACKS[col.id] ?? []) {
+      for (const fb of col.filterOptions ?? ENUM_FALLBACKS[col.id] ?? []) {
         const key = fb.toLowerCase()
         if (!seen.has(key)) seen.set(key, fb)
       }
@@ -686,7 +780,7 @@ export function DataTable<T>({
   }, [data, filterSourceData, columns])
 
   const sortedData = useMemo(() => {
-    const base = filteredData
+    const base = quickFilteredData
     if (controlled || !sortKey || !sortColumn) return base
     const dir = sortDirState === "asc" ? 1 : -1
     return [...base].sort((a, b) => {
@@ -694,7 +788,7 @@ export function DataTable<T>({
       const bv = sortColumn.accessor ? sortColumn.accessor(b) : renderCellValue(sortColumn, b)
       return compareValues(av, bv) * dir
     })
-  }, [filteredData, sortKey, sortDirState, controlled, sortColumn])
+  }, [quickFilteredData, sortKey, sortDirState, controlled, sortColumn])
 
   const alignClass = (align?: "left" | "center" | "right") =>
     align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"
@@ -714,8 +808,222 @@ export function DataTable<T>({
   // server-mode tables keep the parent's server-provided total.
   const paginationTotal = internalPagination ? sortedData.length : total
 
+  /* ── Row detail panel (§5.6) ───────────────────────────────────── */
+  const detailControlled = rowDetailOpen !== undefined
+  const [detailRowId, setDetailRowId] = useState<string | number | null>(() => persistedOf(viewKey, "openRow") ?? null)
+  // Re-open the panel for a row restored from persistence (§5.6 stores the
+  // open row id under `unetwatch_table_<viewKey>_openRow`).
+  const [internalDetailOpen, setInternalDetailOpen] = useState(() => persistedOf(viewKey, "openRow") !== null)
+  const detailOpen = detailControlled ? rowDetailOpen! : internalDetailOpen
+  const setDetailOpen = useCallback(
+    (open: boolean) => {
+      if (detailControlled) onRowDetailOpenChange?.(open)
+      else setInternalDetailOpen(open)
+      writePersisted(viewKey, { openRow: open ? detailRowId : null })
+    },
+    [detailControlled, onRowDetailOpenChange, detailRowId, viewKey],
+  )
+  const activateRow = useCallback(
+    (row: T) => {
+      onRowActivate?.(row)
+      if (rowDetail) {
+        setDetailRowId(rowId(row))
+        if (detailControlled) onRowDetailOpenChange?.(true)
+        else setInternalDetailOpen(true)
+      } else onRowClick?.(row)
+    },
+    [onRowActivate, rowDetail, detailControlled, onRowDetailOpenChange, onRowClick, rowId],
+  )
+  const detailRow = useMemo(() => {
+    if (detailRowId === null) return null
+    return data.find((r) => rowId(r) === detailRowId) ?? null
+  }, [data, detailRowId, rowId])
+
+  /* ── Context menu (§5.5) ──────────────────────────────────────── */
+  const [menu, setMenu] = useState<{ x: number; y: number; row: T } | null>(null)
+  // §4.2: enableContextMenu defaults true *when a rowMenu is given* — with no
+  // rowMenu there is no command list, so the native browser menu is left alone
+  // (this keeps every existing call site unaffected).
+  const contextEnabled = enableContextMenu && !!rowMenu
+  const openContextMenu = (e: React.MouseEvent, row: T) => {
+    if (!contextEnabled) return
+    e.preventDefault()
+    setMenu({ x: e.clientX, y: e.clientY, row })
+  }
+  const menuItems: ContextMenuItem[] = useMemo(
+    () => (menu && rowMenu ? rowMenu(menu.row) : []),
+    [menu, rowMenu],
+  )
+
+  /* ── Export (§5.9) ────────────────────────────────────────────── */
+  const [exportBusy, setExportBusy] = useState(false)
+  const exportColumns = useMemo(
+    // The actions slot is the structural command column (§3.1 slot 7): its
+    // header is an sr-only ReactNode and its cell is a menu, so it must never
+    // reach the CSV (it would serialize as "[object Object]"). Exclude by
+    // slot, not only by `srOnly`, because no page sets `srOnly` on it.
+    () => visibleColumns.filter((c) => !c.srOnly && c.slot !== "actions"),
+    [visibleColumns],
+  )
+  const runExport = async (scope: ExportScope) => {
+    setExportBusy(true)
+    try {
+      const filename = defaultExportFilename(viewKey, ariaLabel, exportFilename)
+      if (scope === "server-all" && onExport) {
+        const payload = await onExport(scope)
+        if (payload) downloadCsv(filename, payloadToCsv(payload))
+        else return
+      } else {
+        const source = scope === "view" ? displayData : sortedData
+        const header = exportColumns.map((c) => exportHeaderOf(c as DataTableColumn<unknown>))
+        const rows = source.map((row) =>
+          exportColumns.map((c) => cellExportValue(c, row)),
+        )
+        downloadCsv(filename, toCsv(header, rows))
+      }
+      toast({ title: "Export ready", description: filename, variant: "success" })
+    } catch {
+      toast({ title: "Export failed", variant: "error" })
+    } finally {
+      setExportBusy(false)
+    }
+  }
+
+  /* ── Chips (§5.2) ─────────────────────────────────────────────── */
+  const chips: FilterChipModel[] = useMemo(() => {
+    const out: FilterChipModel[] = []
+    for (const col of orderedColumns) {
+      const value = filters[col.id]
+      if (!isActiveFilter(value)) continue
+      const { text, negated } = summarizeFilter(value, col.filterType ?? "enum")
+      out.push({
+        id: col.id,
+        label: String(col.header),
+        onOpen: () => setChipOpenId(col.id),
+        summary: text,
+        negated,
+        onClear: () => setFilter(col.id, emptyFilterFor(col.filterType ?? "enum")),
+      })
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedColumns, filters])
+
+  const [chipOpenId, setChipOpenId] = useState<string | null>(null)
+  const chipAnchors = useRef(new Map<string, HTMLElement>())
+  const chipCol = chipOpenId ? visibleColumns.find((c) => c.id === chipOpenId) ?? null : null
+  const resetView = () => {
+    columnState.reset()
+    setAllFilters({})
+    setQuickQuery("")
+    if (!controlled) setInternalSort({ key: defaultSortBy, dir: defaultSortDir })
+    clearPersisted(viewKey)
+    toast({ title: "View reset", variant: "default" })
+  }
+
+  /* ── Sticky-header scroll shadow (§6.1) ───────────────────────── */
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrolledX, setScrolledX] = useState(false)
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      setScrolledX(el.scrollLeft > 0)
+    }
+    onScroll()
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [])
+
+  const showColumnChooser = enableColumnVisibility && visibleColumns.filter((c) => !c.srOnly).length > 3
+  const pad = DENSITY_PAD[density]
+  const anyTagged = useMemo(() => columns.some((c) => c.slot !== undefined), [columns])
+  const colSpan = visibleColumns.length + (selectable ? 1 : 0)
+
   return (
     <div className={className}>
+      {/* Toolbar (§5a) — always rendered so density is always available. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {enableQuickFilter && (
+          <input
+            type="search"
+            value={quickQuery}
+            onChange={(e) => {
+              setQuickQuery(e.target.value)
+              writePersisted(viewKey, { quickFilter: e.target.value })
+            }}
+            placeholder="Search"
+            aria-label="Search table"
+            className="h-8 w-52 rounded border border-border bg-card px-2.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        )}
+        {toolbar}
+        <FilterChips
+          chips={chips}
+          onClearAll={() => setAllFilters({})}
+          onChipRef={(id, el) => {
+            if (el) chipAnchors.current.set(id, el)
+            else chipAnchors.current.delete(id)
+          }}
+        />
+        <div className="ml-auto flex items-center gap-1.5">
+          {toolbarRight}
+          {onRefresh && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 px-2.5"
+              disabled={loading}
+              onClick={onRefresh}
+              aria-label="Refresh"
+            >
+              <RotateCcw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          )}
+          <DensityToggle density={density} onChange={columnState.setDensity} />
+          {showColumnChooser && (
+            <ColumnChooser
+              rows={orderedColumns
+                .filter((c) => !c.srOnly)
+                .map((c) => ({
+                  col: c,
+                  slot: c.slot,
+                  hideable: c.hideable !== false,
+                  reorderable: enableReorder && c.hideable !== false && c.slot !== "actions",
+                  visible: columnState.state.visibility[c.id] ?? !c.defaultHidden,
+                }))}
+              onToggle={columnState.setVisibility}
+              onReorder={columnState.setOrder}
+              onReset={columnState.reset}
+            />
+          )}
+          {enableExport && (
+            <ExportMenu
+              disabled={loading || busy || exportBusy}
+              count={displayData.length}
+              loadedCount={sortedData.length}
+              serverAvailable={!!onExport}
+              onExport={runExport}
+            />
+          )}
+          {(columnState.isDirty || chips.length > 0 || quickQuery !== "") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 px-2.5"
+              onClick={resetView}
+              aria-label="Reset view"
+            >
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Reset</span>
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {filterBuilder && <div className="mb-2">{filterBuilder}</div>}
+
       {/* Bulk action bar (animate in/out) */}
       <AnimatePresence>
         {selectable && selected.size > 0 && (
@@ -760,12 +1068,22 @@ export function DataTable<T>({
         )}
       </AnimatePresence>
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card shadow-none">
+      <div
+        ref={scrollRef}
+        className="overflow-x-auto rounded-md border border-border bg-card shadow-none"
+      >
         <table className="w-full text-sm" aria-label={ariaLabel}>
           <thead>
-            <tr className="border-b border-border bg-transparent text-muted-foreground">
+            <tr className="border-b border-border text-muted-foreground">
               {selectable && (
-                <th className="w-12 px-4 py-3 text-left font-medium text-muted-foreground">
+                <th
+                  scope="col"
+                  className={cn(
+                    pad.th,
+                    "w-12 text-left font-medium text-muted-foreground",
+                    stickyHeader && "sticky top-0 z-20 bg-card",
+                  )}
+                >
                   <Checkbox
                     checked={allSelected}
                     indeterminate={someSelected}
@@ -775,93 +1093,56 @@ export function DataTable<T>({
                   />
                 </th>
               )}
-              {columns.map((col) => {
-                const sortable = col.enableSorting !== false && !col.srOnly
+              {visibleColumns.map((col) => {
+                const sortable = col.enableSorting !== false && col.sortable !== false && !col.srOnly
                 const active = sortable && sortState.key === col.id
                 const filterable = enableFiltering && !col.srOnly && col.enableColumnFilter !== false
+                const stickySide = resolveSticky(col, anyTagged)
+                const widthPx = columnState.state.widths[col.id] ?? defaults.defaultWidths[col.id]
                 return (
                   <th
                     key={col.id}
+                    scope="col"
+                    title={col.headerTitle}
+                    style={widthPx ? { width: widthPx, minWidth: col.minWidth ?? 64 } : undefined}
                     className={cn(
-                      "px-4 py-3 font-medium text-muted-foreground",
+                      pad.th,
+                      "font-medium text-muted-foreground",
                       alignClass(col.align),
                       col.width,
                       col.headerClassName,
+                      // A header cell can stick in both axes at once; a
+                      // sticky-pinned column keeps the higher header z-index
+                      // so it paints above the body's sticky cells.
+                      (stickyHeader || stickySide) && "sticky bg-card",
+                      stickyHeader && "top-0",
+                      stickyHeader && (stickySide ? "z-30" : "z-20"),
+                      stickySide === "left" && "left-0",
+                      stickySide === "right" && "right-0",
+                      stickySide && !stickyHeader && "z-10",
+                      stickySide === "left" && scrolledX && "border-r border-border",
                     )}
-                    aria-sort={
-                      active ? (sortState.dir === "asc" ? "ascending" : "descending") : undefined
-                    }
+                    aria-sort={active ? (sortState.dir === "asc" ? "ascending" : "descending") : undefined}
                   >
-                    {sortable ? (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1",
-                          col.align === "right" && "flex-row-reverse",
-                          col.align === "center" && "justify-center",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleSort(col)}
-                          className={cn(
-                            "inline-flex cursor-pointer items-center gap-1 mono-label transition-colors hover:text-foreground",
-                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background rounded-sm",
-                          )}
-                          aria-label={`Sort by ${String(col.header)}${active ? `, currently ${sortState.dir}ending` : ""}`}
-                        >
-                          {col.header}
-                          {active ? (
-                            sortState.dir === "asc" ? (
-                              <ArrowUp className="h-3 w-3 opacity-100" aria-hidden="true" />
-                            ) : (
-                              <ArrowDown className="h-3 w-3 opacity-100" aria-hidden="true" />
-                            )
-                          ) : (
-                            <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />
-                          )}
-                        </button>
-                        {filterable && (
-                          <HeaderFilter
-                            col={col}
-                            value={filters[col.id]}
-                            onApply={(v) => setFilter(col.id, v)}
-                            options={(() => {
-                              const opts = filterOptions.get(col.id) ?? []
-                              const cur = filters[col.id]
-                              const curStr = typeof cur === "string" ? cur : ""
-                              return curStr && !opts.some((o) => o.value === curStr)
-                                ? [...opts, { value: curStr, label: curStr }]
-                                : opts
-                            })()}
-                          />
-                        )}
-                      </span>
-                    ) : (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 mono-label",
-                          col.align === "right" && "w-full justify-end flex-row-reverse",
-                          col.align === "center" && "w-full justify-center",
-                        )}
-                      >
-                        {col.header}
-                        {filterable && (
-                          <HeaderFilter
-                            col={col}
-                            value={filters[col.id]}
-                            onApply={(v) => setFilter(col.id, v)}
-                            options={(() => {
-                              const opts = filterOptions.get(col.id) ?? []
-                              const cur = filters[col.id]
-                              const curStr = typeof cur === "string" ? cur : ""
-                              return curStr && !opts.some((o) => o.value === curStr)
-                                ? [...opts, { value: curStr, label: curStr }]
-                                : opts
-                            })()}
-                          />
-                        )}
-                      </span>
-                    )}
+                    <HeaderCell
+                      col={col}
+                      sortable={sortable}
+                      active={active}
+                      sortDir={sortState.dir}
+                      onSort={() => handleSort(col)}
+                      filterable={filterable}
+                      filterValue={filters[col.id]}
+                      onFilterApply={(v) => setFilter(col.id, v)}
+                      filterOptions={filterOptions.get(col.id) ?? []}
+                      showHandle={enableReorder && col.hideable !== false && col.slot !== "actions"}
+                      onReorder={(from, to) => reorderColumns(from, to, columnState.state.order, columnState.setOrder)}
+                      resizable={enableResize && (col.resizable ?? true) && !col.srOnly}
+                      currentWidth={widthPx}
+                      minWidth={col.minWidth ?? 64}
+                      maxWidth={col.maxWidth ?? 640}
+                      onResize={(w) => columnState.setWidth(col.id, w)}
+                      onResetWidth={() => columnState.clearWidth(col.id)}
+                    />
                   </th>
                 )
               })}
@@ -872,12 +1153,12 @@ export function DataTable<T>({
               {Array.from({ length: skeletonRows }).map((_, i) => (
                 <tr key={i} className="border-b border-border">
                   {selectable && (
-                    <td className="px-4 py-3">
+                    <td className={pad.td}>
                       <Skeleton className="h-4 w-4" />
                     </td>
                   )}
-                  {columns.map((col) => (
-                    <td key={col.id} className="px-4 py-3">
+                  {visibleColumns.map((col) => (
+                    <td key={col.id} className={pad.td}>
                       <Skeleton className={cn("h-4", col.width ?? "w-24")} />
                     </td>
                   ))}
@@ -887,7 +1168,7 @@ export function DataTable<T>({
           ) : data.length === 0 ? (
             <tbody>
               <tr>
-                <td colSpan={columns.length + (selectable ? 1 : 0)}>
+                <td colSpan={colSpan}>
                   {empty ? (
                     <EmptyState
                       icon={empty.icon}
@@ -918,14 +1199,23 @@ export function DataTable<T>({
                     as="tr"
                     key={id}
                     className={cn(
-                      "border-b border-border transition-colors",
+                      "border-b border-border transition-colors cv-auto",
                       isSelected ? "bg-primary/[0.04] hover:bg-primary/[0.06]" : "hover:bg-muted/50",
-                      onRowClick && "cursor-pointer",
+                      (onRowClick || rowDetail || onRowActivate) && "cursor-pointer",
                     )}
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    onClick={
+                      onRowClick || rowDetail
+                        ? () => {
+                            if (rowDetail) activateRow(row)
+                            else onRowClick?.(row)
+                          }
+                        : undefined
+                    }
+                    onDoubleClick={rowDetail ? () => activateRow(row) : undefined}
+                    onContextMenu={contextEnabled ? (e) => openContextMenu(e, row) : undefined}
                   >
                     {selectable && (
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className={pad.td} onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={isSelected}
                           disabled={busy}
@@ -934,14 +1224,27 @@ export function DataTable<T>({
                         />
                       </td>
                     )}
-                    {columns.map((col) => (
-                      <td
-                        key={col.id}
-                        className={cn("px-4 py-3", alignClass(col.align), col.align === "right" && "tabular-nums", col.className)}
-                      >
-                        {col.srOnly ? <span className="sr-only">{renderCell(col, row)}</span> : renderCell(col, row)}
-                      </td>
-                    ))}
+                    {visibleColumns.map((col) => {
+                      const stickySide = resolveSticky(col, anyTagged)
+                      return (
+                        <td
+                          key={col.id}
+                          className={cn(
+                            pad.td,
+                            alignClass(col.align),
+                            col.align === "right" && "tabular-nums",
+                            col.className,
+                            col.cellClass,
+                            stickySide && "bg-card",
+                            stickySide === "left" && "sticky left-0 z-10",
+                            stickySide === "left" && scrolledX && "border-r border-border",
+                            stickySide === "right" && "sticky right-0 z-10",
+                          )}
+                        >
+                          {col.srOnly ? <span className="sr-only">{renderCell(col, row)}</span> : renderCell(col, row)}
+                        </td>
+                      )
+                    })}
                   </StaggerItem>
                 )
               })}
@@ -961,7 +1264,375 @@ export function DataTable<T>({
           className="mt-3"
         />
       )}
+
+      {/* Row context menu (§5.5) */}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+        />
+      )}
+
+      {/* Chip-anchored filter popover (§5a) */}
+      {chipCol && chipAnchors.current.get(chipCol.id) && (
+        <PopoverPrimitive.Root open onOpenChange={(o) => !o && setChipOpenId(null)}>
+          <PopoverPrimitive.Anchor virtualRef={{ current: chipAnchors.current.get(chipCol.id)! }} />
+          <PopoverPrimitive.Portal>
+            <PopoverPrimitive.Content
+              align="start"
+              sideOffset={4}
+              aria-label={`Filter by ${String(chipCol.header)}`}
+              className="z-[70] w-64 rounded-md border border-border bg-card p-3 shadow-md data-[state=open]:animate-in"
+            >
+              <FilterEditor
+                col={chipCol}
+                value={filters[chipCol.id]}
+                onApply={(v) => {
+                  setFilter(chipCol.id, v)
+                  setChipOpenId(null)
+                }}
+                options={withCurrentOption(filterOptions.get(chipCol.id) ?? [], filters[chipCol.id])}
+              />
+            </PopoverPrimitive.Content>
+          </PopoverPrimitive.Portal>
+        </PopoverPrimitive.Root>
+      )}
+
+      {/* Row detail panel (§5.6) */}
+      {rowDetail && detailRow && (
+        <RowDetailPanel
+          open={detailOpen}
+          onOpenChange={setDetailOpen}
+          title={String(detailRowId ?? "")}
+          copyValue={JSON.stringify(detailRow, null, 2)}
+          items={rowMenu?.(detailRow)}
+          width={readPersisted(viewKey).panelWidth ?? 440}
+          onWidthChange={(w) => writePersisted(viewKey, { panelWidth: w })}
+        >
+          {rowDetail(detailRow)}
+        </RowDetailPanel>
+      )}
     </div>
+  )
+}
+
+/* ── Header cell (sort button + filter + resize + reorder) ─────── */
+
+function HeaderCell<T>({
+  col,
+  sortable,
+  active,
+  sortDir,
+  onSort,
+  filterable,
+  filterValue,
+  onFilterApply,
+  filterOptions,
+  showHandle,
+  onReorder,
+  resizable,
+  currentWidth,
+  minWidth,
+  maxWidth,
+  onResize,
+  onResetWidth,
+}: {
+  col: DataTableColumn<T>
+  sortable: boolean
+  active: boolean
+  sortDir: SortDir
+  onSort: () => void
+  filterable: boolean
+  filterValue: ColumnFilterValue | undefined
+  onFilterApply: (value: ColumnFilterValue) => void
+  filterOptions: { value: string; label: string }[]
+  showHandle: boolean
+  onReorder: (from: string, to: string) => void
+  resizable: boolean
+  currentWidth?: number
+  minWidth: number
+  maxWidth: number
+  onResize: (width: number) => void
+  onResetWidth: () => void
+}) {
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const [dragging, setDragging] = useState(false)
+
+  useEffect(() => {
+    if (!dragging) return
+    const onMove = (e: PointerEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      const next = Math.min(maxWidth, Math.max(minWidth, d.startWidth + (e.clientX - d.startX)))
+      onResize(Math.round(next))
+    }
+    const onUp = () => {
+      dragRef.current = null
+      setDragging(false)
+    }
+    document.addEventListener("pointermove", onMove)
+    document.addEventListener("pointerup", onUp)
+    return () => {
+      document.removeEventListener("pointermove", onMove)
+      document.removeEventListener("pointerup", onUp)
+    }
+  }, [dragging, minWidth, maxWidth, onResize])
+
+  const label = String(col.header)
+
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      {showHandle && (
+        <span
+          draggable
+          onDragStart={(e) => e.dataTransfer.setData("text/dt-col", col.id)}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const from = e.dataTransfer.getData("text/dt-col")
+            if (from) onReorder(from, col.id)
+          }}
+          className="cursor-grab text-muted-foreground/40 hover:text-muted-foreground"
+          aria-hidden="true"
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </span>
+      )}
+      <span
+        className={cn(
+          "inline-flex min-w-0 items-center gap-1",
+          col.align === "right" && "flex-row-reverse",
+          col.align === "center" && "justify-center",
+        )}
+      >
+        {sortable ? (
+          <button
+            type="button"
+            onClick={onSort}
+            title={col.headerTitle}
+            className={cn(
+              "inline-flex cursor-pointer items-center gap-1 mono-label transition-colors hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background rounded-sm",
+            )}
+            aria-label={`Sort by ${label}${active ? `, currently ${sortDir}ending` : ""}`}
+          >
+            <span className="min-w-0 truncate">{col.header}</span>
+            {active ? (
+              sortDir === "asc" ? (
+                <ArrowUp className="h-3 w-3 opacity-100" aria-hidden="true" />
+              ) : (
+                <ArrowDown className="h-3 w-3 opacity-100" aria-hidden="true" />
+              )
+            ) : (
+              <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />
+            )}
+          </button>
+        ) : (
+          <span className={cn("inline-flex min-w-0 items-center gap-1 mono-label", col.align === "right" && "flex-row-reverse", col.align === "center" && "justify-center")}>
+            <span className="min-w-0 truncate">{col.header}</span>
+          </span>
+        )}
+        {filterable && (
+          <FilterBuilder
+            col={col}
+            value={filterValue}
+            onApply={onFilterApply}
+            options={withCurrentOption(filterOptions, filterValue)}
+          />
+        )}
+      </span>
+      {resizable && (
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize ${label} column`}
+          onPointerDown={(e) => {
+            dragRef.current = { startX: e.clientX, startWidth: currentWidth ?? e.currentTarget.parentElement?.parentElement?.getBoundingClientRect().width ?? minWidth }
+            setDragging(true)
+          }}
+          onDoubleClick={onResetWidth}
+          className={cn(
+            "ml-auto h-full w-2 shrink-0 cursor-col-resize touch-none",
+            dragging ? "bg-primary/40" : "hover:bg-border",
+          )}
+        />
+      )}
+    </span>
+  )
+}
+
+/** The currently-applied scalar filter may not be in the derived options
+ * (e.g. it came from a stale page) — append it so the popover can show it. */
+function withCurrentOption(
+  options: { value: string; label: string }[],
+  value: ColumnFilterValue | undefined,
+): { value: string; label: string }[] {
+  if (typeof value !== "string" || !value) return options
+  return options.some((o) => o.value === value) ? options : [...options, { value, label: value }]
+}
+
+/** Sticky side for a column: explicit `sticky` wins, else derived from the
+ * slot (identity/select ⇒ left, actions ⇒ right) — but only once the table
+ * has adopted the grammar, so un-tagged tables stay fully static. */
+function resolveSticky<T>(col: DataTableColumn<T>, anyTagged: boolean): "left" | "right" | undefined {
+  if (col.sticky) return col.sticky
+  if (!anyTagged) return undefined
+  if (col.slot === "identity" || col.slot === "select") return "left"
+  if (col.slot === "actions") return "right"
+  return undefined
+}
+
+/** Move `from` immediately before `to` in the operator-authored order. */
+function reorderColumns(
+  from: string,
+  to: string,
+  order: string[],
+  setOrder: (order: string[]) => void,
+): void {
+  if (from === to) return
+  const next = order.filter((id) => id !== from)
+  const idx = next.indexOf(to)
+  if (idx === -1) next.push(from)
+  else next.splice(idx, 0, from)
+  setOrder(next)
+}
+
+/* ── Density toggle (§5a) ─────────────────────────────────────── */
+
+function DensityToggle({ density, onChange }: { density: Density; onChange: (d: Density) => void }) {
+  const options: { value: Density; label: string }[] = [
+    { value: "comfortable", label: "Comfortable" },
+    { value: "compact", label: "Compact" },
+  ]
+  return (
+    <div className="inline-flex items-center rounded-md border border-border bg-card p-0.5" role="radiogroup" aria-label="Row density">
+      <Rows3 className="mx-1 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={density === o.value}
+          onClick={() => onChange(o.value)}
+          className={cn(
+            "rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            density === o.value ? "bg-primary text-white" : "text-muted-foreground hover:bg-muted",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/* ── Export menu (§5.9) ───────────────────────────────────────── */
+
+function ExportMenu({
+  disabled,
+  count,
+  loadedCount,
+  serverAvailable,
+  onExport,
+}: {
+  disabled: boolean
+  count: number
+  loadedCount: number
+  serverAvailable: boolean
+  onExport: (scope: ExportScope) => void
+}) {
+  const items: { scope: ExportScope; label: string; show: boolean }[] = [
+    { scope: "view", label: `Current view (${count})`, show: true },
+    { scope: "all-loaded", label: `All loaded (${loadedCount})`, show: loadedCount > count },
+    { scope: "server-all", label: "All matching (server)", show: serverAvailable },
+  ]
+  return (
+    <DropdownMenuPrimitive.Root>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2.5" disabled={disabled} aria-label="Export CSV">
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="hidden sm:inline">Export</span>
+        </Button>
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          align="end"
+          sideOffset={6}
+          className="z-[70] min-w-48 overflow-hidden rounded-md border border-border bg-card p-1 shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out"
+        >
+          {items
+            .filter((i) => i.show)
+            .map((item) => (
+              <DropdownMenuPrimitive.Item
+                key={item.scope}
+                onSelect={() => onExport(item.scope)}
+                className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-muted"
+              >
+                {item.label}
+              </DropdownMenuPrimitive.Item>
+            ))}
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
+  )
+}
+
+/* ── Context menu (§5.5) ──────────────────────────────────────── */
+
+function ContextMenu({
+  x,
+  y,
+  items,
+  onClose,
+}: {
+  x: number
+  y: number
+  items: ContextMenuItem[]
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  return (
+    <DropdownMenuPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
+      <DropdownMenuPrimitive.Trigger asChild>
+        <span
+          style={{ position: "fixed", left: x, top: y, width: 1, height: 1 }}
+          aria-hidden="true"
+        />
+      </DropdownMenuPrimitive.Trigger>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          className="z-[90] min-w-44 overflow-hidden rounded-md border border-border bg-card p-1 shadow-md data-[state=open]:animate-in"
+        >
+          {items.map((item) => {
+            const Icon = item.icon
+            return (
+              <div key={item.key}>
+                {item.separator && <DropdownMenuPrimitive.Separator className="my-1 h-px bg-border" />}
+                <DropdownMenuPrimitive.Item
+                  disabled={item.disabled}
+                  onSelect={item.onClick}
+                  className={cn(
+                    "flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-muted data-[disabled]:opacity-50",
+                    item.variant === "destructive" && "text-danger data-[highlighted]:bg-danger/10",
+                  )}
+                >
+                  {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {item.label}
+                </DropdownMenuPrimitive.Item>
+              </div>
+            )
+          })}
+        </DropdownMenuPrimitive.Content>
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuPrimitive.Root>
   )
 }
 
@@ -969,4 +1640,13 @@ function renderCellValue<T>(col: DataTableColumn<T>, row: T): ReactNode {
   const value = col.accessor ? col.accessor(row) : undefined
   if (value === undefined || value === null) return ""
   return String(value)
+}
+
+/** Read one persisted key for the `viewKey` blob (uncontrolled state only). */
+function persistedOf<K extends "filters" | "quickFilter" | "openRow">(
+  viewKey: string | undefined,
+  key: K,
+): PersistedTableState[K] | null {
+  if (!viewKey) return null
+  return readPersisted(viewKey)[key] ?? null
 }

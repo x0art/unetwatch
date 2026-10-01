@@ -1065,3 +1065,67 @@ async def test_top_enforced_primary_rule_empty_when_no_rule_attributable(
     by_domain = {it["domain"]: it for it in data["items"]}
     assert by_domain["z-m-gateway.facebook.com"]["primaryRule"] == ""
     assert by_domain["z-m-gateway.facebook.com"]["enforcements"] == 1
+
+
+async def test_summary_reads_enforcement_count_from_object_api_response(
+    client, db_path, monkeypatch
+):
+    """The enforcement count is read from a REAL elasticsearch-py response.
+
+    WHY: ``es.search()`` returns an ``ObjectApiResponse``, whose
+    ``ApiResponse`` base is not a ``dict`` subclass — so the historical
+    ``isinstance(res, dict)`` guard was always False and every enforcement
+    count silently became ``None`` (which then crashed the Analytics page).
+    The older stubs here returned plain dicts and never caught it; this one
+    returns the genuine response type the transport produces.
+    """
+    from elastic_transport import ObjectApiResponse
+
+    from app.services import es_fields
+
+    baseline = {
+        "@timestamp": "2026-09-21T07:00:00Z",
+        "url": "https://x/",
+        "client_ip": "10.0.0.5",
+        "server_ip": "57.144.192.3",
+        "duration_seconds": 0.01,
+        "action": "ALLOW",
+    }
+    es_fields._invalidate_cache()
+    await es_fields.fetch_field_inventory(
+        es=_SampleES(sample_doc=baseline, field_caps={k: {} for k in baseline})
+    )
+    assert es_fields.get_mode() != "UNKNOWN"
+
+    def _obj(body):
+        # positional (body, meta) — meta is opaque to the access path.
+        return ObjectApiResponse(body, None)
+
+    class _FakeES:
+        async def search(self, **kwargs):
+            body = kwargs["body"]
+            filters = body["query"]["bool"]["filter"]
+            if any("terms" in f for f in filters):
+                return _obj(
+                    {"hits": {"total": {"value": 7, "relation": "eq"}, "hits": []}}
+                )
+            return _obj({"hits": {"hits": [_PATTERN_ALLOW_HIT]}})
+
+        async def close(self):
+            return None
+
+    class _Ctx:
+        async def __aenter__(self):
+            return _FakeES()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("app.services.es_client.es_client", lambda *a, **k: _Ctx())
+    monkeypatch.setattr(es_fields, "es_client", lambda *a, **k: _Ctx())
+
+    await _seed_block_pattern()
+    data = client.get("/api/analytics/summary?range=7d").json()
+    # Pre-fix this was None regardless of the ES total.
+    assert data["totalEnforcements"] == 7
+    assert data["enforcementsNeverMeasured"] is False

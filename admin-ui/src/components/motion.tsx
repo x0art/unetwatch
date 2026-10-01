@@ -82,6 +82,8 @@ export function StaggerItem({
   className,
   onClick,
   onKeyDown,
+  onDoubleClick,
+  onContextMenu,
   tabIndex,
   role,
   title,
@@ -91,6 +93,8 @@ export function StaggerItem({
   className?: string
   onClick?: () => void
   onKeyDown?: (e: React.KeyboardEvent) => void
+  onDoubleClick?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
   tabIndex?: number
   role?: string
   title?: string
@@ -101,6 +105,8 @@ export function StaggerItem({
       className={className}
       onClick={onClick}
       onKeyDown={onKeyDown}
+      onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       tabIndex={tabIndex}
       role={role}
       title={title}

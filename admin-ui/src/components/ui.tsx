@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentPropsWithRef,
   type ReactNode,
 } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
@@ -56,35 +57,36 @@ const buttonSizes: Record<ButtonSize, string> = {
   icon: "h-9 w-9",
 }
 
+/**
+ * Button — soft: hairline border, rounded corners, subtle shadow,
+ * gentle scale on press.
+ *
+ * Wraps a native `<button>`, so it is Radix-compatible: it spreads every
+ * remaining DOM prop and forwards `ref` to the element. That matters for
+ * `asChild` triggers (`DropdownMenu`/`Popover`/`Dialog`), which clone this
+ * element and inject `ref`, `onPointerDown`, `aria-*` and `data-*` props —
+ * all of which are dropped if the component only enumerates a fixed prop set.
+ * React 19 treats `ref` as an ordinary prop, so no `forwardRef` wrapper is
+ * needed.
+ */
 export function Button({
   className,
   variant = "default",
   size = "default",
-  disabled,
-  onClick,
-  children,
   type = "button",
-  "aria-label": ariaLabel,
-}: {
-  className?: string
+  ref,
+  ...props
+}: ComponentPropsWithRef<"button"> & {
   variant?: ButtonVariant
   size?: ButtonSize
-  disabled?: boolean
-  onClick?: () => void
-  children: ReactNode
-  type?: "button" | "submit"
-  "aria-label"?: string
 }) {
   return (
     <button
+      ref={ref}
       type={type}
       className={cn(buttonBase, buttonVariants[variant], buttonSizes[size], className)}
-      disabled={disabled}
-      onClick={onClick}
-      aria-label={ariaLabel}
-    >
-      {children}
-    </button>
+      {...props}
+    />
   )
 }
 
@@ -656,7 +658,7 @@ export function RankedTable({ rows, className, onRowClick }: { rows: { label: st
           {rows.map((r, i) => (
             <StaggerItem
               as="tr"
-              key={r.label}
+              key={`${i}-${r.label}`}
               className={cn("transition-colors", onRowClick ? "cursor-pointer hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" : "hover:bg-muted/40")}
               title={`${r.label} — ${r.count.toLocaleString()}`}
               onClick={onRowClick ? () => onRowClick(r.label) : undefined}
@@ -761,7 +763,7 @@ export function Pagination({
           <Button key={p} variant={p === page ? "default" : "outline"} size="icon" className="h-8 w-8 text-xs" onClick={() => go(p)} aria-label={`Page ${p + 1}`} aria-current={p === page ? "page" : undefined}>{p + 1}</Button>
         ))}
         <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canNext} onClick={() => go(page + 1)} aria-label="Next page"><ChevronRight className="h-4 w-4" /></Button>
-        <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canNext} onClick={() => go(totalPages - 1)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>
+        {hasTotal && <Button variant="outline" size="icon" className="h-8 w-8" disabled={!canNext} onClick={() => go(totalPages - 1)} aria-label="Last page"><ChevronsRight className="h-4 w-4" /></Button>}
       </div>
     </div>
   )

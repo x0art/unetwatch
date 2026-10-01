@@ -84,6 +84,7 @@ const LOGS_ROW_ID = (l: MonitorLog) => l.id
 const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   {
     id: "started_at",
+    slot: "identity",
     header: "Time",
     filterType: "datetime",
     accessor: (l) => l.started_at,
@@ -93,6 +94,7 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
   },
   {
     id: "kind",
+    slot: "subject",
     header: "Type",
     filterType: "enum",
     accessor: (l) => l.kind,
@@ -105,76 +107,37 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     width: "w-24",
   },
   {
-    id: "minutes",
-    header: "Window",
-    filterType: "number",
-    accessor: (l) => l.minutes,
-    cell: (l) => (
-      <span className="font-mono tabular-nums text-xs text-muted-foreground">
-        {l.minutes !== null && l.minutes !== undefined ? `${l.minutes}m` : "—"}
-      </span>
-    ),
-    align: "right",
-    width: "w-20",
+    id: "error",
+    slot: "verdict",
+    header: "Outcome",
+    filterType: "text",
+    accessor: (l) => l.error,
+    cell: (l) =>
+      l.error ? (
+        <span className="block max-w-[220px] truncate text-xs text-destructive" title={l.error}>
+          {l.error}
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 text-xs text-success">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          OK
+        </span>
+      ),
   },
   {
-    id: "matches",
-    header: "Hits",
-    filterType: "number",
-    accessor: (l) => l.matches,
-    cell: (l) => <span className="font-mono tabular-nums text-xs">{l.matches.toLocaleString()}</span>,
-    align: "right",
-    width: "w-20",
-  },
-  {
-    id: "stored",
-    header: "Stored",
-    filterType: "number",
-    accessor: (l) => l.stored,
-    cell: (l) => (
-      <span className="font-mono tabular-nums text-xs text-muted-foreground">
-        {l.kind === "poll" ? l.stored.toLocaleString() : "—"}
-      </span>
-    ),
-    align: "right",
-    width: "w-20",
-  },
-  {
-    id: "suppressed",
-    header: "Suppressed",
-    filterType: "number",
-    accessor: (l) => l.suppressed_rows,
-    cell: (l) => (
-      <span className="font-mono tabular-nums text-xs text-muted-foreground">
-        {l.suppressed_rows !== null && l.suppressed_rows !== undefined
-          ? l.suppressed_rows.toLocaleString()
-          : "—"}
-      </span>
-    ),
-    align: "right",
-    width: "w-20",
-  },
-  {
-    id: "monitored_dests",
-    header: "Monitored dests",
-    filterType: "number",
-    accessor: (l) => l.suppressed_blacklisted,
-    cell: (l) => (
-      <span
-        className="font-mono tabular-nums text-xs text-muted-foreground"
-        title="alertable rows dropped because the destination is already on the blacklist"
-      >
-        {l.suppressed_blacklisted !== null && l.suppressed_blacklisted !== undefined
-          ? l.suppressed_blacklisted.toLocaleString()
-          : "—"}
-      </span>
-    ),
-    align: "right",
-    width: "w-20",
+    id: "webhook_status",
+    slot: "verdict",
+    header: "Webhook",
+    filterType: "enum",
+    accessor: (l) => l.webhook_status,
+    cell: (l) => <WebhookBadge log={l} />,
+    enableSorting: true,
+    width: "w-44",
   },
   {
     id: "flagged",
-    header: "Flagged URLs",
+    slot: "evidence",
+    header: "Flagged",
     filterType: "number",
     accessor: (l) => (l.topUrls?.length ?? 0),
     cell: (l) => {
@@ -198,16 +161,83 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     width: "w-64",
   },
   {
-    id: "webhook_status",
-    header: "Webhook",
-    filterType: "enum",
-    accessor: (l) => l.webhook_status,
-    cell: (l) => <WebhookBadge log={l} />,
-    enableSorting: true,
-    width: "w-44",
+    id: "matches",
+    slot: "measures",
+    header: "Hits",
+    filterType: "number",
+    accessor: (l) => l.matches,
+    cell: (l) => <span className="font-mono tabular-nums text-xs">{l.matches.toLocaleString()}</span>,
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "stored",
+    slot: "measures",
+    header: "Stored",
+    filterType: "number",
+    accessor: (l) => (l.kind === "poll" ? l.stored : undefined),
+    cell: (l) => (
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
+        {l.kind === "poll" ? l.stored.toLocaleString() : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "suppressed",
+    slot: "measures",
+    defaultHidden: true,
+    header: "Suppressed",
+    filterType: "number",
+    accessor: (l) => l.suppressed_rows,
+    cell: (l) => (
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
+        {l.suppressed_rows !== null && l.suppressed_rows !== undefined
+          ? l.suppressed_rows.toLocaleString()
+          : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "monitored_dests",
+    slot: "measures",
+    defaultHidden: true,
+    header: "Dests monitored",
+    filterType: "number",
+    accessor: (l) => l.suppressed_blacklisted,
+    cell: (l) => (
+      <span
+        className="font-mono tabular-nums text-xs text-muted-foreground"
+        title="alertable rows dropped because the destination is already on the blacklist"
+      >
+        {l.suppressed_blacklisted !== null && l.suppressed_blacklisted !== undefined
+          ? l.suppressed_blacklisted.toLocaleString()
+          : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
+  },
+  {
+    id: "minutes",
+    slot: "measures",
+    header: "Window",
+    filterType: "number",
+    accessor: (l) => l.minutes,
+    cell: (l) => (
+      <span className="font-mono tabular-nums text-xs text-muted-foreground">
+        {l.minutes !== null && l.minutes !== undefined ? `${l.minutes}m` : "—"}
+      </span>
+    ),
+    align: "right",
+    width: "w-20",
   },
   {
     id: "duration_ms",
+    slot: "measures",
     header: "Duration",
     filterType: "number",
     accessor: (l) => l.duration_ms,
@@ -216,24 +246,8 @@ const LOGS_COLUMNS: DataTableColumn<MonitorLog>[] = [
     width: "w-20",
   },
   {
-    id: "error",
-    header: "Outcome",
-    filterType: "text",
-    accessor: (l) => l.error,
-    cell: (l) =>
-      l.error ? (
-        <span className="block max-w-[220px] truncate text-xs text-destructive" title={l.error}>
-          {l.error}
-        </span>
-      ) : (
-        <span className="inline-flex items-center gap-1 text-xs text-success">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          OK
-        </span>
-      ),
-  },
-  {
     id: "actions",
+    slot: "actions",
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
@@ -723,6 +737,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           onPageSizeChange={(size) => { setPageSize(size); setPage(0) }}
           total={total}
           onPageChange={setPage}
+          viewKey="logs"
           ariaLabel="Monitor logs"
           empty={{
             icon: SearchX,

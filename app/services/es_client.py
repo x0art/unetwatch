@@ -60,6 +60,35 @@ async def es_client(
         await client.close()
 
 
+def es_hits_total(response: object) -> int | None:
+    """Total hit count from an Elasticsearch search response, or ``None``.
+
+    Returns ``None`` when the response carries no usable ``hits.total`` — a
+    window the search could not answer (a stub, an old index without
+    ``track_total_hits``) — so callers can report the count as *unavailable*
+    rather than assuming a confident 0.
+
+    ``es.search()`` does **not** return a ``dict``: elasticsearch-py 8/9
+    returns an :class:`elastic_transport.ObjectApiResponse`, whose ``ApiResponse``
+    base is not a ``dict`` subclass. A bare ``isinstance(res, dict)`` guard is
+    therefore always false and silently blanks every count; read the payload
+    through mapping-style access (which the response proxies to its ``.body``)
+    instead.
+    """
+    try:
+        hits = response["hits"]  # type: ignore[index]
+    except (TypeError, KeyError, IndexError):
+        return None
+    total = hits.get("total") if hasattr(hits, "get") else None
+    if isinstance(total, int):  # ES 6-style scalar total
+        return total
+    if hasattr(total, "get"):
+        value = total.get("value")
+        if isinstance(value, int):
+            return value
+    return None
+
+
 async def is_es_online() -> bool:
     """True when Elasticsearch answers a ping within a short timeout."""
     settings = get_settings()
