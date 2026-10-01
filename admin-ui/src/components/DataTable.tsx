@@ -229,6 +229,8 @@ interface DataTableProps<T> {
   loadingNoun?: string
   /** What the toolbar hint announces it is waiting on. Default "Loading". */
   loadingLabel?: string
+  /** Optional override for the first-load skeleton row count. Absent ⇒ the
+   *  real `pageSize`, so a 50-row page does not advertise 8 rows. */
   skeletonRows?: number
   /** When true, a checkbox column + bulk action bar are rendered. */
   selectable?: boolean
@@ -365,6 +367,11 @@ const ENUM_FALLBACKS: Record<string, string[]> = {
   coverage: ["Blacklist risk", "Whitelist", "Blacklist", "None"],
 }
 
+/** Grid cell padding, keyed by density (Canon §1.3). `TableSkeleton` in
+ *  `ui.tsx` mirrors these exact values; changing one here MUST change the
+ *  other, because the skeleton's whole job is to occupy the real grid's cells.
+ *  Kept module-private (a plain `export` adds a `react(only-export-components)`
+ *  warning to this file). */
 const DENSITY_PAD: Record<Density, { th: string; td: string }> = {
   comfortable: { th: "px-4 py-3", td: "px-4 py-3" },
   compact: { th: "px-3 py-2", td: "px-3 py-1.5" },
@@ -410,7 +417,7 @@ export function DataTable<T>({
   data,
   rowId,
   loading = false,
-  skeletonRows = 8,
+  skeletonRows,
   loadingStartedAt,
   loadingProgress,
   loadingNoun = "rows",
@@ -1220,23 +1227,23 @@ export function DataTable<T>({
           </thead>
           {/* Skeleton only when there is genuinely nothing to keep. A refetch
               over existing rows falls through to the live rows below, which
-              the region above dims via `aria-busy` + opacity. */}
+              the region above dims via `aria-busy` + opacity.
+
+              The rows are emitted as a real `<tbody>` of this table — NOT
+              via `TableSkeleton`, whose fixed wrapper (`<div><table>`) cannot
+              legally sit inside the `<table>` opened above. Nesting it there
+              makes the browser foster-parent the wrapper out of the table, so
+              the skeleton detaches and paints ABOVE the real header. The row
+              markup itself is still the one `TableSkeleton` defines; see
+              `SkeletonRows` at the foot of this file. */}
           {loading && data.length === 0 ? (
             <tbody>
-              {Array.from({ length: skeletonRows }).map((_, i) => (
-                <tr key={i} className="border-b border-border">
-                  {selectable && (
-                    <td className={pad.td}>
-                      <Skeleton className="h-4 w-4" />
-                    </td>
-                  )}
-                  {visibleColumns.map((col) => (
-                    <td key={col.id} className={pad.td}>
-                      <Skeleton className={cn("h-4", col.width ?? "w-24")} />
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              <SkeletonRows
+                rows={skeletonRows ?? pageSize ?? 25}
+                columns={visibleColumns.map((c) => ({ width: c.width }))}
+                selectable={selectable}
+                td={pad.td}
+              />
             </tbody>
           ) : data.length === 0 ? (
             <tbody>
@@ -1722,4 +1729,48 @@ function persistedOf<K extends "filters" | "quickFilter" | "openRow">(
 ): PersistedTableState[K] | null {
   if (!viewKey) return null
   return readPersisted(viewKey)[key] ?? null
+}
+
+/* ── Skeleton rows ───────────────────────────────────────────────
+ * The first-load placeholder's `<tr>`s. The canonical `TableSkeleton`
+ * (`ui.tsx`) owns this markup, but it hard-codes its own wrapper
+ * (`<div class="overflow-x-auto rounded-md border …"><table>`), so it can
+ * only be used where the CALLER does not already own the `<table>` element.
+ *
+ * `DataTable` DOES own one, and the skeleton must land between its real
+ * `</thead>` and its real `<tbody>`. Nesting the wrapper there emits
+ * `<table>…<div><table>…</table></div>…</table>`, which is invalid HTML:
+ * the browser foster-parents the stray `<div>` out of the table, so the
+ * skeleton detaches and renders ABOVE the real header. Hence this helper
+ * emits the rows ONLY, for a caller-owned `<tbody>`.
+ *
+ * It is a deliberate byte-for-byte mirror of `TableSkeleton`'s row loop —
+ * same density padding (`pad`), same `w-12` checkbox cell, same
+ * `col.width ?? "w-24"` fallback that keeps a widthless column visible.
+ * Change one and the other MUST move with it. */
+function SkeletonRows({
+  rows,
+  columns,
+  selectable,
+  td,
+}: {
+  rows: number
+  columns: Array<{ width?: string }>
+  selectable: boolean
+  td: string
+}) {
+  return Array.from({ length: rows }, (_, r) => (
+    <tr key={r} className="border-b border-border last:border-b-0">
+      {selectable && (
+        <td className={td}>
+          <Skeleton className="h-4 w-4" />
+        </td>
+      )}
+      {columns.map((col, c) => (
+        <td key={c} className={td}>
+          <Skeleton className={cn("h-4", col.width ?? "w-24")} />
+        </td>
+      ))}
+    </tr>
+  ))
 }

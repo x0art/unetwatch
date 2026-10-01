@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ArrowRight,
   Ban,
@@ -21,9 +21,9 @@ import {
   getFindings,
   listTrackedUrls,
 } from "../api"
-import { Button, Callout, EmptyState, PageShell, Panel, RefreshIntervalSelect, SimpleTable, Skeleton, StatCard, StatusBadge, useToast } from "./ui"
+import { Button, Callout, EmptyState, PageShell, Panel, RefreshIntervalSelect, SimpleTable, Skeleton, SkeletonShape, StatCard, StatusBadge, useToast } from "./ui"
 import { CountdownRing } from "./CountdownRing"
-import { useAutoRefresh } from "../lib/utils"
+import { useAbortable, useAutoRefresh, useGeneration } from "../lib/utils"
 import { LoadingIndicator } from "./loading"
 import { type View } from "./Sidebar"
 
@@ -134,35 +134,51 @@ export function DashboardPage({
     return () => { cancelBlacklist(); cancelTracked() }
   }, [fetchBlacklistCount, fetchTrackedCount])
 
+  // `getFindings` is a plain READ, so it can be aborted; the generation keeps
+  // the poll tick honest — useAutoRefresh discards a callback's cleanup, so an
+  // abort alone cannot await a superseded read there.
+  const runRecent = useAbortable()
+  const recentGen = useGeneration()
+  const recentLoadedRef = useRef(false)
+
+  // Returns its promise so useAutoRefresh can skip a tick while this read is
+  // pending (a poll tick must skip, never overlap).
   const fetchRecent = useCallback(() => {
-    let cancelled = false
+    const g = recentGen.next()
+    const isFirstLoad = !recentLoadedRef.current
     setRecentLoading(true)
     setRecentError(null)
     setRecentLoadingStartedAt(Date.now())
-    getFindings({ limit: 5 })
+    return runRecent((signal) => getFindings({ limit: 5 }, { signal }))
       .then((data) => {
-        if (!cancelled) setRecentFindings(data.items)
+        if (data === undefined || !recentGen.isCurrent(g)) return
+        setRecentFindings(data.items)
+        recentLoadedRef.current = true
       })
       .catch((e) => {
-        if (!cancelled) {
-          setRecentFindings([])
-          setRecentError((e as Error).message)
-          toast({ title: "Failed to load recent findings", variant: "error" })
-        }
+        if (!recentGen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        // Never blank the recent list on a FAILED refetch; a failed first load
+        // has nothing to keep, so it may still reset (§4.6 never-blank).
+        if (isFirstLoad) setRecentFindings([])
+        setRecentError((e as Error).message)
+        toast({ title: "Failed to load recent findings", variant: "error" })
       })
       .finally(() => {
-        if (!cancelled) {
-          setRecentLoading(false)
-        }
+        if (recentGen.isCurrent(g)) setRecentLoading(false)
       })
-    return () => { cancelled = true }
-  }, [toast])
+  }, [runRecent, recentGen, toast])
 
-  useEffect(() => fetchRecent(), [fetchRecent])
+  useEffect(() => {
+    void fetchRecent()
+  }, [fetchRecent])
 
+  // Returns the findings promise so useAutoRefresh's in-flight skip actually
+  // engages: a `{}` body (returning undefined) left the flag unset, so 60s
+  // ticks could overlap a slow read.
   const refreshAll = useCallback(() => {
     onRefresh()
-    fetchRecent()
+    return fetchRecent()
   }, [onRefresh, fetchRecent])
   const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
 
@@ -231,7 +247,16 @@ export function DashboardPage({
           <StatCard
             icon={ShieldAlert}
             label="Blacklist"
-            value={blacklistCount !== null ? blacklistCount.toLocaleString() : "—"}
+            value={
+              // Honest loading: an unread count is unknown, never 0 — a
+              // shape-mirroring skeleton keeps the card's box while the read
+              // runs, and `—` stays reserved for a genuine failure (below).
+              blacklistCount !== null
+                ? blacklistCount.toLocaleString()
+                : blacklistError === null
+                  ? <Skeleton className="h-9 w-16" />
+                  : "—"
+            }
             tone="danger"
             hint="Hosts & IPs blocked"
             action={
@@ -245,7 +270,13 @@ export function DashboardPage({
           <StatCard
             icon={Globe}
             label="Tracked URLs"
-            value={trackedCount !== null ? trackedCount.toLocaleString() : "—"}
+            value={
+              trackedCount !== null
+                ? trackedCount.toLocaleString()
+                : trackedError === null
+                  ? <Skeleton className="h-9 w-16" />
+                  : "—"
+            }
             tone="warning"
             hint="Monitored for redirects"
             action={
@@ -294,8 +325,11 @@ export function DashboardPage({
                 and show the quiet banner so the operator sees the read is still
                 running. */}
             {recentLoading && recentFindings.length === 0 ? (
-              <div className="space-y-3" aria-busy="true">
-                <Skeleton className="h-32 w-full" />
+              // Plain `div` (not the styled feed-list container): the list
+              // itself is borderless inside the Panel, so a bordered box here
+              // would be a second frame. Rows mirror the table's line rhythm.
+              <div className="space-y-2" aria-busy="true">
+                <SkeletonShape variant="feed-list" count={5} className="border-0 bg-transparent shadow-none" />
               </div>
             ) : recentFindings.length > 0 ? (
               <div aria-busy={recentLoading}>

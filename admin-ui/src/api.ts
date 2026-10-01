@@ -297,8 +297,7 @@ export async function runQuery(
     excludeWhitelist?: boolean
     excludeBlacklist?: boolean
     viewMode?: "all" | "flagged"
-    signal?: AbortSignal
-  },
+  } & ReqOpts,
 ): Promise<QueryResult> {
   const params = new URLSearchParams({ minutes: String(minutes) })
   const q = opts?.q?.trim()
@@ -308,7 +307,10 @@ export async function runQuery(
   if (opts?.excludeWhitelist) params.set("exclude_whitelist", "true")
   if (opts?.excludeBlacklist) params.set("exclude_blacklist", "true")
   if (opts?.viewMode && opts.viewMode !== "flagged") params.set("view_mode", opts.viewMode)
-  return request(`/query/run?${params}`, opts?.signal ? { signal: opts.signal } : undefined)
+  // ReqOpts is a strict subset of RequestInit, so `opts` (minus the query
+  // fields) can go straight to the fetch wrapper; the unused query fields are
+  // harmless extra keys, and `signal` reaches fetch via request()'s `...opts`.
+  return request(`/query/run?${params}`, opts)
 }
 
 /* ── Monitor logs (ES query + webhook audit trail) ───────────────── */
@@ -370,7 +372,7 @@ export async function listLogs(params?: {
   offset?: number
   sort_by?: string
   sort_order?: "asc" | "desc"
-}): Promise<LogsResponse> {
+}, opts?: ReqOpts): Promise<LogsResponse> {
   const qs = new URLSearchParams()
   if (params?.kind) qs.set("kind", params.kind)
   if (params?.search) qs.set("search", params.search)
@@ -378,7 +380,7 @@ export async function listLogs(params?: {
   if (params?.offset) qs.set("offset", String(params.offset))
   if (params?.sort_by) qs.set("sort_by", params.sort_by)
   if (params?.sort_order) qs.set("sort_order", params.sort_order)
-  const data = await request<LogsResponse>(`/logs/?${qs}`)
+  const data = await request<LogsResponse>(`/logs/?${qs}`, opts)
   return {
     ...data,
     items: data.items.map((l) => ({
@@ -469,7 +471,17 @@ export async function login(
 
 /* ── Generic API wrapper ─────────────────────────────────────────── */
 
-async function request<T>(url: string, opts?: RequestInit): Promise<T> {
+/**
+ * Cancellation option for READ endpoints (spec §4.1 / Audit §4.5).
+ *
+ * Deliberately `AbortSignal`-only: writes never receive one, because aborting a
+ * half-sent POST/PUT/DELETE leaves unknown server-side state and the UI unable
+ * to report success/failure. Keeping the type to just `{ signal }` means there
+ * is no room in a reader's signature for anything a mutation could misuse.
+ */
+export type ReqOpts = { signal?: AbortSignal }
+
+async function request<T>(url: string, opts?: RequestInit & ReqOpts): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
@@ -529,7 +541,7 @@ export async function listPatterns(params?: {
   offset?: number
   sort_by?: "id" | "pattern" | "pattern_type" | "created_at"
   sort_order?: "asc" | "desc"
-}): Promise<Pattern[]> {
+}, opts?: ReqOpts): Promise<Pattern[]> {
   const qs = new URLSearchParams()
   if (params?.pattern_type) qs.set("pattern_type", params.pattern_type)
   if (params?.search) qs.set("search", params.search)
@@ -537,7 +549,7 @@ export async function listPatterns(params?: {
   if (params?.offset) qs.set("offset", String(params.offset))
   if (params?.sort_by) qs.set("sort_by", params.sort_by)
   if (params?.sort_order) qs.set("sort_order", params.sort_order)
-  return request(`/patterns/?${qs}`)
+  return request(`/patterns/?${qs}`, opts)
 }
 
 export async function createPattern(data: {
@@ -570,8 +582,8 @@ export async function bulkImport(data: {
   return request("/patterns/bulk", { method: "POST", body: JSON.stringify(data) })
 }
 
-export async function getPatternCounts(): Promise<PatternCounts> {
-  return request("/patterns/stats/counts")
+export async function getPatternCounts(opts?: ReqOpts): Promise<PatternCounts> {
+  return request("/patterns/stats/counts", opts)
 }
 
 /* ── Live Kibana pattern simulation (Task 9 — spec §3.3) ─────────── */
@@ -636,19 +648,19 @@ export async function simulatePattern(data: {
  * All four are derived from real persisted data — never hardcoded. Card
  * "Rules" vs "Patterns" units follow the brief verbatim.
  */
-export async function getPatternStats(): Promise<PatternStats> {
-  const patternsPromise = listPatterns({ limit: 5000, sort_by: "id", sort_order: "asc" }).catch(() => [] as Pattern[])
+export async function getPatternStats(opts?: ReqOpts): Promise<PatternStats> {
+  const patternsPromise = listPatterns({ limit: 5000, sort_by: "id", sort_order: "asc" }, opts).catch(() => [] as Pattern[])
   const [patterns, counts, status, metrics] = await Promise.all([
     patternsPromise,
-    getPatternCounts().catch(() => ({ block: 0, whitelist: 0 }) as PatternCounts),
-    getMonitorStatus().catch(() => null),
+    getPatternCounts(opts).catch(() => ({ block: 0, whitelist: 0 }) as PatternCounts),
+    getMonitorStatus(opts).catch(() => null),
     request<{
       total_requests?: number
       unique_ips?: number
       es_online?: boolean
       top_urls?: { url: string; count: number }[]
       top_ips?: { client_ip: string; count: number }[]
-    }>("/monitor/metrics?minutes=1440").catch(() => null),
+    }>("/monitor/metrics?minutes=1440", opts).catch(() => null),
   ])
 
   const activePatterns = patterns.filter((p) => p.pattern_type === "block")
@@ -678,8 +690,8 @@ export async function getPatternStats(): Promise<PatternStats> {
   }
 }
 
-export async function getMonitorStatus(): Promise<MonitorStatus> {
-  return request("/monitor/status")
+export async function getMonitorStatus(opts?: ReqOpts): Promise<MonitorStatus> {
+  return request("/monitor/status", opts)
 }
 
 /* ── Live Monitor metrics (Task 3 KPI aggregation) ─────────────────── */
@@ -700,7 +712,7 @@ export interface LiveMetrics {
 export async function getLiveMetrics(opts?: {
   minutes?: number
   viewMode?: "all" | "flagged"
-}): Promise<LiveMetrics> {
+}, reqOpts?: ReqOpts): Promise<LiveMetrics> {
   const minutes = opts?.minutes ?? 60
   // Metrics endpoint is capped to 1440 (enforced by backend Query ge=1,le=1440);
   // longer windows fall back to the max so the card never 500s.
@@ -712,8 +724,8 @@ export async function getLiveMetrics(opts?: {
     denied_count?: number
     denied_requests?: number
     total_denied?: number
-  }>(`/monitor/metrics?minutes=${metricsMinutes}`).catch(() => null)
-  const queryPromise = runQuery(metricsMinutes, { viewMode: opts?.viewMode }).catch(() => null)
+  }>(`/monitor/metrics?minutes=${metricsMinutes}`, reqOpts).catch(() => null)
+  const queryPromise = runQuery(metricsMinutes, { viewMode: opts?.viewMode, ...reqOpts }).catch(() => null)
 
   const [metrics, query] = await Promise.all([metricsPromise, queryPromise])
 
@@ -785,13 +797,13 @@ export async function getFindings(params?: {
   minutes?: number
   limit?: number
   offset?: number
-}): Promise<FindingsResponse> {
+}, opts?: ReqOpts): Promise<FindingsResponse> {
   const qs = new URLSearchParams()
   if (params?.search) qs.set("search", params.search)
   if (params?.minutes) qs.set("minutes", String(params.minutes))
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
-  return request(`/findings/?${qs}`)
+  return request(`/findings/?${qs}`, opts)
 }
 
 export async function deleteFinding(id: number): Promise<void> {
@@ -809,8 +821,8 @@ export async function bulkDeleteFindings(ids: number[]): Promise<{ deleted: numb
   })
 }
 
-export async function getFindingsGraph(limit = 30): Promise<FindingsGraph> {
-  return request(`/findings/graph?limit=${limit}`)
+export async function getFindingsGraph(limit = 30, opts?: ReqOpts): Promise<FindingsGraph> {
+  return request(`/findings/graph?limit=${limit}`, opts)
 }
 
 /* ── Live Sankey (Task 4 — 4-column Sources → Patterns → Domains → Destinations) ─ */
@@ -891,6 +903,7 @@ export function originOf(u: string): string {
 export async function getLiveSankey(
   timeRange: string,
   viewMode: "all" | "flagged" = "flagged",
+  opts?: ReqOpts,
 ): Promise<LiveSankeyGraph> {
   const minutes = timeRangeToMinutesLive(timeRange)
   // Backend /api/query/run caps at 1440; longer windows silently clamp — caller
@@ -900,7 +913,7 @@ export async function getLiveSankey(
 
   // Prefer live ES data (rich: blocked_by, action, blacklisted).
   try {
-    const res = await runQuery(clamped, { viewMode })
+    const res = await runQuery(clamped, { viewMode, ...opts })
     if (res.items.length > 0) {
       return buildFlowSankey(res.items)
     }
@@ -1213,33 +1226,35 @@ export interface ClientBreakdown {
 export async function getTopClients(opts?: {
   search?: string
   limit?: number
-}): Promise<{ items: TopClient[] }> {
+}, reqOpts?: ReqOpts): Promise<{ items: TopClient[] }> {
   const qs = new URLSearchParams()
   if (opts?.search) qs.set("search", opts.search)
   if (opts?.limit) qs.set("limit", String(opts.limit))
-  return request(`/findings/top-clients?${qs}`)
+  return request(`/findings/top-clients?${qs}`, reqOpts)
 }
 
 export async function getClientBreakdown(
   ip: string,
   opts?: { minutes?: number; search?: string; limit?: number },
+  reqOpts?: ReqOpts,
 ): Promise<ClientBreakdown> {
   const qs = new URLSearchParams()
   if (opts?.minutes) qs.set("minutes", String(opts.minutes))
   if (opts?.search) qs.set("search", opts.search)
   if (opts?.limit) qs.set("limit", String(opts.limit))
-  return request(`/findings/client/${encodeURIComponent(ip)}?${qs}`)
+  return request(`/findings/client/${encodeURIComponent(ip)}?${qs}`, reqOpts)
 }
 
 export async function runClientQuery(
   ip: string,
   opts?: { minutes?: number; search?: string; limit?: number },
+  reqOpts?: ReqOpts,
 ): Promise<ClientBreakdown> {
   const qs = new URLSearchParams({ ip })
   if (opts?.minutes) qs.set("minutes", String(opts.minutes))
   if (opts?.search) qs.set("search", opts.search)
   if (opts?.limit) qs.set("limit", String(opts.limit))
-  return request(`/query/client?${qs}`)
+  return request(`/query/client?${qs}`, reqOpts)
 }
 
 /* ── Per-URL client drill-down (Traffic page reverse) ─────────── */
@@ -1261,28 +1276,33 @@ export interface UrlBreakdown {
 export async function getUrlBreakdown(
   url: string,
   opts?: { minutes?: number; limit?: number; source?: "findings" | "live" },
+  reqOpts?: ReqOpts,
 ): Promise<UrlBreakdown> {
   const qs = new URLSearchParams()
   if (opts?.minutes) qs.set("minutes", String(opts.minutes))
   if (opts?.limit) qs.set("limit", String(opts.limit))
   if (opts?.source) qs.set("source", opts.source)
-  return request(`/findings/url/${encodeURIComponent(url)}?${qs}`)
+  return request(`/findings/url/${encodeURIComponent(url)}?${qs}`, reqOpts)
 }
 
 /* ── Blacklist plain-text feeds (for external integrations) ──────── */
 
-export async function getBlacklistUrls(): Promise<string> {
+export async function getBlacklistUrls(opts?: ReqOpts): Promise<string> {
+  // Direct fetch (plain-text feed): mirror the request() auth/401 handling and
+  // forward the caller's `signal` explicitly (Audit §4.3.1 / Rule R-C3).
   const res = await fetch(`${API}/blacklist/urls.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
+    signal: opts?.signal,
   })
   if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.text()
 }
 
-export async function getBlacklistIps(): Promise<string> {
+export async function getBlacklistIps(opts?: ReqOpts): Promise<string> {
   const res = await fetch(`${API}/blacklist/ips.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
+    signal: opts?.signal,
   })
   if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
@@ -1303,11 +1323,11 @@ export async function deleteBlacklistEntry(kind: "url" | "ip", value: string): P
   return request(`/blacklist/${kind}/${encodeURIComponent(value)}`, { method: "DELETE" })
 }
 
-export async function getBlacklistSet(): Promise<{ urls: string[]; ips: string[] }> {
+export async function getBlacklistSet(opts?: ReqOpts): Promise<{ urls: string[]; ips: string[] }> {
   const headers: Record<string, string> = {}
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
-  const res = await fetch(`${API}/blacklist/entries`, { headers })
+  const res = await fetch(`${API}/blacklist/entries`, { headers, signal: opts?.signal })
   if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
@@ -1357,8 +1377,8 @@ export interface UpstreamSyncResult {
   errors?: { value: string; error: string }[]
 }
 
-export async function getBlacklistUpstreamStatus(): Promise<BlacklistUpstreamStatus> {
-  return request("/blacklist/upstream-status")
+export async function getBlacklistUpstreamStatus(opts?: ReqOpts): Promise<BlacklistUpstreamStatus> {
+  return request("/blacklist/upstream-status", opts)
 }
 
 export async function syncBlacklistUpstream(): Promise<UpstreamSyncResult> {
@@ -1377,9 +1397,10 @@ export interface JaillistBulkDeleteResult {
   deleted: number
 }
 
-export async function getJaillistIps(): Promise<string> {
+export async function getJaillistIps(opts?: ReqOpts): Promise<string> {
   const res = await fetch(`${API}/jaillist/ips.txt`, {
     headers: getToken() ? { "X-API-Key": getToken()! } : {},
+    signal: opts?.signal,
   })
   if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
@@ -1400,11 +1421,11 @@ export async function deleteJaillistEntry(value: string): Promise<void> {
   return request(`/jaillist/${encodeURIComponent(value)}`, { method: "DELETE" })
 }
 
-export async function getJaillistSet(): Promise<{ ips: string[] }> {
+export async function getJaillistSet(opts?: ReqOpts): Promise<{ ips: string[] }> {
   const headers: Record<string, string> = {}
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
-  const res = await fetch(`${API}/jaillist/entries`, { headers })
+  const res = await fetch(`${API}/jaillist/entries`, { headers, signal: opts?.signal })
   if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
   if (!res.ok) throw new Error(`Failed: ${res.status}`)
   return res.json()
@@ -1435,8 +1456,8 @@ export interface JaillistUpstreamStatus {
   upstream_count: number
 }
 
-export async function getJaillistUpstreamStatus(): Promise<JaillistUpstreamStatus> {
-  return request("/jaillist/upstream-status")
+export async function getJaillistUpstreamStatus(opts?: ReqOpts): Promise<JaillistUpstreamStatus> {
+  return request("/jaillist/upstream-status", opts)
 }
 
 export async function syncJaillistUpstream(): Promise<UpstreamSyncResult> {
@@ -1451,14 +1472,14 @@ export async function listTrackedUrls(params?: {
   offset?: number
   sort_by?: "id" | "url" | "source" | "status" | "last_checked_at"
   sort_order?: "asc" | "desc"
-}): Promise<TrackedUrlsResponse> {
+}, opts?: ReqOpts): Promise<TrackedUrlsResponse> {
   const qs = new URLSearchParams()
   if (params?.search) qs.set("search", params.search)
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
   if (params?.sort_by) qs.set("sort_by", params.sort_by)
   if (params?.sort_order) qs.set("sort_order", params.sort_order)
-  return request(`/redirects/?${qs}`)
+  return request(`/redirects/?${qs}`, opts)
 }
 
 export async function addTrackedUrl(data: {
@@ -1499,16 +1520,16 @@ export async function checkRedirectsBackground(urls?: string[]): Promise<{ accep
   })
 }
 
-export async function getRedirectCheckStatus(checkId: string): Promise<RedirectCheckRun> {
-  return request(`/redirects/check/status?check_id=${encodeURIComponent(checkId)}`)
+export async function getRedirectCheckStatus(checkId: string, opts?: ReqOpts): Promise<RedirectCheckRun> {
+  return request(`/redirects/check/status?check_id=${encodeURIComponent(checkId)}`, opts)
 }
 
-export async function getRedirectGraph(): Promise<RedirectGraph> {
-  return request("/redirects/graph")
+export async function getRedirectGraph(opts?: ReqOpts): Promise<RedirectGraph> {
+  return request("/redirects/graph", opts)
 }
 
-export async function getUrlRedirectHistory(id: number): Promise<UrlRedirectHistory> {
-  return request(`/redirects/${id}/history`)
+export async function getUrlRedirectHistory(id: number, opts?: ReqOpts): Promise<UrlRedirectHistory> {
+  return request(`/redirects/${id}/history`, opts)
 }
 
 /* ── Host Inspector (Task 6 — single-entity forensic) ───────────── */
@@ -1827,7 +1848,7 @@ function hostProfileFromQuery(ip: string, res: QueryResult): HostProfile {
  * says "no score", and rungs 2-3 could only answer with a number the client
  * invented.
  */
-export async function getHostProfile(ip: string, timeRange: string): Promise<HostProfile> {
+export async function getHostProfile(ip: string, timeRange: string, opts?: ReqOpts): Promise<HostProfile> {
   const cleanIp = ip.trim()
   if (!cleanIp) throw new Error("IP required")
   const minutes = timeRangeToMinutesLive(timeRange)
@@ -1837,6 +1858,7 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   try {
     const data = await request<Record<string, unknown>>(
       `/hosts/${encodeURIComponent(cleanIp)}?timeRange=${encodeURIComponent(timeRange)}`,
+      opts,
     )
     // Accept either { host, risk } or the flat HostProfile shape.
     if (data && typeof data === "object") {
@@ -1864,7 +1886,7 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
   //    supplies identity, byte totals and the raw counts, never a score.
   //    The window follows the selector (1h/24h/7d/30d) via timeRangeToMinutesLive.
   try {
-    const qRes = await runQuery(minutes, { q: cleanIp })
+    const qRes = await runQuery(minutes, { q: cleanIp, ...opts })
     if (qRes.items.length > 0 || qRes.total_requests > 0) {
       return hostProfileFromQuery(cleanIp, qRes)
     }
@@ -1874,7 +1896,7 @@ export async function getHostProfile(ip: string, timeRange: string): Promise<Hos
 
   // 3) Persisted findings, again CONTEXT-CARRYING ONLY. The backend grades
   //    this same table itself now, so a score for it comes from rung 1 only.
-  const findings = await getFindings({ search: cleanIp, limit: 200 })
+  const findings = await getFindings({ search: cleanIp, limit: 200 }, opts)
   if (findings.items.length > 0) {
     return hostProfileFromFindings(cleanIp, findings.items, findings.total)
   }
@@ -2014,36 +2036,36 @@ export async function getAnalyticsSummary(params: {
   range?: string
   compare?: string
   hostGroup?: string
-} = {}): Promise<AnalyticsSummary> {
+}, opts?: ReqOpts): Promise<AnalyticsSummary> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
-  return request(`/analytics/summary?${qs}`)
+  return request(`/analytics/summary?${qs}`, opts)
 }
 
 export async function getAnalyticsBandwidth(params: {
   range?: string
   compare?: string
   hostGroup?: string
-} = {}): Promise<AnalyticsBandwidth> {
+}, opts?: ReqOpts): Promise<AnalyticsBandwidth> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
-  return request(`/analytics/bandwidth?${qs}`)
+  return request(`/analytics/bandwidth?${qs}`, opts)
 }
 
 export async function getAnalyticsEnforcements(params: {
   range?: string
   compare?: string
   hostGroup?: string
-} = {}): Promise<AnalyticsEnforcements> {
+}, opts?: ReqOpts): Promise<AnalyticsEnforcements> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
-  return request(`/analytics/enforcements?${qs}`)
+  return request(`/analytics/enforcements?${qs}`, opts)
 }
 
 export async function getAnalyticsTopDomains(params: {
@@ -2051,13 +2073,13 @@ export async function getAnalyticsTopDomains(params: {
   compare?: string
   hostGroup?: string
   limit?: number
-} = {}): Promise<AnalyticsTopDomains> {
+}, opts?: ReqOpts): Promise<AnalyticsTopDomains> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
-  return request(`/analytics/top-domains?${qs}`)
+  return request(`/analytics/top-domains?${qs}`, opts)
 }
 
 export async function getAnalyticsTopDenied(params: {
@@ -2065,13 +2087,13 @@ export async function getAnalyticsTopDenied(params: {
   compare?: string
   hostGroup?: string
   limit?: number
-} = {}): Promise<AnalyticsTopDenied> {
+}, opts?: ReqOpts): Promise<AnalyticsTopDenied> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
-  return request(`/analytics/top-denied?${qs}`)
+  return request(`/analytics/top-denied?${qs}`, opts)
 }
 
 export async function getAnalyticsTopEnforced(params: {
@@ -2079,13 +2101,13 @@ export async function getAnalyticsTopEnforced(params: {
   compare?: string
   hostGroup?: string
   limit?: number
-} = {}): Promise<AnalyticsTopEnforced> {
+}, opts?: ReqOpts): Promise<AnalyticsTopEnforced> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
-  return request(`/analytics/top-enforced?${qs}`)
+  return request(`/analytics/top-enforced?${qs}`, opts)
 }
 
 export async function getAnalyticsTopClients(params: {
@@ -2093,13 +2115,13 @@ export async function getAnalyticsTopClients(params: {
   compare?: string
   hostGroup?: string
   limit?: number
-} = {}): Promise<AnalyticsTopClients> {
+}, opts?: ReqOpts): Promise<AnalyticsTopClients> {
   const qs = new URLSearchParams()
   qs.set("range", params.range ?? "7d")
   if (params.compare) qs.set("compare", params.compare)
   if (params.hostGroup) qs.set("hostGroup", params.hostGroup)
   if (params.limit) qs.set("limit", String(params.limit))
-  return request(`/analytics/top-clients?${qs}`)
+  return request(`/analytics/top-clients?${qs}`, opts)
 }
 
 /* ── System & Kibana Settings (Task 11 — spec §3.5) ─────────────────── */
@@ -2135,8 +2157,8 @@ export type TestConnectionResult = {
   error?: string
 }
 
-export async function getKibanaSettings(): Promise<KibanaSettings> {
-  return request("/settings/kibana")
+export async function getKibanaSettings(opts?: ReqOpts): Promise<KibanaSettings> {
+  return request("/settings/kibana", opts)
 }
 
 export async function putKibanaSettings(data: KibanaSettings): Promise<KibanaSettings> {
@@ -2150,16 +2172,16 @@ export async function testKibanaConnection(data: KibanaSettings): Promise<TestCo
   })
 }
 
-export async function getFieldMap(): Promise<FieldMap> {
-  return request("/settings/field-map")
+export async function getFieldMap(opts?: ReqOpts): Promise<FieldMap> {
+  return request("/settings/field-map", opts)
 }
 
 export async function putFieldMap(data: FieldMap): Promise<FieldMap> {
   return request("/settings/field-map", { method: "PUT", body: JSON.stringify(data) })
 }
 
-export async function getAlerts(): Promise<AlertSettings> {
-  return request("/settings/alerts")
+export async function getAlerts(opts?: ReqOpts): Promise<AlertSettings> {
+  return request("/settings/alerts", opts)
 }
 
 export async function putAlerts(data: AlertSettings): Promise<AlertSettings> {
@@ -2198,13 +2220,14 @@ export interface ClientReport {
   top_patterns: ClientReportTopPattern[]
 }
 
-export async function getClientReport(clientIp: string): Promise<ClientReport> {
-  return request(`/client-report/${encodeURIComponent(clientIp)}`)
+export async function getClientReport(clientIp: string, opts?: ReqOpts): Promise<ClientReport> {
+  return request(`/client-report/${encodeURIComponent(clientIp)}`, opts)
 }
 
 export async function getClientReportFindings(
   clientIp: string,
   params: { search?: string; limit?: number; offset?: number; sort_by?: string; sort_order?: "asc" | "desc" } = {},
+  opts?: ReqOpts,
 ): Promise<FindingsResponse> {
   const qs = new URLSearchParams()
   if (params.search) qs.set("search", params.search)
@@ -2213,7 +2236,7 @@ export async function getClientReportFindings(
   if (params.sort_by) qs.set("sort_by", params.sort_by)
   if (params.sort_order) qs.set("sort_order", params.sort_order)
   const q = qs.toString() ? `?${qs}` : ""
-  return request(`/client-report/${encodeURIComponent(clientIp)}/findings${q}`)
+  return request(`/client-report/${encodeURIComponent(clientIp)}/findings${q}`, opts)
 }
 
 export function getClientReportCsvUrl(clientIp: string): string {
@@ -2333,23 +2356,25 @@ export interface AttckMapping {
 export async function getHostAttckMapping(
   ip: string,
   params?: { minutes?: number; timeRange?: string },
+  opts?: ReqOpts,
 ): Promise<AttckMapping> {
   const qs = new URLSearchParams()
   if (params?.minutes) qs.set("minutes", String(params.minutes))
   if (params?.timeRange) qs.set("timeRange", params.timeRange)
   const q = qs.toString() ? `?${qs}` : ""
-  return request(`/attck/host/${encodeURIComponent(ip)}${q}`)
+  return request(`/attck/host/${encodeURIComponent(ip)}${q}`, opts)
 }
 
 export async function getUrlAttckMapping(
   url: string,
   params?: { source?: "findings" | "live"; limit?: number },
+  opts?: ReqOpts,
 ): Promise<AttckMapping> {
   const qs = new URLSearchParams()
   if (params?.source) qs.set("source", params.source)
   if (params?.limit) qs.set("limit", String(params.limit))
   const q = qs.toString() ? `?${qs}` : ""
-  return request(`/attck/url/${encodeURIComponent(url)}${q}`)
+  return request(`/attck/url/${encodeURIComponent(url)}${q}`, opts)
 }
 
 /** One technique aggregated across every host that evidenced it (fleet view). */
@@ -2386,13 +2411,14 @@ export interface FleetMapping {
 
 export async function getFleetAttckMapping(
   params?: { minutes?: number; timeRange?: string; hostLimit?: number },
+  opts?: ReqOpts,
 ): Promise<FleetMapping> {
   const qs = new URLSearchParams()
   if (params?.minutes) qs.set("minutes", String(params.minutes))
   if (params?.timeRange) qs.set("timeRange", params.timeRange)
   if (params?.hostLimit) qs.set("hostLimit", String(params.hostLimit))
   const q = qs.toString() ? `?${qs}` : ""
-  return request(`/attck/fleet${q}`)
+  return request(`/attck/fleet${q}`, opts)
 }
 /* ── Network Enrichment ─────────────────────────────────── */
 export interface EnrichLookup { status: string; hostname?: string | null; addresses?: string[]; error?: string | null }
@@ -2401,11 +2427,11 @@ export interface EnrichHost { entity: { kind: "host"; value: string }; checked_a
 export interface EnrichTls { status: string; subject: string | null; issuer: string | null; not_after: string | null; san: string[]; error: string | null }
 export interface EnrichHttp { status: string; status_code: number | null; server: string | null; final_url: string | null; redirects: number; error: string | null }
 export interface EnrichUrl { entity: { kind: "url"; value: string }; checked_at: string; host: string; is_ip_literal: boolean; resolved_ips: string[]; reverse_dns: EnrichLookup; tls: EnrichTls; http: EnrichHttp; rdap: EnrichRdap; notes: string[] }
-export async function getHostEnrichment(ip: string, timeoutS = 3): Promise<EnrichHost> {
-  return request(`/enrich/host/${encodeURIComponent(ip)}?timeout_s=${timeoutS}`)
+export async function getHostEnrichment(ip: string, timeoutS = 3, opts?: ReqOpts): Promise<EnrichHost> {
+  return request(`/enrich/host/${encodeURIComponent(ip)}?timeout_s=${timeoutS}`, opts)
 }
-export async function getUrlEnrichment(url: string, timeoutS = 3): Promise<EnrichUrl> {
-  return request(`/enrich/url/${encodeURIComponent(url)}?timeout_s=${timeoutS}`)
+export async function getUrlEnrichment(url: string, timeoutS = 3, opts?: ReqOpts): Promise<EnrichUrl> {
+  return request(`/enrich/url/${encodeURIComponent(url)}?timeout_s=${timeoutS}`, opts)
 }
 
 /* ── Operator display zone (backend half of timestamp rendering) ──── */
@@ -2424,9 +2450,9 @@ export interface OperatorZone {
  * callers must then render timestamps browser-local (the pre-zone
  * behavior) and never break the page. Never throws.
  */
-export async function getOperatorZone(): Promise<OperatorZone | null> {
+export async function getOperatorZone(opts?: ReqOpts): Promise<OperatorZone | null> {
   try {
-    const z = await request<{ label?: unknown; offsetMinutes?: unknown }>("/timezone")
+    const z = await request<{ label?: unknown; offsetMinutes?: unknown }>("/timezone", opts)
     if (typeof z?.label !== "string" || z.label === "") return null
     return {
       label: z.label,

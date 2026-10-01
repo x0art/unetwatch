@@ -34,14 +34,14 @@ import {
   Input,
   PageHeader,
   SearchInput,
-  Skeleton,
+  SkeletonShape,
   StatCard,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
 import { ListActionCell } from "./ListActionDropdown"
 import { NetworkGraphDiagram, type NetworkNode, type NetworkLink } from "./NetworkGraphDiagram"
-import { cn, useDebounce } from "../lib/utils"
+import { cn, useAbortable, useDebounce, useGeneration } from "../lib/utils"
 import { LoadingIndicator, useElapsed } from "./loading"
 
 const DEFAULT_PAGE_SIZE = 25
@@ -336,62 +336,83 @@ export function RedirectsPage() {
 
   const debouncedSearch = useDebounce(search, 300)
 
+  // User-keyed READ (search/page/sort). A newer load aborts the previous one
+  // and the generation drops a slow earlier load that lands after a newer one
+  // (the bare `cancelled` flag only suppressed setState on cleanup).
+  const runTable = useAbortable()
+  const tableGen = useGeneration()
+  const tableLoadedRef = useRef(false)
   const loadTable = useCallback(() => {
-    let cancelled = false
+    const g = tableGen.next()
+    const isFirstLoad = !tableLoadedRef.current
     setLoading(true)
     setLoadingStartedAt(Date.now())
     setTableError(null)
-    listTrackedUrls({
-      search: debouncedSearch || undefined,
-      limit: pageSize,
-      offset: page * pageSize,
-      sort_by: (sortBy ?? "last_checked_at") as "id" | "url" | "source" | "status" | "last_checked_at",
-      sort_order: sortDir,
-    })
+    return runTable((signal) =>
+      listTrackedUrls({
+        search: debouncedSearch || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+        sort_by: (sortBy ?? "last_checked_at") as "id" | "url" | "source" | "status" | "last_checked_at",
+        sort_order: sortDir,
+      }, { signal }),
+    )
       .then((data) => {
-        if (cancelled) return
+        if (data === undefined || !tableGen.isCurrent(g)) return
         setItems(data.items)
         setTotal(data.total)
+        tableLoadedRef.current = true
       })
       .catch((e) => {
-        if (!cancelled) {
+        if (!tableGen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        // Never blank good rows on a FAILED refetch; a failed first load has
+        // nothing to keep, so it may still reset (§4.6 never-blank).
+        if (isFirstLoad) {
           setItems([])
           setTotal(0)
-          setTableError((e as Error).message)
         }
+        setTableError((e as Error).message)
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (tableGen.isCurrent(g)) setLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [debouncedSearch, page, pageSize, sortBy, sortDir])
+  }, [runTable, tableGen, debouncedSearch, page, pageSize, sortBy, sortDir])
 
+  // Not user-keyed (fixed params) but still overlappable via `reload`; the
+  // abort+generation keep a slow first graph from clobbering a fresher one.
+  const runGraph = useAbortable()
+  const graphGen = useGeneration()
+  const graphLoadedRef = useRef(false)
   const loadGraph = useCallback(() => {
-    let cancelled = false
+    const g = graphGen.next()
+    const isFirstLoad = !graphLoadedRef.current
     setGraphLoading(true)
     setGraphError(null)
-    getRedirectGraph()
+    return runGraph((signal) => getRedirectGraph({ signal }))
       .then((data) => {
-        if (!cancelled) setGraph(data)
+        if (data === undefined || !graphGen.isCurrent(g)) return
+        setGraph(data)
+        graphLoadedRef.current = true
       })
       .catch((e) => {
-        if (!cancelled) {
-          setGraph(null)
-          setGraphError((e as Error).message)
-        }
+        if (!graphGen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        // Never blank a graph already on screen on a FAILED refetch.
+        if (isFirstLoad) setGraph(null)
+        setGraphError((e as Error).message)
       })
       .finally(() => {
-        if (!cancelled) setGraphLoading(false)
+        if (graphGen.isCurrent(g)) setGraphLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  }, [runGraph, graphGen])
 
-  useEffect(() => loadTable(), [loadTable])
-  useEffect(() => loadGraph(), [loadGraph])
+  useEffect(() => {
+    void loadTable()
+  }, [loadTable])
+  useEffect(() => {
+    void loadGraph()
+  }, [loadGraph])
 
   const reload = useCallback(() => {
     loadTable()
@@ -607,7 +628,10 @@ export function RedirectsPage() {
 
   const openHistory = async (target: TrackedUrl) => {
     setHistoryTarget(target)
-    setHistory(null)
+    // Null only when the target actually changes (nothing to keep). Reopening
+    // the SAME target keeps the edges mounted so a reload dims-and-cues like
+    // every other refetch instead of being unable to ever keep content.
+    if (historyTarget?.id !== target.id) setHistory(null)
     setHistoryLoading(true)
     setHistoryError(null)
     try {
@@ -729,7 +753,9 @@ export function RedirectsPage() {
             loaded diagram mounted while `graphLoading` re-fetches it. */}
         {graphLoading && !graph ? (
           <div className="space-y-3 p-4" aria-busy="true">
-            <Skeleton className="h-64 w-full" />
+            {/* The loaded surface is a DAG of source/destination nodes — mirror
+                the node silhouettes and the zoom-control overlay. */}
+            <SkeletonShape variant="dag" />
           </div>
         ) : graphError ? (
           <div className="p-4">
@@ -921,9 +947,41 @@ export function RedirectsPage() {
         description={historyTarget ? `${historyTarget.url} · ${STATUS_META[historyTarget.status].label}` : undefined}
         className="max-w-2xl"
       >
-        {historyLoading ? (
+        {/* Refetch with edges already on screen: keep the loaded list mounted and
+            only light the quiet "Refreshing" cue, so good data is never blanked.
+            The edge-list placeholder is reserved for when there is genuinely
+            nothing to keep (a first load of a newly opened target) — a loading
+            dialog never competes with a populated one. */}
+        {historyLoading && !history ? (
           <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-40 w-full" />
+            {/* The loaded body is a list of variable-height edge cards. */}
+            <SkeletonShape variant="edge-list" />
+          </div>
+        ) : historyLoading && history ? (
+          <div className="space-y-2" aria-busy="true">
+            <LoadingIndicator label="Refreshing history" className="max-w-md" />
+            {history.edges.map((edge, i) => (
+              <div
+                key={i}
+                className={cn(
+                  "rounded-md border px-3 py-2.5",
+                  edge.active ? "border-success/40 bg-success/5" : "border-border bg-muted/30 opacity-70",
+                )}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={edge.active ? "success" : "secondary"}>
+                    {edge.active ? "Active" : "Historical"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">HTTP {edge.http_status}</span>
+                  <span className="ml-auto text-[11px] text-muted-foreground">
+                    {formatWhen(edge.first_seen_at)} → {formatWhen(edge.last_seen_at)}
+                  </span>
+                </div>
+                <p className="mt-1.5 truncate font-mono text-xs" title={edge.target_url}>
+                  {edge.target_url}
+                </p>
+              </div>
+            ))}
           </div>
         ) : historyError ? (
           <Callout action={<Button variant="outline" size="sm" onClick={() => historyTarget && openHistory(historyTarget)}>Retry</Button>}>

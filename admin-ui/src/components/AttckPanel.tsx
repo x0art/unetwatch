@@ -1,5 +1,5 @@
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react"
-import { Badge, Button, Callout, EmptyState, Panel, SimpleTable, Skeleton, StatusBadge, type StatusTone } from "./ui"
+import { Badge, Button, Callout, EmptyState, Panel, SimpleTable, SkeletonShape, StatusBadge, type StatusTone } from "./ui"
 import { type AttckMapping } from "../api"
 
 interface Props {
@@ -65,7 +65,9 @@ export function AttckPanel({ mapping, loading, error, entityLabel, embedded = fa
       {loading && (
         <div aria-busy="true" aria-live="polite">
           <span className="sr-only">Loading ATT&CK mapping</span>
-          <Skeleton className="h-40 w-full" />
+          {/* The mapping is a titled panel of stacked sections (summary,
+              technique table, coverage) — mirror the panel stack. */}
+          <SkeletonShape variant="panel-stack" />
         </div>
       )}
       {!loading && !mapping && !error && (

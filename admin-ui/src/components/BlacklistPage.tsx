@@ -37,7 +37,7 @@ import {
   LoadingIcon,
   PageHeader,
   SearchInput,
-  Skeleton,
+  SkeletonShape,
   Toolbar,
   useToast,
 } from "./ui"
@@ -226,7 +226,9 @@ export function FeedCard({
 
         {loading && entries.length === 0 ? (
           <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-40 w-full" />
+            {/* The loaded list is a `max-h-80` scrolling feed of one-line rows —
+                mirror the container and the row height, not a flat block. */}
+            <SkeletonShape variant="feed-list" />
           </div>
         ) : entries.length > 0 ? (
           <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border bg-muted/30 shadow-sm">

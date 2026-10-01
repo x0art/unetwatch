@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
   Database,
@@ -15,7 +15,7 @@ import {
   FileText,
 } from "lucide-react"
 import { useFilter } from "../contexts/FilterContext"
-import { Button, Callout, IconButton, Input, SearchInput, Select, PageHeader, Panel, Skeleton, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
+import { Button, Callout, IconButton, Input, SearchInput, Select, PageHeader, Panel, SkeletonShape, Badge, EmptyState, LoadingIcon, TimestampCell, useToast, StatCard } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { HostEntityCard } from "./HostEntityCard"
 import { TrafficTimeline, type TimelinePoint } from "./TrafficTimeline"
@@ -52,6 +52,7 @@ import {
   hostOfUrl,
   type LogRow,
 } from "../lib/logRow"
+import { useAbortable, useGeneration } from "../lib/utils"
 
 const TIME_RANGE_OPTIONS = [
   { value: "1h", label: "Last 1h" },
@@ -247,10 +248,10 @@ function detectSpike(points: TimelinePoint[]): string | undefined {
 
 type HostSource = "live" | "findings"
 
-async function fetchHostSectionsFindings(ip: string, timeRange: string): Promise<HostSectionData> {
+async function fetchHostSectionsFindings(ip: string, timeRange: string, signal?: AbortSignal): Promise<HostSectionData> {
   const minutes = timeRangeToMinutesLive(timeRange)
   const { getFindings } = await import("../api")
-  const res = await getFindings({ search: ip.trim(), minutes, limit: 500 })
+  const res = await getFindings({ search: ip.trim(), minutes, limit: 500 }, { signal })
   if (res.items.length === 0) return { ...EMPTY_SECTIONS, window: timeRange }
   // Build same aggregates but from findings (QueryDoc-shaped items from Finding coords)
   const items = res.items.map((f) => {
@@ -283,10 +284,10 @@ async function fetchHostSectionsFindings(ip: string, timeRange: string): Promise
   return { timeline, anomaly: detectSpike(timeline), topDomains, triggeredPatterns, topUrls, logs, logTotal: res.total || items.length, window: timeRange }
 }
 
-async function fetchHostSections(ip: string, timeRange: string, source: HostSource = "live"): Promise<HostSectionData> {
+async function fetchHostSections(ip: string, timeRange: string, source: HostSource = "live", signal?: AbortSignal): Promise<HostSectionData> {
   const minutes = timeRangeToMinutesLive(timeRange)
   if (source === "findings") {
-    try { const data = await fetchHostSectionsFindings(ip, timeRange); if (data.logs.length > 0) return data } catch { /* fallback below */ }
+    try { const data = await fetchHostSectionsFindings(ip, timeRange, signal); if (data.logs.length > 0) return data } catch { /* fallback below */ }
     return { ...EMPTY_SECTIONS, window: timeRange }
   }
   // Prefer live ES rows filtered to this host — richest source (action-aware,
@@ -295,7 +296,7 @@ async function fetchHostSections(ip: string, timeRange: string, source: HostSour
   // The `ip` param uses an exact ES term filter so risk rows are found even
   // when the generic substring search would miss them.
   try {
-    const res = await runQuery(minutes, { q: ip.trim(), ip: ip.trim() })
+    const res = await runQuery(minutes, { q: ip.trim(), ip: ip.trim(), signal })
     if (res.items.length > 0) {
       const timeline = res.timeline.map((t) => ({ hour: formatHour(t.bucket), volume: t.count }))
       const topDomains = buildTopDomains(res.items)
@@ -317,7 +318,7 @@ async function fetchHostSections(ip: string, timeRange: string, source: HostSour
     /* fall through to findings fallback */
   }
   // Live found nothing — try findings before the honest empty state.
-  try { const fb = await fetchHostSectionsFindings(ip, timeRange); if (fb.logs.length > 0) return fb } catch { /* ignore */ }
+  try { const fb = await fetchHostSectionsFindings(ip, timeRange, signal); if (fb.logs.length > 0) return fb } catch { /* ignore */ }
   return { ...EMPTY_SECTIONS, window: timeRange }
 }
 
@@ -350,6 +351,12 @@ export function HostInspectorPage({
 
   // ── Findings (Client Report) branch state ──
   const [report, setReport] = useState<ClientReport | null>(null)
+  // Synced each render so the toggle effect can read the CURRENT report without
+  // listing it as a dependency: the effect is keyed on `hSource` alone so it
+  // never re-fires on a report change, but a stale closure would let its
+  // failure guard clobber a report that landed since the effect last ran.
+  const reportRef = useRef<ClientReport | null>(null)
+  reportRef.current = report
   const [reportLoading, setReportLoading] = useState(false)
   const [raw, setRaw] = useState<Finding[]>([])
   const [rawTotal, setRawTotal] = useState(0)
@@ -366,6 +373,22 @@ export function HostInspectorPage({
   const [sectionsStartedAt, setSectionsStartedAt] = useState<number | undefined>(undefined)
   useElapsed(loading)
   useElapsed(sectionsLoading)
+
+  // One shared abort point for every user-keyed read on this page — the host
+  // lookup, the report/sections toggles and the raw-findings search. A faster
+  // navigation aborts the previous read (AbortError resolves undefined), and
+  // the generation tags each invocation so a read that still lands after a
+  // newer one cannot overwrite it. Without both, a slow stale host's data can
+  // render over the host the operator just selected (the audit's "Highest"
+  // race site).
+  const run = useAbortable()
+  const gen = useGeneration()
+  // The selector a read was issued for, so a late response can be dropped when
+  // the operator has since moved to a different host/target.
+  const selectorRef = useRef("")
+  // True once the raw-findings table has painted at least once, so a failed
+  // refetch keeps its rows (never-blank) while a failed first load may reset.
+  const rawLoadedRef = useRef(false)
 
   // Jailed client IPs for the header badge — best-effort, fail-closed to no
   // badge (mirrors the Query/Findings per-row pattern).
@@ -409,18 +432,31 @@ export function HostInspectorPage({
   useEffect(() => {
     if (!host || loading) return
     if (hSource === "findings") {
+      // A toggle supersedes anything in flight, so claim the generation here
+      // too: a slow report must not land after the operator flipped back.
+      const g = gen.next()
       setReportLoading(true)
       setLoadingStartedAt(Date.now())
-      void getClientReport((host as unknown as { primaryIp: string }).primaryIp || target)
+      const selected = (host as unknown as { primaryIp: string }).primaryIp || target
+      void run((signal) => getClientReport(selected, { signal }))
         .then((data) => {
+          if (data === undefined || !gen.isCurrent(g)) return
           setReport(data)
           if (data.has_data) setRawPage(0)
         })
         .catch((e) => {
-          setReport(null)
+          if (!gen.isCurrent(g)) return
+          if ((e as Error).name === "AbortError") return
+          // Never blank a report already on screen on a failed refetch. Read
+          // through the ref: `report` is deliberately absent from this effect's
+          // deps (it is keyed on `hSource`), so the state value here would be
+          // the stale one captured when the effect last ran.
+          if (!reportRef.current) setReport(null)
           toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
         })
-        .finally(() => setReportLoading(false))
+        .finally(() => {
+          if (gen.isCurrent(g)) setReportLoading(false)
+        })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hSource])
@@ -430,13 +466,23 @@ export function HostInspectorPage({
   useEffect(() => {
     if (!host || loading) return
     if (hSource === "live" && !sections) {
+      const g = gen.next()
       setSectionsLoading(true)
       setSectionsStartedAt(Date.now())
       const ip = (host as unknown as { primaryIp: string }).primaryIp || target
-      void fetchHostSections(ip, timeRange, "live")
-        .then((data) => setSections(data))
-        .catch(() => setSections({ ...EMPTY_SECTIONS, window: timeRange }))
-        .finally(() => setSectionsLoading(false))
+      void run((signal) => fetchHostSections(ip, timeRange, "live", signal))
+        .then((data) => {
+          if (data === undefined || !gen.isCurrent(g)) return
+          setSections(data)
+        })
+        .catch((e) => {
+          if (!gen.isCurrent(g)) return
+          if ((e as Error).name === "AbortError") return
+          setSections({ ...EMPTY_SECTIONS, window: timeRange })
+        })
+        .finally(() => {
+          if (gen.isCurrent(g)) setSectionsLoading(false)
+        })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hSource])
@@ -447,42 +493,44 @@ export function HostInspectorPage({
   // call can never block, empty or break the log rows — those still paint from
   // `sections`. A failure leaves `domainMatch` null and the page falls back to
   // the client-side `buildTopDomains` and an unmeasured "—" figure.
+  // Own abort point: this read overlaps nothing else — it starts when a lookup
+  // resolves, and `lookup` also kicks off `fetchSections`. Sharing one
+  // controller would let whichever starts second abort the other, leaving
+  // `domainMatch` permanently null. The generation still drops a stale pair.
+  const runDomainMatch = useAbortable()
   useEffect(() => {
     if (!host || loading) return
-    let cancelled = false
+    // Keyed on the host/time-range pair: a newer pair supersedes this read.
+    const g = gen.next()
     setDomainMatch(null)
     const ip = host.primaryIp || target
-    void getHostProfile(ip, timeRange)
+    void runDomainMatch((signal) => getHostProfile(ip, timeRange, { signal }))
       .then((profile) => {
-        if (!cancelled) setDomainMatch(readDomainMatch(profile.risk))
+        if (profile === undefined || !gen.isCurrent(g)) return
+        setDomainMatch(readDomainMatch(profile.risk))
       })
       .catch(() => {
-        if (!cancelled) setDomainMatch(null)
+        if (gen.isCurrent(g)) setDomainMatch(null)
       })
-    return () => {
-      cancelled = true
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, timeRange])
 
   // Shared sections loader: uses the cleaned host string, falls back to
   // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
-  const fetchSections = useCallback(async (clean: string) => {
+  // `g` is the lookup's generation, threaded in so the profile read and the
+  // sections read that make up one lookup share an ownership token.
+  const fetchSections = useCallback(async (clean: string, g: number) => {
     setSectionsLoading(true)
     setSectionsStartedAt(Date.now())
     setSectionsError(null)
-    try {
-      const data = await fetchHostSections(clean, timeRange, hSource)
-      setSections(data)
-    } catch (e) {
-      const msg = (e as Error).message || "Sections load failed"
-      setSections({ ...EMPTY_SECTIONS, window: timeRange })
-      setSectionsError(msg)
-      toast({ title: "Sections load failed", description: msg, variant: "error" })
-    } finally {
-      setSectionsLoading(false)
-    }
-  }, [timeRange, hSource, toast])
+    const data = await run((signal) => fetchHostSections(clean, timeRange, hSource, signal))
+    // Superseded by a newer lookup/toggle, or aborted (undefined) — a newer
+    // invocation owns the section state now.
+    if (data === undefined || !gen.isCurrent(g)) return
+    // Stale-target guard: only paint if the operator is still on this host.
+    if (clean === selectorRef.current) setSections(data)
+    setSectionsLoading(false)
+  }, [run, gen, timeRange, hSource])
 
   const lookup = async (ip: string) => {
     const clean = ip.trim()
@@ -490,6 +538,9 @@ export function HostInspectorPage({
       toast({ title: "Enter a host or IP", variant: "info" })
       return
     }
+    // Newest invocation wins; this aborts the previous lookup's in-flight read.
+    const g = gen.next()
+    selectorRef.current = clean
     setLoading(true)
     setLoadingStartedAt(Date.now())
     setError(null)
@@ -498,60 +549,71 @@ export function HostInspectorPage({
     setSections(null)
     setSectionsLoading(false)
     setReportLoading(false)
-    try {
-      const profile = await getHostProfile(clean, timeRange)
-      setHost(profile)
-    } catch (e) {
-      const msg = (e as Error).message || "Lookup failed"
-      setError(msg)
-      setHost(null)
-      toast({ title: "Lookup failed", description: msg, variant: "error" })
-      setLoading(false)
-      return
-    }
+    const profile = await run((signal) => getHostProfile(clean, timeRange, { signal }))
+    if (profile === undefined || !gen.isCurrent(g)) return
+    setHost(profile)
     setLoading(false)
 
     if (hSource === "findings") {
       // Findings branch: always resolve the full Client Report.
       setReportLoading(true)
       try {
-        const data = await getClientReport(clean)
+        const data = await run((signal) => getClientReport(clean, { signal }))
+        if (data === undefined || !gen.isCurrent(g)) return
         setReport(data)
         setRawPage(0)
       } catch (e) {
+        if (!gen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
         setReport(null)
         setError((e as Error).message || "Report failed")
         toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
-      } finally {
-        setReportLoading(false)
       }
+      if (gen.isCurrent(g)) setReportLoading(false)
     } else {
       // Live branch: sections load independently so the entity card paints immediately.
-      await fetchSections(clean)
+      await fetchSections(clean, g)
     }
   }
 
   // ── Raw findings table (findings branch) ──
+  // Own abort point so a raw search/page change cannot abort the report read
+  // that triggered it (and vice versa). The generation still orders the two.
+  const runRaw = useAbortable()
   const fetchRaw = useCallback(async () => {
     if (!report?.client_ip || !report.has_data) return
+    // Newest search/page wins; a superseded raw read is aborted below.
+    const g = gen.next()
+    const isFirstLoad = !rawLoadedRef.current
     setRawLoading(true)
     setRawError(null)
     try {
-      const res = await getClientReportFindings(report.client_ip, {
-        search: rawSearch.trim() || undefined,
-        limit: rawPageSize,
-        offset: rawPage * rawPageSize,
-      })
+      const res = await runRaw((signal) =>
+        getClientReportFindings(report.client_ip, {
+          search: rawSearch.trim() || undefined,
+          limit: rawPageSize,
+          offset: rawPage * rawPageSize,
+        }, { signal }),
+      )
+      if (res === undefined || !gen.isCurrent(g)) return
       setRaw(res.items)
       setRawTotal(res.total)
+      rawLoadedRef.current = true
     } catch (e) {
+      if (!gen.isCurrent(g)) return
+      if ((e as Error).name === "AbortError") return
+      // Never blank good rows on a FAILED refetch; a failed first load may reset.
+      if (isFirstLoad) {
+        setRaw([])
+        setRawTotal(0)
+      }
       const msg = (e as Error).message || "Raw findings failed"
       setRawError(msg)
       toast({ title: "Raw findings failed", description: msg, variant: "error" })
     } finally {
-      setRawLoading(false)
+      if (gen.isCurrent(g)) setRawLoading(false)
     }
-  }, [report, rawSearch, rawPage, toast])
+  }, [runRaw, gen, report, rawSearch, rawPage, toast])
 
   useEffect(() => { void fetchRaw() }, [fetchRaw])
 
@@ -1045,9 +1107,11 @@ export function HostInspectorPage({
             startedAt={loadingStartedAt}
             className="max-w-md"
           />
-          <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-40 w-full" />
-            <Skeleton className="h-24 w-full" />
+          <div className="space-y-5" aria-busy="true">
+            {/* The resolved view is a HostEntityCard followed by the
+                multi-section investigation — mirror that stack, not two flat
+                blocks. */}
+            <SkeletonShape variant="panel-stack" count={2} />
           </div>
         </>
       )}
@@ -1074,8 +1138,7 @@ export function HostInspectorPage({
       {showSections && (
         <>
           {sectionsError && (
-            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target) }}>Retry</Button>}>
-              {sectionsError}
+            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target, gen.next()) }}>Retry</Button>}>
             </Callout>
           )}
           {/* Refetch (time-range change / Retry) with sections already loaded:
@@ -1095,7 +1158,7 @@ export function HostInspectorPage({
             description={sections ? `${sections.logTotal.toLocaleString()} req · ${windowLabel(sections.window)} window` : "—"}
           >
             {sectionsLoading && !sections ? (
-              <Skeleton className="h-60 w-full" />
+              <SkeletonShape variant="chart" height={240} />
             ) : sections && sections.timeline.length > 0 ? (
               <TrafficTimeline points={sections.timeline} anomalyAnnotation={sections.anomaly} />
             ) : (
@@ -1114,7 +1177,8 @@ export function HostInspectorPage({
 
           {/* 2) Top Destinations & Rule Matches */}
           {sectionsLoading && !sections ? (
-            <Skeleton className="h-64 w-full" />
+            /* TopDestinations is a titled card with a two-column table body. */
+            <SkeletonShape variant="panel-stack" count={1} />
           ) : sections ? (
             <TopDestinations
               topDomains={topDomainItems}
@@ -1130,7 +1194,8 @@ export function HostInspectorPage({
             description="Click a URL to investigate who else reached it"
           >
             {sectionsLoading && !sections ? (
-              <Skeleton className="h-48 w-full" />
+              /* The loaded body is a divide-y list of one-line URL rows. */
+              <SkeletonShape variant="feed-list" />
             ) : sections && sections.topUrls.length > 0 ? (
               <div className="divide-y divide-border">
                 {sections.topUrls.map((u) => (
@@ -1162,7 +1227,8 @@ export function HostInspectorPage({
             description="Pattern → this client → Domain → destination · hover traces a path · click isolates it"
           >
             {sectionsLoading && !sections ? (
-              <Skeleton className="h-64 w-full" />
+              /* The loaded body is a Sankey node/link flow diagram. */
+              <SkeletonShape variant="dag" />
             ) : behaviourFlow && behaviourFlow.links.length > 0 ? (
               <>
                 {behaviourFocus && (
@@ -1240,9 +1306,7 @@ export function HostInspectorPage({
             </div>
           ) : null}
           {reportLoading && !report ? (
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
-              <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />
-            </div>
+            <SkeletonShape variant="stat-grid" />
           ) : report && !hasRealData && hasSearched ? (
             <EmptyState icon={SearchX} title={`No findings for ${report.client_ip}`} description="This client has no findings in the database." action={<Button variant="outline" size="sm" onClick={() => void lookup(target)}>Search again</Button>} />
           ) : report && hasRealData ? (

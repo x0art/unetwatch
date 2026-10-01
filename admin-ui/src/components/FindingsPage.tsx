@@ -42,7 +42,7 @@ import {
 } from "./ui"
 import { ListActionCell } from "./ListActionDropdown"
 import { DataTable, type DataTableColumn } from "./DataTable"
-import { useAutoRefresh, useDebounce } from "../lib/utils"
+import { useAbortable, useGeneration, useAutoRefresh, useDebounce } from "../lib/utils"
 import { LoadingIndicator, useElapsed } from "./loading"
 import { useFilter } from "../contexts/FilterContext"
 
@@ -318,6 +318,15 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   // empty table doesn't re-skeleton on every interval tick.
   const loadedRef = useRef(false)
 
+  // Aborts a superseded getFindings read (AbortError resolves undefined). The
+  // generation marks "the result this invocation was still current for": it is
+  // the ordering guard for the useAutoRefresh poll, whose returned cleanup
+  // useAutoRefresh discards — so an abort alone cannot await it there. Without
+  // this a poll tick could let a stale page/list silently overwrite a newer one
+  // (a tick can also land mid-typing, racing the debounced-search effect).
+  const run = useAbortable()
+  const gen = useGeneration()
+
   // Epoch-ms the current getFindings read left for the API. Reset each run so
   // the elapsed figure never inherits a previous read's clock.
   const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
@@ -337,47 +346,59 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSearch])
 
+  // Returns its promise so useAutoRefresh can skip a tick while this read is
+  // still pending (a poll tick must skip, not overlap).
   const refetch = useCallback(() => {
-    let cancelled = false
+    // Claim a generation for this invocation; a later one (interval tick,
+    // filter/search/page change) supersedes it, so this read's result is
+    // ignored even if it lands after — the ordering rule (§4.4).
+    const g = gen.next()
     // First load blanks to a skeleton; every later run (interval tick, filter
     // change, page change) keeps the rows on screen and only lights the quiet
     // "Refreshing" cue, so a populated table is never blanked.
-    if (!loadedRef.current) setLoading(true)
+    const isFirstLoad = !loadedRef.current
+    if (isFirstLoad) setLoading(true)
     setRefreshing(true)
     setLoadingStartedAt(Date.now())
     setError(null)
-    getFindings({
-      search: debouncedSearch || undefined,
-      limit: pageSize,
-      offset: page * pageSize,
-    })
+    // The abort is per-invocation: a newer refetch aborts this read so a
+    // superseded search cannot overwrite a newer one. AbortError resolves to
+    // undefined (swallowed by useAbortable) and is handled below without a cue.
+    return run((signal) =>
+      getFindings({
+        search: debouncedSearch || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+      }, { signal }),
+    )
       .then((data) => {
-        if (cancelled) return
+        if (!gen.isCurrent(g)) return
+        if (data === undefined) return // aborted — the newer invocation owns state
         setFindings(data.items)
         setTotal(data.total)
       })
       .catch((e) => {
-        if (!cancelled) {
+        if (!gen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        // Never blank good data on a FAILED refetch: a later failure keeps the
+        // rows the operator is reading and only raises the error cue. A failed
+        // FIRST load has nothing to keep, so it may still reset.
+        if (isFirstLoad) {
           setFindings([])
           setTotal(0)
-          setError((e as Error).message)
         }
+        setError((e as Error).message)
       })
       .finally(() => {
-        if (!cancelled) {
-          loadedRef.current = true
-          setLoading(false)
-          setRefreshing(false)
-        }
+        if (!gen.isCurrent(g)) return
+        loadedRef.current = true
+        setLoading(false)
+        setRefreshing(false)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [debouncedSearch, page, pageSize])
+  }, [run, gen, debouncedSearch, page, pageSize])
 
   useEffect(() => {
-    const cancel = refetch()
-    return cancel
+    void refetch()
   }, [refetch])
 
   // Live updates: refetch findings on an interval.

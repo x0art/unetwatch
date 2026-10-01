@@ -36,13 +36,12 @@ import {
   Panel,
   SearchInput,
   Select,
-  Skeleton,
   TimestampCell,
   useToast,
   SimpleTable,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { cn, formatInstant, useDebounce } from "../lib/utils"
+import { cn, formatInstant, useAbortable, useDebounce, useGeneration } from "../lib/utils"
 import { LoadingIndicator, useElapsed } from "./loading"
 import { useZone } from "../contexts/ZoneContext"
 
@@ -572,43 +571,54 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
   const loadedRef = useRef(false)
   const { elapsed } = useElapsed(loading)
 
+  // User-keyed READ (kind/search/page/sort). A newer load aborts the previous
+  // one and the generation drops a slow earlier load that lands after a newer
+  // one — the `cancelled` flag alone only suppresses setState on cleanup, which
+  // never runs for the post-mutation refetches above.
+  const run = useAbortable()
+  const gen = useGeneration()
   const load = useCallback(() => {
-    let cancelled = false
+    const g = gen.next()
+    const isFirstLoad = !loadedRef.current
     setLoading(true)
     setLoadingStartedAt(Date.now())
     setLoadError(null)
-    listLogs({
-      kind: (kind || undefined) as "poll" | "query" | undefined,
-      search: debouncedSearch || undefined,
-      limit: pageSize,
-      offset: page * pageSize,
-      sort_by: sortBy ?? "started_at",
-      sort_order: sortDir,
-    })
+    return run((signal) =>
+      listLogs({
+        kind: (kind || undefined) as "poll" | "query" | undefined,
+        search: debouncedSearch || undefined,
+        limit: pageSize,
+        offset: page * pageSize,
+        sort_by: sortBy ?? "started_at",
+        sort_order: sortDir,
+      }, { signal }),
+    )
       .then((data) => {
-        if (cancelled) return
+        if (data === undefined || !gen.isCurrent(g)) return
         setItems(data.items)
         setTotal(data.total)
       })
       .catch((e) => {
-        if (!cancelled) {
+        if (!gen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        // Never blank good rows on a FAILED refetch; a failed first load has
+        // nothing to keep, so it may still reset (§4.6 never-blank).
+        if (isFirstLoad) {
           setItems([])
           setTotal(0)
-          setLoadError((e as Error).message)
         }
+        setLoadError((e as Error).message)
       })
       .finally(() => {
-        if (!cancelled) {
-          loadedRef.current = true
-          setLoading(false)
-        }
+        if (!gen.isCurrent(g)) return
+        loadedRef.current = true
+        setLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
-  }, [kind, page, pageSize, sortBy, sortDir, debouncedSearch])
+  }, [run, gen, kind, page, pageSize, sortBy, sortDir, debouncedSearch])
 
-  useEffect(() => load(), [load])
+  useEffect(() => {
+    void load()
+  }, [load])
 
   // Sync an external search (Ctrl+K palette) into the local search box.
   useEffect(() => {
@@ -720,7 +730,11 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
       </PageHeader>
 
       {/* Refetch with rows already on screen: keep them mounted and say what is
-          happening. First load still shows the skeleton below. */}
+          happening. The first load routes straight to `DataTable`, which draws
+          its own shape-faithful row skeleton — hand-rolling a block here only
+          pre-empted a better placeholder and made Logs load worse than pages
+          that delegate (the `total === 0` empty state is gated on `!loading` so
+          it can never flash mid-read). */}
       {loading && items.length > 0 && (
         <LoadingIndicator
           label="Loading logs"
@@ -733,11 +747,7 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
         <Callout action={<Button variant="outline" size="sm" onClick={load}>Retry</Button>}>
           {loadError}
         </Callout>
-      ) : loading && items.length === 0 ? (
-        <div className="space-y-3" aria-busy="true">
-          <Skeleton className="h-56 w-full" />
-        </div>
-      ) : total === 0 ? (
+      ) : !loading && total === 0 ? (
         <EmptyState
           icon={ScrollText}
           title={kind ? `No ${kind} logs yet` : "No logs yet"}

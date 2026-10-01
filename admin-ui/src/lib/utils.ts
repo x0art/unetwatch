@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { OperatorZone } from "../api"
 
 /**
@@ -28,12 +28,76 @@ export function useDebounce<T>(value: T, delayMs: number): T {
 }
 
 /**
+ * Run an abortable READ and get its typed result.
+ *
+ * Generalizes the one good cancellation implementation in the app
+ * (`QueryPage.tsx:633-676`) so every reader can share it. Each call aborts the
+ * previous in-flight call BEFORE installing a FRESH `AbortController`, so a
+ * superseded request stops and a new one proceeds on its own signal.
+ *
+ * `AbortError` is swallowed — it resolves to `undefined` instead of rejecting.
+ * An abort is a normal consequence of the user changing input, not a failure,
+ * so it must never flash an error banner; non-abort errors still reject.
+ *
+ * Unmount aborts the current call: the effect owns and clears its own
+ * controller, so React 19 Strict Mode's double-invoke is safe (the first
+ * mount's cleanup aborts its controller; the second mount's call makes its own).
+ *
+ * Only READ (GET-style) functions may be run through this — aborting a
+ * half-sent write leaves unknown server state (Audit §4.5 / spec §5).
+ */
+export function useAbortable(): <T>(fn: (signal: AbortSignal) => Promise<T>) => Promise<T | undefined> {
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => {
+    abortRef.current?.abort()
+  }, [])
+
+  return useCallback(<T,>(fn: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> => {
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+    return fn(controller.signal).catch((e: unknown) => {
+      if ((e as Error).name === "AbortError") return undefined
+      throw e
+    })
+  }, [])
+}
+
+/**
+ * A monotonically increasing generation counter.
+ *
+ * `next()` claims and returns a new generation id; `isCurrent(g)` is true only
+ * while `g` is still the newest claimed one. Use this where a request may be
+ * allowed to *finish* but its result must not *win* — the discarded-cleanup
+ * paths (`useAutoRefresh` poll ticks, `QueryPage.tsx:685`) whose returned
+ * cleanup is thrown away, so an abort could never run there.
+ *
+ * Rule of thumb: `useAbortable` when the superseded work is worthless and
+ * should stop; `useGeneration` when it may finish but must not overwrite state.
+ */
+export function useGeneration(): { next: () => number; isCurrent: (g: number) => boolean } {
+  const genRef = useRef(0)
+  const next = useCallback(() => ++genRef.current, [])
+  const isCurrent = useCallback((g: number) => g === genRef.current, [])
+  return { next, isCurrent }
+}
+
+/**
  * Periodically re-run `refresh` every `seconds` (0 = off). The interval is
  * persisted per `key` in localStorage and ticks are skipped while the tab is
  * hidden, so background tabs never hammer the API.
+ *
+ * `refresh` may return a promise. While one is pending the next tick is
+ * SKIPPED (not queued and never aborted): a slow backend tick must not overlap
+ * the next, but aborting every tick would defeat a periodic refresh against
+ * that same slow backend (the wall-display scenario this module exists for).
  */
 export function useAutoRefresh(
-  refresh: () => void,
+  // `unknown` (not `void | Promise<unknown>`) so the legacy callbacks that
+  // return their own `cancelled` cleanup keep compiling unchanged: only a
+  // thenable return is tracked as in-flight.
+  refresh: () => unknown,
   key: string,
   defaultSeconds = 0,
 ): { refreshSeconds: number; setRefreshSeconds: (s: number) => void } {
@@ -46,6 +110,10 @@ export function useAutoRefresh(
     }
   })
 
+  // Whether a tick's returned promise is still pending. A ref (not state) so
+  // setting it never re-renders or restarts the interval.
+  const inFlightRef = useRef(false)
+
   useEffect(() => {
     try {
       window.localStorage.setItem(`unetwatch_autorefresh_${key}`, String(refreshSeconds))
@@ -57,7 +125,15 @@ export function useAutoRefresh(
   useEffect(() => {
     if (!refreshSeconds) return
     const id = window.setInterval(() => {
-      if (document.visibilityState !== "hidden") refresh()
+      if (document.visibilityState === "hidden") return
+      if (inFlightRef.current) return
+      const out = refresh()
+      if (out && typeof (out as Promise<unknown>).then === "function") {
+        inFlightRef.current = true
+        void Promise.resolve(out).finally(() => {
+          inFlightRef.current = false
+        })
+      }
     }, refreshSeconds * 1000)
     return () => window.clearInterval(id)
   }, [refreshSeconds, refresh])

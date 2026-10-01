@@ -19,14 +19,14 @@ import {
   type UrlBreakdown,
   type UrlClientCount,
 } from "../api"
-import { copyText } from "../lib/utils"
+import { copyText, useAbortable, useGeneration } from "../lib/utils"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import {
   Badge,
   Button,
   PageHeader,
   Panel,
-  Skeleton,
+  SkeletonShape,
   StatCard,
   useToast,
 } from "./ui"
@@ -310,8 +310,19 @@ export function ReportPage({ kind, value, onBack }: Props) {
   const [urlEnrich, setUrlEnrich] = useState<SectionState<EnrichUrl>>({ data: null, loading: true, error: null })
   // Explicit ES-reachability probe — NEVER inferred from a section payload.
   // /health always answers and reports dependencies.elasticsearch as
-  // "ok" | "unreachable" (app/main.py:257-303).
   const [health, setHealth] = useState<{ checked: boolean; es: boolean | null }>({ checked: false, es: null })
+  // A generation per entity switch: a slow previous entity's response must not
+  // paint over the entity the operator just navigated to. Each section gets its
+  // OWN abort point — the host branch fires three reads in the same tick, and a
+  // single shared controller would have the later calls abort the earlier ones.
+  const sectionGen = useGeneration()
+  const runProfile = useAbortable()
+  const runReport = useAbortable()
+  const runHostEnrich = useAbortable()
+  const runBreakdown = useAbortable()
+  const runUrlEnrich = useAbortable()
+  // The explicit /health probe is user-independent (fixed params, mounts once),
+  // so its own `cancelled` cleanup is sufficient — left as-is.
   useEffect(() => {
     let cancelled = false
     void probeEsHealth()
@@ -328,32 +339,87 @@ export function ReportPage({ kind, value, onBack }: Props) {
     // No entity selected (e.g. a bare reload restoring the view from
     // localStorage with no ?q=) — never issue a fetch with an empty value.
     if (value.trim() === "") return
-    let cancelled = false
+    // Supersede any in-flight read from the previous entity.
+    const g = sectionGen.next()
     if (kind === "host") {
       setProfile({ data: null, loading: true, error: null })
       setReport({ data: null, loading: true, error: null })
       setHostEnrich({ data: null, loading: true, error: null })
-      void getHostProfile(value, "24h")
-        .then((data) => { if (!cancelled) setProfile({ data, loading: false, error: null }) })
-        .catch((e: unknown) => { if (!cancelled) setProfile({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
-      void getClientReport(value)
-        .then((data) => { if (!cancelled) setReport({ data, loading: false, error: null }) })
-        .catch((e: unknown) => { if (!cancelled) setReport({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
-      void getHostEnrichment(value)
-        .then((data) => { if (!cancelled) setHostEnrich({ data, loading: false, error: null }) })
-        .catch((e: unknown) => { if (!cancelled) setHostEnrich({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
+      void runProfile((signal) => getHostProfile(value, "24h", { signal }))
+        .then((data) => {
+          if (!sectionGen.isCurrent(g)) return
+          if (data === undefined) {
+            setProfile({ data: null, loading: false, error: null })
+            return
+          }
+          setProfile({ data, loading: false, error: null })
+        })
+        .catch((e: unknown) => {
+          if (!sectionGen.isCurrent(g)) return
+          const aborted = (e as Error).name === "AbortError"
+          setProfile({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
+        })
+      void runReport((signal) => getClientReport(value, { signal }))
+        .then((data) => {
+          if (!sectionGen.isCurrent(g)) return
+          if (data === undefined) {
+            setReport({ data: null, loading: false, error: null })
+            return
+          }
+          setReport({ data, loading: false, error: null })
+        })
+        .catch((e: unknown) => {
+          if (!sectionGen.isCurrent(g)) return
+          const aborted = (e as Error).name === "AbortError"
+          setReport({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
+        })
+      void runHostEnrich((signal) => getHostEnrichment(value, 3, { signal }))
+        .then((data) => {
+          if (!sectionGen.isCurrent(g)) return
+          if (data === undefined) {
+            setHostEnrich({ data: null, loading: false, error: null })
+            return
+          }
+          setHostEnrich({ data, loading: false, error: null })
+        })
+        .catch((e: unknown) => {
+          if (!sectionGen.isCurrent(g)) return
+          const aborted = (e as Error).name === "AbortError"
+          setHostEnrich({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
+        })
     } else {
       setBreakdown({ data: null, loading: true, error: null })
       setUrlEnrich({ data: null, loading: true, error: null })
-      void getUrlBreakdown(value, { limit: 100, source: "findings" })
-        .then((data) => { if (!cancelled) setBreakdown({ data, loading: false, error: null }) })
-        .catch((e: unknown) => { if (!cancelled) setBreakdown({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
-      void getUrlEnrichment(value)
-        .then((data) => { if (!cancelled) setUrlEnrich({ data, loading: false, error: null }) })
-        .catch((e: unknown) => { if (!cancelled) setUrlEnrich({ data: null, loading: false, error: e instanceof Error ? e.message : "Request failed" }) })
+      void runBreakdown((signal) => getUrlBreakdown(value, { limit: 100, source: "findings" }, { signal }))
+        .then((data) => {
+          if (!sectionGen.isCurrent(g)) return
+          if (data === undefined) {
+            setBreakdown({ data: null, loading: false, error: null })
+            return
+          }
+          setBreakdown({ data, loading: false, error: null })
+        })
+        .catch((e: unknown) => {
+          if (!sectionGen.isCurrent(g)) return
+          const aborted = (e as Error).name === "AbortError"
+          setBreakdown({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
+        })
+      void runUrlEnrich((signal) => getUrlEnrichment(value, 3, { signal }))
+        .then((data) => {
+          if (!sectionGen.isCurrent(g)) return
+          if (data === undefined) {
+            setUrlEnrich({ data: null, loading: false, error: null })
+            return
+          }
+          setUrlEnrich({ data, loading: false, error: null })
+        })
+        .catch((e: unknown) => {
+          if (!sectionGen.isCurrent(g)) return
+          const aborted = (e as Error).name === "AbortError"
+          setUrlEnrich({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
+        })
     }
-    return () => { cancelled = true }
-  }, [kind, value])
+  }, [sectionGen, runProfile, runReport, runHostEnrich, runBreakdown, runUrlEnrich, kind, value])
 
   const handleCopy = useCallback(async () => {
     const ok = await copyText(`${kind}:${value} @ ${generatedAt}`)
@@ -445,7 +511,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
           {profile.loading ? (
             <div aria-busy="true" aria-live="polite">
               <span className="sr-only">Loading risk summary</span>
-              <Skeleton className="h-28 w-full" />
+              <SkeletonShape variant="panel-stack" count={1} />
             </div>
           ) : profile.data ? (
             <RiskSummaryBody profile={profile.data} />
@@ -458,7 +524,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
           {breakdown.loading ? (
             <div aria-busy="true" aria-live="polite">
               <span className="sr-only">Loading risk summary</span>
-              <Skeleton className="h-28 w-full" />
+              <SkeletonShape variant="panel-stack" count={1} />
             </div>
           ) : breakdown.data ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
@@ -476,7 +542,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
           report.loading ? (
             <div aria-busy="true" aria-live="polite">
               <span className="sr-only">Loading indicators</span>
-              <Skeleton className="h-40 w-full" />
+              <SkeletonShape variant="panel-stack" count={3} />
             </div>
           ) : report.data ? (
             report.data.has_data === false ? (
@@ -532,7 +598,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
         ) : breakdown.loading ? (
           <div aria-busy="true" aria-live="polite">
             <span className="sr-only">Loading indicators</span>
-            <Skeleton className="h-40 w-full" />
+            <SkeletonShape variant="panel-stack" count={1} />
           </div>
         ) : breakdown.data ? (
           <section>
@@ -557,7 +623,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
         {enrichLoading ? (
           <div aria-busy="true" aria-live="polite">
             <span className="sr-only">Loading network enrichment</span>
-            <Skeleton className="h-32 w-full" />
+            <SkeletonShape variant="panel-stack" count={1} />
           </div>
         ) : kind === "host" ? (
           hostEnrich.data ? (

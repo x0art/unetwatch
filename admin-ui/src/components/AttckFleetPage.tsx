@@ -11,6 +11,7 @@ import {
   type FleetTechnique,
   getFleetAttckMapping,
 } from "../api"
+import { useAbortable, useGeneration } from "../lib/utils"
 import { useFilter } from "../contexts/FilterContext"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import {
@@ -21,7 +22,7 @@ import {
   Panel,
   PageHeader,
   Select,
-  Skeleton,
+  SkeletonShape,
   StatCard,
   StatusBadge,
   type StatusTone,
@@ -226,17 +227,30 @@ export function AttckFleetPage({ onNavigate }: Props) {
     HOSTS_UI.openHost = openHost
   }, [openHost])
 
+  // Time-range-keyed READ: a newer range aborts the previous mapping read and
+  // the generation stops a slow earlier range from overwriting a faster newer
+  // one. Without this a quick 24h→7d flip could paint the 24h fleet under 7d.
+  const runFleet = useAbortable()
+  const fleetGen = useGeneration()
   const fetchFleet = useCallback(() => {
+    const g = fleetGen.next()
     setLoading(true)
     setError(null)
-    getFleetAttckMapping({ timeRange })
-      .then((data) => setMapping(data))
+    return runFleet((signal) => getFleetAttckMapping({ timeRange }, { signal }))
+      .then((data) => {
+        if (data === undefined || !fleetGen.isCurrent(g)) return
+        setMapping(data)
+      })
       .catch((e: unknown) => {
+        if (!fleetGen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
         setMapping(null)
         setError(e instanceof Error ? e.message : "Request failed")
       })
-      .finally(() => setLoading(false))
-  }, [timeRange])
+      .finally(() => {
+        if (fleetGen.isCurrent(g)) setLoading(false)
+      })
+  }, [runFleet, fleetGen, timeRange])
 
   useEffect(() => {
     fetchFleet()
@@ -290,7 +304,9 @@ export function AttckFleetPage({ onNavigate }: Props) {
       {loading && (
         <div aria-busy="true" aria-live="polite">
           <span className="sr-only">Loading fleet ATT&CK mapping</span>
-          <Skeleton className="h-40 w-full" />
+          {/* The result is a stack of titled panels (heat map, technique
+              table, breakdown) — mirror that, not one flat block. */}
+          <SkeletonShape variant="panel-stack" />
         </div>
       )}
 

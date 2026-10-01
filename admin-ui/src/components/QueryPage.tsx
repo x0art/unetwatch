@@ -31,6 +31,7 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   CopyUrlButton,
   EmptyState,
   IconButton,
@@ -41,8 +42,9 @@ import {
   RankedTable,
   SearchInput,
   Select,
-  Skeleton,
+  SkeletonShape,
   StatCard,
+  TableSkeleton,
   TimestampCell,
   useToast,
 } from "./ui"
@@ -631,6 +633,11 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
   // windows) and on unmount. Aborted requests reject with AbortError, which
   // is silently ignored below so a superseded request never flashes an error.
   const abortRef = useRef<AbortController | null>(null)
+  // Whether a successful result has ever landed. Read from inside the
+  // memoized `fetchQuery`, a plain `firstLoad` read would be stale (its
+  // closure is not recreated when the state flips), so the never-blank rule
+  // uses this ref instead: only a load with nothing to keep may blank.
+  const hasLoadedRef = useRef(false)
   useEffect(() => () => {
     abortRef.current?.abort()
   }, [])
@@ -652,7 +659,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
       signal: controller.signal,
     })
       .then((res) => {
-        if (!cancelled) setResult(res)
+        if (!cancelled) { setResult(res); hasLoadedRef.current = true }
       })
       .catch((e) => {
         if (!cancelled) {
@@ -663,7 +670,9 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
               ? "Elasticsearch timed out — try a shorter time window (e.g. 30d instead of 1y)."
               : msg,
           )
-          setResult(null)
+          // A failed REFETCH keeps the good table the operator is reading; only
+          // a failed first load has nothing to keep, so only it blanks.
+          if (!hasLoadedRef.current) setResult(null)
         }
       })
       .finally(() => {
@@ -960,13 +969,24 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
             className="max-w-md"
           />
           {loading && (
-            <div className="space-y-3" aria-busy="true">
-              <Skeleton className="h-40 w-full" />
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <Skeleton className="h-56 w-full" />
-                <Skeleton className="h-56 w-full" />
-                <Skeleton className="h-56 w-full" />
-              </div>
+            /* The placeholder mirrors the boxes the populated page draws — a
+               full-width timeline Panel, the two ranked tables, the Sankey
+               Panel and the documents DataTable — so swapping in the real
+               content does not move them. The six StatCards render above this
+               branch unconditionally, so they are deliberately not repeated. */
+            <div className="space-y-5" aria-busy="true">
+              {/* Requests over time */}
+              <SkeletonShape variant="panel-stack" count={1} />
+              {/* Top URLs · Top client IPs */}
+              <SkeletonShape variant="panel-stack" count={2} />
+              {/* Traffic flow (Sankey) */}
+              <SkeletonShape variant="panel-stack" count={1} />
+              {/* Matching documents */}
+              <TableSkeleton
+                columns={QUERY_COLUMNS.filter((c) => !c.defaultHidden).map((c) => ({ width: c.width }))}
+                rows={pageSize}
+                selectable
+              />
             </div>
           )}
         </>
@@ -988,6 +1008,19 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
         ) : null
       ) : (
         <div className="space-y-6" aria-busy={loading}>
+          {/* A failed REFETCH keeps the panels below and only reports the read
+              failure here, so a good table is never thrown away. */}
+          {error && !loading && (
+            <Callout
+              action={
+                <Button variant="outline" size="sm" onClick={handleRun}>
+                  Try again
+                </Button>
+              }
+            >
+              {error}
+            </Callout>
+          )}
           {/* Refetch in flight — everything below stays mounted. The elapsed
               figure is the honest part: ES reads here routinely run 10-60s. */}
           {loading && (

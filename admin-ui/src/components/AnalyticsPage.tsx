@@ -22,7 +22,7 @@ import {
   Panel,
   SearchInput,
   Select,
-  Skeleton,
+  SkeletonShape,
   StatCard,
   useToast,
   Badge,
@@ -32,7 +32,7 @@ import {
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
 import { TrendCharts, type TrendPoint } from "./TrendCharts"
-import { formatInstant, useAutoRefresh } from "../lib/utils"
+import { formatInstant, useAbortable, useAutoRefresh, useGeneration } from "../lib/utils"
 import { LoadingIndicator, useElapsed } from "./loading"
 import { useFilter } from "../contexts/FilterContext"
 import { useZone } from "../contexts/ZoneContext"
@@ -164,32 +164,53 @@ export function AnalyticsPage({
   const refreshing = loading && hasLoaded
   const rawPageSize = 50
 
-  const fetchAll = useCallback(async () => {
+  // Two independent abort points: the 5-request aggregate fan-out and the raw
+  // table. A newer range/compare/search supersedes the previous read.
+  const runAll = useAbortable()
+  const allGen = useGeneration()
+  const runRaw = useAbortable()
+  const rawGen = useGeneration()
+
+  // Returns its promise so useAutoRefresh can skip a tick while this 5-request
+  // read is pending (a poll tick must skip, never overlap). The generation is
+  // the ordering guard: the poll's returned cleanup is discarded, so an abort
+  // alone could not stop a slow tick from overwriting a newer one.
+  const fetchAll = useCallback(() => {
+    const g = allGen.next()
     setLoading(true)
     setLoadingStartedAt(Date.now())
-    try {
-      const [s, b, e, td, tc] = await Promise.all([
-        getAnalyticsSummary({ range, compare }),
-        getAnalyticsBandwidth({ range, compare }),
-        getAnalyticsEnforcements({ range, compare }),
-        getAnalyticsTopDomains({ range, compare, limit: 10 }),
-        getAnalyticsTopClients({ range, compare, limit: 10 }),
-      ])
-      setSummary(s)
-      setBandwidth(b)
-      setEnforcements(e)
-      setTopDomains(td)
-      setTopClients(tc)
-      setError(null)
-    } catch (err) {
-      const msg = (err as Error).message || "Failed to load analytics"
-      setError(msg)
-      toast({ title: "Analytics load failed", description: msg, variant: "error" })
-    } finally {
-      setLoading(false)
-      setHasLoaded(true)
-    }
-  }, [range, compare, toast])
+    return runAll((signal) =>
+      Promise.all([
+        getAnalyticsSummary({ range, compare }, { signal }),
+        getAnalyticsBandwidth({ range, compare }, { signal }),
+        getAnalyticsEnforcements({ range, compare }, { signal }),
+        getAnalyticsTopDomains({ range, compare, limit: 10 }, { signal }),
+        getAnalyticsTopClients({ range, compare, limit: 10 }, { signal }),
+      ]),
+    )
+      .then((res) => {
+        if (res === undefined || !allGen.isCurrent(g)) return
+        const [s, b, e, td, tc] = res
+        setSummary(s)
+        setBandwidth(b)
+        setEnforcements(e)
+        setTopDomains(td)
+        setTopClients(tc)
+        setError(null)
+      })
+      .catch((err) => {
+        if (!allGen.isCurrent(g)) return
+        if ((err as Error).name === "AbortError") return
+        const msg = (err as Error).message || "Failed to load analytics"
+        setError(msg)
+        toast({ title: "Analytics load failed", description: msg, variant: "error" })
+      })
+      .finally(() => {
+        if (!allGen.isCurrent(g)) return
+        setLoading(false)
+        setHasLoaded(true)
+      })
+  }, [runAll, allGen, range, compare, toast])
 
   useEffect(() => {
     void fetchAll()
@@ -198,26 +219,34 @@ export function AnalyticsPage({
   useAutoRefresh(fetchAll, "analytics", 0)
 
   // Raw-data table — the persisted findings in the selected window.
-  const fetchRaw = useCallback(async () => {
+  const fetchRaw = useCallback(() => {
+    const g = rawGen.next()
     setRawLoading(true)
     setRawError(null)
-    try {
-      const res = await getFindings({
+    return runRaw((signal) =>
+      getFindings({
         search: rawSearch.trim() || undefined,
         minutes: RANGE_MINUTES[range] ?? 1440,
         limit: rawPageSize,
         offset: rawPage * rawPageSize,
+      }, { signal }),
+    )
+      .then((res) => {
+        if (res === undefined || !rawGen.isCurrent(g)) return
+        setRaw(res.items)
+        setRawTotal(res.total)
       })
-      setRaw(res.items)
-      setRawTotal(res.total)
-    } catch (e) {
-      const msg = (e as Error).message || "Raw data load failed"
-      setRawError(msg)
-      toast({ title: "Raw data load failed", description: msg, variant: "error" })
-    } finally {
-      setRawLoading(false)
-    }
-  }, [range, rawSearch, rawPage, toast])
+      .catch((e) => {
+        if (!rawGen.isCurrent(g)) return
+        if ((e as Error).name === "AbortError") return
+        const msg = (e as Error).message || "Raw data load failed"
+        setRawError(msg)
+        toast({ title: "Raw data load failed", description: msg, variant: "error" })
+      })
+      .finally(() => {
+        if (rawGen.isCurrent(g)) setRawLoading(false)
+      })
+  }, [runRaw, rawGen, range, rawSearch, rawPage, toast])
 
   useEffect(() => {
     void fetchRaw()
@@ -673,13 +702,7 @@ export function AnalyticsPage({
 
       {/* ── High-level usage metrics ───────────────────────────────── */}
       {loading && !summary ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
-          <Skeleton className="h-28 w-full" />
-          <Skeleton className="h-28 w-full" />
-          <Skeleton className="h-28 w-full" />
-          <Skeleton className="h-28 w-full" />
-          <Skeleton className="h-28 w-full" />
-        </div>
+        <SkeletonShape variant="stat-grid" />
       ) : (
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
@@ -712,7 +735,7 @@ export function AnalyticsPage({
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Daily Bandwidth Consumption (GB)" icon={Activity} description={`${rangeLabel(range)} · inbound vs outbound`}>
           {loading && !bandwidth ? (
-            <Skeleton className="h-64 w-full" />
+            <SkeletonShape variant="chart" height={260} />
           ) : (
             <TrendCharts
               type="area"
@@ -727,7 +750,7 @@ export function AnalyticsPage({
         </Panel>
         <Panel title="Daily Policy Enforcements (Allow vs Deny)" icon={Activity} description={`${rangeLabel(range)} · stacked — DENY are handled, not risk`}>
           {loading && !enforcements ? (
-            <Skeleton className="h-64 w-full" />
+            <SkeletonShape variant="chart" height={260} />
           ) : (
             <TrendCharts
               type="stackedBar"

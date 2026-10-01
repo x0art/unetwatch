@@ -20,7 +20,7 @@ import {
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn, type SortDir, type SortKey } from "./DataTable"
-import { useDebounce } from "../lib/utils"
+import { useAbortable, useDebounce, useGeneration } from "../lib/utils"
 import { LoadingIndicator, useElapsed } from "./loading"
 import { AddPatternDialog, AddPatternButton } from "./AddPatternDialog"
 import {
@@ -152,6 +152,12 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
   // Only the first read blanks to a skeleton. A search, filter, sort or page
   // change keeps the populated rows mounted and surfaces the quiet banner.
   const loadedRef = useRef(false)
+  // Aborts a superseded listPatterns read; AbortError resolves undefined.
+  const run = useAbortable()
+  // Orders competing reads: a later search/filter/page/sort change claims a
+  // newer generation, so this read's terminal paths are ignored even if they
+  // land after — the newer invocation then owns loading/data/error.
+  const gen = useGeneration()
   const { elapsed } = useElapsed(loading)
 
   // ── Edit dialog ──
@@ -185,26 +191,53 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
 
   /* ── Data fetching ──────────────────────────────────────────────── */
   const fetchPatterns = useCallback(async () => {
+    // Claim a generation for this invocation; a later one supersedes it.
+    const g = gen.next()
     setLoading(true)
     setLoadingStartedAt(Date.now())
     setError(null)
     try {
-      const data = await listPatterns({
-        pattern_type: filterType === "all" ? undefined : filterType,
-        search: debouncedSearch || undefined,
-        limit: pageSize,
-        offset: page * pageSize,
-        sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
-        sort_order: sortDir,
-      })
-      setPatterns(data)
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
+      // Superseded reads abort (the signal is per-invocation); AbortError is
+      // swallowed by useAbortable so an aborted search never flashes an error.
+      const data = await run((signal) =>
+        listPatterns({
+          pattern_type: filterType === "all" ? undefined : filterType,
+          search: debouncedSearch || undefined,
+          limit: pageSize,
+          offset: page * pageSize,
+          sort_by: (sortBy ?? "id") as "id" | "pattern" | "pattern_type" | "created_at",
+          sort_order: sortDir,
+        }, { signal }),
+      )
+      // A newer invocation superseded us: it owns loading/data/error now, so
+      // touch nothing or we would blank its spinner.
+      if (!gen.isCurrent(g)) return
+      // Aborted while still current: no newer owner will clear it, so release
+      // the spinner here — the read is over and Retry must be reachable.
+      if (data === undefined) {
+        setLoading(false)
+        return
+      }
+      // Success, and still current: show the rows, clear the cue and spinner.
       loadedRef.current = true
+      setPatterns(data)
+      setError(null)
+      setLoading(false)
+    } catch (e) {
+      // A newer invocation owns the state; leave its spinner untouched.
+      if (!gen.isCurrent(g)) return
+      // A bare abort must never surface as a user-visible error.
+      if ((e as Error).name === "AbortError") {
+        setLoading(false)
+        return
+      }
+      // A non-abort failure (HTTP 500, 401, network) rethrows through
+      // useAbortable: surface it and release the spinner so the Callout retry
+      // below is reachable. Good rows stay mounted (the quiet-cue pattern).
+      setError((e as Error).message)
       setLoading(false)
     }
-  }, [debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
+  }, [run, gen, debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
 
   useEffect(() => {
     fetchPatterns()

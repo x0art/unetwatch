@@ -439,6 +439,230 @@ export function Skeleton({ className }: { className?: string }) {
     </div>
   )
 }
+/* ── TableSkeleton — the grid mirror ─────────────────────────────
+ * One entry per RENDERED column (`width` is a Tailwind width class such as
+ * "w-28" or "w-[320px]"). The cell is always emitted — `w-24` is the fallback
+ * when a column declares no width — because a widthless column used to vanish
+ * silently from the skeleton (Analytics identity columns), so the placeholder
+ * advertised a narrower table than the real one.
+ *
+ * The padding values below are a deliberate byte-for-byte mirror of
+ * `DENSITY_PAD` in `DataTable.tsx`, which stays module-private (exporting it
+ * would add a `react(only-export-components)` warning there and the spec
+ * forbids new lint warnings). The two MUST move together — if a density's
+ * padding changes in one, change it in the other, or the placeholder stops
+ * occupying the real grid's cells. */
+const DENSITY_PAD: Record<"comfortable" | "compact", { th: string; td: string }> = {
+  comfortable: { th: "px-4 py-3", td: "px-4 py-3" },
+  compact: { th: "px-3 py-2", td: "px-3 py-1.5" },
+}
+export interface TableSkeletonProps {
+  /** One entry per rendered column. `width` is a Tailwind width class
+   *  (e.g. "w-28", "w-[320px]"); absent ⇒ the primitive picks a stable
+   *  default so the cell NEVER vanishes (fixes the Analytics dropped column). */
+  columns: Array<{ width?: string }>
+  /** Row count. Default: the surface's page size, never the fixed 8. */
+  rows?: number
+  /** Leading 48px checkbox cell, matching DataTable's select slot. */
+  selectable?: boolean
+  /** Render a skeleton header row too. Default true. */
+  header?: boolean
+  /** Density padding; default "comfortable". */
+  density?: "comfortable" | "compact"
+  className?: string
+}
+
+export function TableSkeleton({
+  columns,
+  rows = 8,
+  selectable = false,
+  header = true,
+  density = "comfortable",
+  className,
+}: TableSkeletonProps) {
+  const pad = DENSITY_PAD[density]
+  return (
+    <div
+      className={cn("overflow-x-auto rounded-md border border-border bg-card shadow-none", className)}
+      aria-hidden="true"
+    >
+      <table className="w-full text-sm" aria-hidden="true">
+        {header && (
+          <thead>
+            <tr className="border-b border-border bg-muted/50">
+              {selectable && <th scope="col" className={cn(pad.th, "w-12")} aria-hidden="true" />}
+              {columns.map((_, i) => (
+                <th key={i} scope="col" className={pad.th} aria-hidden="true">
+                  <Skeleton className="h-3.5 w-16" />
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {Array.from({ length: rows }).map((_, r) => (
+            <tr key={r} className="border-b border-border last:border-b-0">
+              {selectable && (
+                <td className={pad.td}>
+                  <Skeleton className="h-4 w-4" />
+                </td>
+              )}
+              {columns.map((col, c) => (
+                <td key={c} className={pad.td}>
+                  <Skeleton className={cn("h-4", col.width ?? "w-24")} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/* ── SkeletonShape — the layout mirror ───────────────────────────
+ * A first-load placeholder must occupy the SAME boxes as the content that
+ * replaces it; a flat block standing in for a multi-panel surface is the
+ * layout jump the user perceives. Each variant therefore mirrors a real
+ * component's container + grid + padding, quoting its classNames. Every
+ * variant reuses `Skeleton` (so the shimmer, reduced-motion and paused-tab
+ * behaviour are inherited), and the whole subtree is `aria-hidden`. */
+export type SkeletonVariant =
+  | "stat-grid"
+  | "chart"
+  | "panel-stack"
+  | "feed-list"
+  | "dag"
+  | "edge-list"
+
+export interface SkeletonShapeProps {
+  variant: SkeletonVariant
+  /** Cards / rows / panels depending on the variant. Default per variant. */
+  count?: number
+  /** Plot/diagram body height in px for `chart`/`dag`; ignored elsewhere. */
+  height?: number
+  className?: string
+}
+
+export function SkeletonShape({ variant, count, height, className }: SkeletonShapeProps) {
+  // Mirrors a `StatCard` row: the `AnalyticsPage` / `HostInspectorPage`
+  // wrapper grids. `h-28` ≈ the measured card height at the 5-up breakpoint.
+  if (variant === "stat-grid") {
+    return (
+      <div className={cn("grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5", className)} aria-hidden="true">
+        {Array.from({ length: count ?? 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full" />
+        ))}
+      </div>
+    )
+  }
+
+  // Mirrors `TrendCharts`: the plot area plus the axis/legend chrome, not one
+  // flat rectangle — `height` is the same ECharts host height (default 260).
+  if (variant === "chart") {
+    return (
+      <div className={cn("relative w-full", className)} style={{ height: height ?? 260 }} aria-hidden="true">
+        <div className="mb-3 flex items-center gap-3">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-3 w-16" />
+        </div>
+        <Skeleton className="h-[calc(100%-2.5rem)] w-full" />
+        <div className="mt-2 flex items-center justify-between">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-2.5 w-10" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // Mirrors a stacked column of titled `Panel`s: each block is a panel frame
+  // (header `border-b border-border px-4 py-3`, body `p-4 sm:p-5`) with
+  // skeleton lines in place of content. `space-y-5` is the canonical rhythm.
+  if (variant === "panel-stack") {
+    return (
+      <div className={cn("space-y-5", className)} aria-hidden="true">
+        {Array.from({ length: count ?? 3 }).map((_, i) => (
+          <div key={i} className="overflow-hidden rounded-md border border-border bg-card shadow-sm">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+            <div className="space-y-3 p-4 sm:p-5">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-5/6" />
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Mirrors the `FeedCard` scrolling list: a `max-h-80` bordered container of
+  // one-line `px-3 py-1.5` rows, so the placeholder is the list it becomes.
+  if (variant === "feed-list") {
+    return (
+      <div
+        className={cn(
+          "divide-y divide-border overflow-hidden rounded-md border border-border bg-muted/30 shadow-sm",
+          "max-h-80",
+          className,
+        )}
+        aria-hidden="true"
+      >
+        {Array.from({ length: count ?? 10 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-1.5">
+            <Skeleton className="h-3.5 flex-1" />
+            <Skeleton className="h-4 w-4 shrink-0" />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // Mirrors `NetworkGraphDiagram`: the node/edge silhouette plus the absolute
+  // bottom-right zoom-control overlay, inside the same ECharts host height.
+  if (variant === "dag") {
+    return (
+      <div className={cn("relative w-full", className)} style={{ height: height ?? 360 }} aria-hidden="true">
+        <div className="flex h-full items-center justify-center gap-6 px-6">
+          {Array.from({ length: count ?? 3 }).map((_, col) => (
+            <div key={col} className="flex flex-col items-center gap-4">
+              <Skeleton className="h-8 w-24 rounded-md" />
+              <Skeleton className="h-8 w-24 rounded-md" />
+            </div>
+          ))}
+        </div>
+        <div className="absolute bottom-3 right-3 flex flex-col gap-1" aria-hidden="true">
+          <Skeleton className="h-8 w-8" />
+          <Skeleton className="h-8 w-8" />
+          <Skeleton className="h-8 w-8" />
+        </div>
+      </div>
+    )
+  }
+
+  // Mirrors the redirect-history drawer: a stack of VARIABLE-height bordered
+  // edge cards, not one flat block (the alternating width keeps the list from
+  // looking like a grid).
+  return (
+    <div className={cn("space-y-3", className)} aria-hidden="true">
+      {Array.from({ length: count ?? 4 }).map((_, i) => (
+        <div key={i} className="overflow-hidden rounded-md border border-border bg-card p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <Skeleton className="h-4 w-40" />
+            <Skeleton className="h-5 w-16 rounded-md" />
+          </div>
+          <div className="mt-3 space-y-2">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className={cn("h-3.5", i % 2 === 0 ? "w-5/6" : "w-2/3")} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 /* ── LoadingIndicator — honest elapsed-time feedback ─────────────
  * Re-exported here so every consumer can reach it from the same module as

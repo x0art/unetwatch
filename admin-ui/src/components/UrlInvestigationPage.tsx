@@ -29,11 +29,13 @@ import {
   PageHeader,
   Panel,
   SearchInput,
-  Skeleton,
+  SkeletonShape,
   StatCard,
+  TableSkeleton,
   useToast,
 } from "./ui"
 import { DataTable, type DataTableColumn } from "./DataTable"
+import { useAbortable, useGeneration } from "../lib/utils"
 
 function formatWhen(iso: string): string {
   const d = new Date(iso)
@@ -95,25 +97,63 @@ export function UrlInvestigationPage({
       cancelled = true
     }
   }, [])
+  // Aborts a superseded getUrlBreakdown read; AbortError resolves undefined.
+  const runBreakdown = useAbortable()
+  // Generation guard for `loading`: the abort alone cannot decide who clears the
+  // spinner, because a superseded invocation (already resolving to undefined)
+  // would otherwise blank the spinner the newer one set. Only the newest
+  // invocation owns loading/result/error and releases the spinner.
+  const gen = useGeneration()
   const investigate = useCallback(async (target: string) => {
     const trimmed = target.trim()
     if (!trimmed) {
+      // A superseded call may have left the spinner up; clear it here since
+      // this early return has no generation of its own to guard with.
+      setLoading(false)
       toast({ title: "Enter a URL", description: "Paste a full URL or host to investigate.", variant: "info" })
       return
     }
+    // Claim a generation for this invocation; a later investigate (or a
+    // globalFilter change) supersedes it, so this read's terminal paths are
+    // ignored even if they land after — the newer invocation then owns loading.
+    const g = gen.next()
     setLoading(true)
     setError(null)
     setSearched(trimmed)
     try {
-      const res = await getUrlBreakdown(trimmed, { limit: 100, source: uSource })
+      // Per-invocation signal: a newer investigate (or a globalFilter change)
+      // aborts this read; useAbortable swallows AbortError -> undefined.
+      const res = await runBreakdown((signal) =>
+        getUrlBreakdown(trimmed, { limit: 100, source: uSource }, { signal }),
+      )
+      // A newer invocation superseded us: it owns loading/result/error now,
+      // so touch nothing or we would blank its spinner.
+      if (!gen.isCurrent(g)) return
+      // Aborted while still current: no newer owner will clear it, so release
+      // the spinner here — the read is over and the button must be usable.
+      if (res === undefined) {
+        setLoading(false)
+        return
+      }
+      // Success, and still current: show the result and stop the spinner.
       setResult(res)
+      setLoading(false)
     } catch (e) {
+      // A newer invocation owns the state; leave its spinner untouched.
+      if (!gen.isCurrent(g)) return
+      // A bare abort must never surface as a user-visible error.
+      if ((e as Error).name === "AbortError") {
+        setLoading(false)
+        return
+      }
+      // A non-abort failure (HTTP 500, 401, network) rethrows through
+      // useAbortable: surface it, drop the stale result, and release the
+      // spinner so the Callout retry is reachable.
       setError((e as Error).message)
       setResult(null)
-    } finally {
       setLoading(false)
     }
-  }, [toast, uSource])
+  }, [runBreakdown, gen, toast, uSource])
 
   // Auto-investigate an incoming URL — Host Inspector's "Top URLs" and the
   // Ctrl+K palette navigate here with the URL in the global filter. Re-runs on
@@ -281,14 +321,23 @@ export function UrlInvestigationPage({
       )}
 
       {loading && !result ? (
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Skeleton className="h-28 w-full" />
-            <Skeleton className="h-28 w-full" />
-            <Skeleton className="h-28 w-full" />
-            <Skeleton className="h-28 w-full" />
-          </div>
-          <Skeleton className="h-64 w-full" />
+        // Mirror the real populated branch box-for-box (spec §3.2/§4.2): the
+        // 4-up StatCard row, then the panel-wrapped clients DataTable. A flat
+        // block here is the layout jump the shape-mirroring primitives remove.
+        <div className="space-y-5">
+          {/* Same grid class as the real row (:298) — stat-grid's baked
+              lg:grid-cols-3 xl:grid-cols-5 would advertise the wrong shape. */}
+          <SkeletonShape
+            variant="stat-grid"
+            count={4}
+            className="lg:grid-cols-4 xl:grid-cols-4"
+          />
+          {/* Mirrors the `Clients accessing …` Panel + client DataTable: one
+              column per real column (client_ip, count w-24, last_seen w-44). */}
+          <TableSkeleton
+            columns={[{}, { width: "w-24" }, { width: "w-44" }]}
+            rows={8}
+          />
         </div>
       ) : result ? (
         <>
