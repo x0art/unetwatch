@@ -67,8 +67,15 @@ function looksLikeUrl(s: string): boolean {
 type UrlSource = "live" | "findings"
 export function UrlInvestigationPage({
   onNavigate,
+  // When omitted the page behaves as before (always active), so standalone
+  // use/tests are unaffected. App passes `view === "url"`; hidden tabs stay
+  // mounted, and CSS `hidden` does not stop JS, so mount fetches must not fire
+  // until the tab is actually shown. The auto-investigate effect below is keyed
+  // on `globalFilter` (a navigation action) and is deliberately NOT gated.
+  active = true,
 }: {
   onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url" | "report-url") => void
+  active?: boolean
 } = {}) {
   const { toast } = useToast()
   const { globalFilter, setGlobalFilter } = useFilter()
@@ -81,7 +88,11 @@ export function UrlInvestigationPage({
 
   // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+  // Mount-time fetch, gated on `active`: a hidden (previously visited) tab must
+  // not fire this. Re-runs when the tab becomes visible, so the badge index
+  // still builds on first show.
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     getJaillistSet()
       .then((res) => {
@@ -96,7 +107,7 @@ export function UrlInvestigationPage({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [active])
   // Aborts a superseded getUrlBreakdown read; AbortError resolves undefined.
   const runBreakdown = useAbortable()
   // Generation guard for `loading`: the abort alone cannot decide who clears the

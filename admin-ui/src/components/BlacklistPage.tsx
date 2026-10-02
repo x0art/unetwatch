@@ -301,7 +301,11 @@ export function FeedCard({
   )
 }
 
-export function BlacklistPage() {
+// WHY active: App.tsx keeps every visited page mounted behind a CSS `hidden`
+// wrapper, so a hidden Blacklist page would keep firing its mount feed read.
+// `active` (the current in-app view) gates that work; it defaults to true so
+// the page behaves identically before App.tsx passes the prop.
+export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
   const [urls, setUrls] = useState<string[]>([])
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
@@ -375,10 +379,16 @@ export function BlacklistPage() {
     }
   }, [])
 
+  // Keyed on `active` (not `load`/`loadUpstreamStatus`, which stay out of deps
+  // on purpose): an inactive page reads nothing, the first visit has `active`
+  // already true so it still loads immediately, and later visits refetch on
+  // arrival.
   useEffect(() => {
+    if (!active) return
     load()
     void loadUpstreamStatus()
-  }, [load, loadUpstreamStatus])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   const urlsFeed = upstreamStatus?.feeds.urls
   const ipsFeed = upstreamStatus?.feeds.ips

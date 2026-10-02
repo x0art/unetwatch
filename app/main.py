@@ -13,8 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings, verify_admin
-from app.database import init_db, seed_defaults
-from app.routes import auth as auth_routes
+from app.database import get_db_path, init_db, seed_defaults
 from app.routes import (
     analytics,
     attck,
@@ -32,9 +31,14 @@ from app.routes import (
     timezone,
     triage,
 )
+from app.routes import auth as auth_routes
 from app.services.feeds import sync_regenerate, sync_regenerate_jail
 
 scheduler = AsyncIOScheduler()
+
+# Strong reference to the held instance-lock file while this process owns it:
+# a module global so the open handle outlives ``_acquire_singleton_lock``.
+_singleton_lock = None
 
 log = logging.getLogger("unetwatch")
 
@@ -55,9 +59,57 @@ def setup_logging():
 setup_logging()
 
 
+def _acquire_singleton_lock() -> bool:
+    """Try to claim the one-instance lock for this app; True when claimed.
+
+    The app owns scheduler jobs (a poller that writes findings and fires
+    webhooks, upstream syncs) and an in-process redirect-run store. Both are
+    process-local, so running two instances — ``uvicorn --workers N`` or two
+    containers against one SQLite file — would double every poll/webhook and
+    split ``/api/redirects/check/status`` across stores. ``run()`` therefore
+    refuses ``workers > 1``; this lock is the second half of that guard,
+    covering the two-container case transparently by letting the first
+    instance keep its whole lifespan and making later ones a plain API server.
+
+    A dedicated lock *file* is used rather than the DB: the ``findings`` table
+    is not guaranteed to exist yet at lifespan entry (``init_db()`` creates
+    it), and ``fcntl.flock`` is released automatically by the OS when the
+    process dies, so a crash never leaves a stale lock to unlock by hand. On
+    filesystems without ``flock`` (some network mounts) the attempt fails
+    open: a redundant poller is better than an app that will not boot.
+    """
+    global _singleton_lock
+    try:
+        import fcntl
+
+        lock_path = f"{get_db_path()}.instance-lock"
+        handle = open(lock_path, "a+")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            return False
+        _singleton_lock = handle  # keep the handle open → the lock stays held
+        return True
+    except Exception:  # pragma: no cover — lock is best-effort by design
+        return True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Only one instance may own the scheduler + the in-process run store.
+    # ``init_db()`` above is safe to run in every process (idempotent, WAL);
+    # everything after this gate — seeding, feed regeneration, the APScheduler
+    # jobs — is deliberately single-instance. A second instance still serves
+    # every request, so extra workers scale reads without doubling the poller.
+    if not _acquire_singleton_lock():
+        log.warning(
+            "another uNetWatch instance owns the scheduler; this process is "
+            "starting as a read/write API server only"
+        )
+        yield
+        return
     await seed_defaults()
 
     # Regenerate the static blacklist feeds from the DB so the public
@@ -379,8 +431,23 @@ if os.path.isdir(_ADMIN_DIST):
 
 
 def run():
-    """Console entry point: ``unetwatch`` → serves the app on :8000."""
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000)
+    """Console entry point: ``unetwatch`` → serves the app on :8000.
+
+    ``workers`` may be raised (env ``UNETWATCH_WORKERS``, default 1) to scale
+    reads off the single event loop — the request-storm fix relies on it. The
+    scheduler and the redirect-run store are process-local, so the lifespan
+    claims a one-instance lock (``_acquire_singleton_lock``) and only the
+    first process starts them; the rest are plain API servers. That makes
+    ``workers > 1`` safe here, but note ``workers > 1`` forces uvicorn to
+    import the app in child processes, so it cannot be combined with
+    ``reload`` (the dev entry point below stays single-process).
+    """
+    try:
+        workers = max(1, int(os.getenv("UNETWATCH_WORKERS", "1")))
+    except ValueError:
+        log.warning("UNETWATCH_WORKERS is not an integer; falling back to 1 worker")
+        workers = 1
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, workers=workers)
 
 
 if __name__ == "__main__":

@@ -79,17 +79,24 @@ from app.services.result_processor import (
     _row_is_blocked,
     _row_is_enforced,
     _row_is_risk,
-    _volume_for_bytes,
 )
-from app.services.timeutil import format_peak_iso, local_day, local_hour_bucket
+from app.services.timeutil import (
+    format_peak_iso,
+    local_day,
+    local_hour_bucket,
+    operator_tz,
+)
 
 # ADR 0001 row semantics are canonical in ``app/services/result_processor.py``.
 # ``_row_is_enforced`` / ``_row_is_risk`` / ``_row_is_blocked``
 # (``_row_is_blocked`` is the back-compat alias for the enforcement test) are
 # imported above and re-exported so this module keeps answering those names for
-# any older caller — the rule itself is not restated here. The same module owns
-# ``_domain_of_base`` / ``_persisted_bytes`` / ``_volume_for_bytes``, so those
-# have exactly one implementation shared with ``client_report.py``.
+# any older caller — the rule itself is not restated here (the SQL fragments
+# below mirror it exactly). The same module owns ``_domain_of_base`` /
+# ``_persisted_bytes`` / ``_volume_for_bytes``, so those have exactly one
+# implementation shared with ``client_report.py`` — the SQL pushdowns in this
+# file re-derive the byte and risk rules as SQL, and the parity is pinned by
+# tests/test_analytics.py rather than by a second Python copy.
 __all__ = ["_row_is_blocked", "_row_is_enforced", "_row_is_risk"]
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -129,6 +136,120 @@ def _window_clause(minutes: int, params: list) -> str:
         return " AND log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
     return ""
 
+
+
+# ── SQL aggregation fragments ──────────────────────────────────────────────
+#
+# The findings fallbacks used to pull up to 10 000 / 20 000 rows into Python
+# and aggregate in a loop. The loop itself is not I/O — it is pure CPU on the
+# single event loop this process runs — so under the admin UI's request
+# storm it serialized *every* request behind it (a 20 000-row local-day
+# bucket measured ~500 ms of true blocking). These fragments push the same
+# arithmetic into SQLite (C, off the loop thread) while keeping the exact
+# semantics of ``_row_is_risk`` / ``_row_is_enforced`` / ``_persisted_bytes``:
+#
+#   * ``_RISK_SQL`` / ``_ENF_SQL`` mirror the ADR 0001 rule in
+#     ``app/services/result_processor.py`` — an enforcement (DENY/FLAG) is
+#     never a risk; an explicit action is a risk only when ALLOW; a legacy row
+#     with no action is a risk only when ``matched_patterns`` holds a non-empty
+#     array (``substr(trim(...),1,1) = '['`` is the closest SQL expression of
+#     the JSON-list truthiness ``_parse_matched_patterns`` applies, and
+#     deliberately rejects a non-list ``'{}'`` the way ``bool({})`` would).
+#   * ``_BYTES_SQL`` mirrors ``_persisted_bytes``: NULL, ``''`` and any
+#     non-numeric string are "not recorded", never a fabricated 0, so a
+#     never-measured volume stays ``None`` (never a confident 0).
+#
+# ``has_action`` is False only for a pre-``action`` schema; the callers pass it
+# so the fragments degrade exactly as the Python helpers did.
+
+_RISK_SQL = (
+    "CASE WHEN UPPER(TRIM(COALESCE(action, ''))) IN ('DENY', 'FLAG') THEN 0 "
+    "WHEN TRIM(COALESCE(action, '')) != '' THEN "
+    "CASE WHEN UPPER(TRIM(action)) = 'ALLOW' THEN 1 ELSE 0 END "
+    "ELSE CASE WHEN substr(trim(COALESCE(matched_patterns, '')), 1, 1) = '[' "
+    "AND trim(COALESCE(matched_patterns, '')) != '[]' THEN 1 ELSE 0 END END"
+)
+_ENF_SQL = (
+    "CASE WHEN UPPER(TRIM(COALESCE(action, ''))) IN ('DENY', 'FLAG') "
+    "THEN 1 ELSE 0 END"
+)
+_RISK_SQL_LEGACY = (
+    "CASE WHEN substr(trim(COALESCE(matched_patterns, '')), 1, 1) = '[' "
+    "AND trim(COALESCE(matched_patterns, '')) != '[]' THEN 1 ELSE 0 END"
+)
+
+
+def _risk_expr(has_action: bool) -> str:
+    """The SQL expression for "this row is a risk", honouring ``has_action``."""
+    return _RISK_SQL if has_action else _RISK_SQL_LEGACY
+
+
+def _enf_expr(has_action: bool) -> str:
+    """The SQL expression for "this row is an enforcement"."""
+    return _ENF_SQL if has_action else "0"
+
+
+def _bytes_expr(column: str) -> str:
+    """SQL for ``_persisted_bytes(column)``: an int, or NULL when not recorded.
+
+    ``GLOB '[0-9]*' AND NOT GLOB '*[^0-9]*'`` accepts exactly a non-empty run
+    of digits — the only values ``int()`` accepts among non-negative inputs —
+    so ``NULL``/``''``/``'12abc'`` all read as not-recorded and a stored ``0``
+    stays a real measured 0.
+    """
+    return (
+        f"CASE WHEN {column} IS NOT NULL AND {column} != '' "
+        f"AND {column} GLOB '[0-9]*' AND {column} NOT GLOB '*[^0-9]*' "
+        f"THEN CAST({column} AS INTEGER) ELSE NULL END"
+    )
+
+
+def _local_day_sql(offset_minutes: int) -> str:
+    """SQL for ``local_day(log_timestamp)`` under a fixed-offset operator zone."""
+    return f"strftime('%Y-%m-%d', log_timestamp, '{offset_minutes:+d} minutes')"
+
+
+def _local_hour_sql(offset_minutes: int) -> str:
+    """SQL for ``local_hour_bucket(log_timestamp)`` under a fixed-offset zone."""
+    return (
+        f"strftime('%Y-%m-%dT%H:00:00', log_timestamp, "
+        f"'{offset_minutes:+d} minutes')"
+    )
+
+
+def _fixed_offset_minutes() -> int | None:
+    """The operator zone's UTC offset, or ``None`` when it observes DST.
+
+    A zone whose offset never changes (``UTC`` and fixed-offset zones such as
+    ``+07:00`` or ``Asia/Bangkok``) can be reproduced by SQLite exactly with a
+    single modifier — verified equivalent to ``local_day``/
+    ``local_hour_bucket``. A DST-observing zone cannot: the per-row offset
+    varies within the window, so returning ``None`` makes the callers keep the
+    exact per-row Python call.
+
+    There is no public API to ask a ``ZoneInfo`` whether it observes DST, so
+    the offset is sampled on a daily grid across four years — far finer than
+    any real transition and long enough to cross every leap/DST cycle, so a
+    zone that changes offset at all cannot be sampled as constant.
+    """
+    from datetime import UTC as _UTC
+    from datetime import datetime, timedelta
+
+    tz = operator_tz()
+    try:
+        probe = datetime(2020, 1, 1, tzinfo=_UTC)
+        offsets = {
+            (probe + timedelta(days=d)).astimezone(tz).utcoffset()
+            for d in range(0, 366 * 4)
+        }
+    except Exception:  # pragma: no cover — exotic tzinfo: stay on the safe path
+        return None
+    if len(offsets) != 1:
+        return None
+    offset = offsets.pop()
+    if offset is None:
+        return None
+    return int(offset.total_seconds() // 60)
 
 async def _column_names(db) -> list[str]:
     """Column list for the findings table (schema migrates between modes)."""
@@ -176,18 +297,40 @@ async def _load_blacklist_sets(db) -> tuple[set[str], set[str]]:
 
 
 async def _findings_summary(db, minutes: int) -> dict:
-    """Aggregate the persisted findings table into the summary shape."""
+    """Aggregate the persisted findings table into the summary shape.
+
+    Aggregated in SQL over the same 10 000-row window the old loop read, so
+    the numbers are identical while the CPU cost moves off the event loop.
+    The volume is the same SUM of persisted byte counters (``None`` when no
+    row carried one — ``_volume_for_bytes``), the risk/enforcement counts use
+    the ADR 0001 rule (``_risk_expr``/``_enf_expr``), and only the blacklist
+    host comparison is finished in Python because ``_domain_of_base`` is the
+    shared canonical implementation and re-expressing its regex in SQL would
+    risk drifting from it.
+    """
     columns = await _column_names(db)
     has_action = _has_column(columns, "action")
 
     params: list = []
     where = _window_clause(minutes, params)
     base_where = f"WHERE 1=1{where}"
+    # The capped row set the previous implementation aggregated over. Wrapped
+    # in a subquery so every figure below is computed over exactly those rows.
+    window = f"(SELECT * FROM findings {base_where} LIMIT 10000)"
 
-    count_cursor = await db.execute(
-        f"SELECT COUNT(*) AS total FROM findings {base_where}", params
+    dn, up = _bytes_expr("bytes_downloaded"), _bytes_expr("bytes_uploaded")
+    agg_cursor = await db.execute(
+        f"SELECT COUNT(*) AS total,"
+        f" SUM(COALESCE({dn}, 0) + COALESCE({up}, 0)) AS volume,"
+        f" SUM(CASE WHEN {dn} IS NOT NULL OR {up} IS NOT NULL"
+        f"     THEN 1 ELSE 0 END) AS measured,"
+        f" COALESCE(SUM({_risk_expr(has_action)}), 0) AS risk,"
+        f" COALESCE(SUM({_enf_expr(has_action)}), 0) AS enforced"
+        f" FROM {window}",
+        params,
     )
-    total = (await count_cursor.fetchone())["total"]
+    agg = await agg_cursor.fetchone()
+    total = agg["total"]
 
     blacklist_urls, blacklist_ips = await _load_blacklist_sets(db)
     blacklist_domains = blacklist_urls | blacklist_ips
@@ -201,37 +344,57 @@ async def _findings_summary(db, minutes: int) -> dict:
     top_host = ""
     peak_ts = ""
     if total:
-        cursor = await db.execute(
-            f"SELECT * FROM findings {base_where} LIMIT 10000", params
-        )
-        rows = [dict(r) for r in await cursor.fetchall()]
+        total_volume = int(agg["volume"]) if agg["measured"] else None
+        total_risk = int(agg["risk"])
+        total_enforcements = int(agg["enforced"])
+        if total_risk:
+            # Blacklisted risk = risk rows whose derived host is blacklisted.
+            # Rows are grouped by ``base_url`` (bounded by distinct hosts, not
+            # rows), each group's host is derived with the SHARED
+            # ``_domain_of_base`` and the group's row count is added when that
+            # host is blacklisted — the same per-row predicate, summed.
+            risk_hosts = await db.execute(
+                f"SELECT base_url, COUNT(*) AS n FROM {window}"
+                f" WHERE ({_risk_expr(has_action)}) = 1 GROUP BY base_url",
+                params,
+            )
+            total_blacklisted_risk = sum(
+                r["n"]
+                for r in await risk_hosts.fetchall()
+                if _domain_of_base(r["base_url"] or "") in blacklist_domains
+            )
 
-        total_volume = _volume_for_bytes(rows)
-        total_risk = sum(1 for r in rows if _row_is_risk(r, has_action))
-        total_blacklisted_risk = sum(
-            1
-            for r in rows
-            if _row_is_risk(r, has_action)
-            and _domain_of_base(r.get("base_url") or "") in blacklist_domains
-        )
-        total_enforcements = sum(1 for r in rows if _row_is_enforced(r, has_action))
-
-        by_host: dict[str, int] = {}
-        for r in rows:
-            by_host[r["client_ip"]] = by_host.get(r["client_ip"], 0) + 1
         # NOTE: ``top_host`` stays "" here. "Top bandwidth host" cannot be
         # answered from this fallback: it would have to be ranked by the
         # synthesized volume this module no longer invents. ES answers it from
         # the real feed (see ``_es_summary``/``_es_top_domains``).
-        # Peak hour = the operator-local hour with the most rows (best-effort;
-        # the UI shows the weekday + hour + zone label verbatim).
-        by_hour: dict[str, int] = {}
-        for r in rows:
-            hour = local_hour_bucket(r.get("log_timestamp") or "")
-            if hour:
-                by_hour[hour] = by_hour.get(hour, 0) + 1
-        if by_hour:
-            peak_ts = max(by_hour, key=by_hour.get)
+        # Peak hour = the operator-local hour with the most rows; the earliest
+        # hour wins a tie, matching the previous first-seen order (rows arrived
+        # by id). A fixed-offset zone is bucketed by SQLite; a named (DST)
+        # zone falls back to the per-row Python helper, which is exact for it.
+        offset = _fixed_offset_minutes()
+        if offset is not None:
+            hour_cursor = await db.execute(
+                f"SELECT {_local_hour_sql(offset)} AS hour, COUNT(*) AS n,"
+                f" MIN(id) AS first_id FROM {window}"
+                f" WHERE {_local_hour_sql(offset)} IS NOT NULL"
+                f" GROUP BY hour ORDER BY n DESC, first_id ASC LIMIT 1",
+                params,
+            )
+            peak_row = await hour_cursor.fetchone()
+            if peak_row:
+                peak_ts = peak_row["hour"]
+        else:
+            cursor = await db.execute(
+                f"SELECT log_timestamp, id FROM {window} ORDER BY id", params
+            )
+            by_hour: dict[str, int] = {}
+            for r in await cursor.fetchall():
+                hour = local_hour_bucket(r["log_timestamp"] or "")
+                if hour:
+                    by_hour[hour] = by_hour.get(hour, 0) + 1
+            if by_hour:
+                peak_ts = max(by_hour, key=by_hour.get)
 
     return {
         "totalVolume": total_volume,
@@ -270,18 +433,26 @@ async def _previous_period_summary(db, minutes: int) -> dict | None:
         " WHERE log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
         " AND log_timestamp < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
     )
-    cursor = await db.execute(
-        f"SELECT * FROM findings{where} LIMIT 10000", params
-    )
-    rows = [dict(r) for r in await cursor.fetchall()]
-
-    if not rows:
-        return None
-
+    window = f"(SELECT * FROM findings{where} LIMIT 10000)"
+    dn, up = _bytes_expr("bytes_downloaded"), _bytes_expr("bytes_uploaded")
     columns = await _column_names(db)
     has_action = _has_column(columns, "action")
-    total_volume = _volume_for_bytes(rows)
-    total_enforcements = sum(1 for r in rows if _row_is_enforced(r, has_action))
+    cursor = await db.execute(
+        f"SELECT COUNT(*) AS total,"
+        f" SUM(COALESCE({dn}, 0) + COALESCE({up}, 0)) AS volume,"
+        f" SUM(CASE WHEN {dn} IS NOT NULL OR {up} IS NOT NULL"
+        f"     THEN 1 ELSE 0 END) AS measured,"
+        f" COALESCE(SUM({_enf_expr(has_action)}), 0) AS enforced"
+        f" FROM {window}",
+        params,
+    )
+    agg = await cursor.fetchone()
+
+    if not agg["total"]:
+        return None
+
+    total_volume = int(agg["volume"]) if agg["measured"] else None
+    total_enforcements = int(agg["enforced"])
     return {"totalVolume": total_volume, "totalEnforcements": total_enforcements}
 
 
@@ -301,46 +472,92 @@ async def _findings_bandwidth(db, minutes: int) -> list[dict]:
     """Daily buckets summing the real persisted byte counters.
 
     Rows with no byte counter contribute nothing — the day is present with a
-    real (possibly 0) sum, never a per-request estimate.
+    real (possibly 0) sum, never a per-request estimate. The local day is
+    derived in SQLite for a fixed-offset operator zone and with the exact
+    per-row ``local_day`` for a named (DST) zone; both preserve the previous
+    result. Buckets are ordered by day ascending, the order the previous
+    un-ordered scan produced in practice and the order the chart consumes.
     """
     params: list = []
     where = _window_clause(minutes, params)
-    cursor = await db.execute(
-        f"SELECT * FROM findings WHERE 1=1{where} LIMIT 20000", params
-    )
-    rows = [dict(r) for r in await cursor.fetchall()]
+    window = f"(SELECT * FROM findings WHERE 1=1{where} LIMIT 20000)"
 
+    offset = _fixed_offset_minutes()
+    if offset is not None:
+        dn, up = _bytes_expr("bytes_downloaded"), _bytes_expr("bytes_uploaded")
+        day_sql = _local_day_sql(offset)
+        cursor = await db.execute(
+            f"SELECT {day_sql} AS day,"
+            f" SUM(COALESCE({dn}, 0)) AS inbound,"
+            f" SUM(COALESCE({up}, 0)) AS outbound"
+            f" FROM {window} WHERE {day_sql} IS NOT NULL"
+            f" GROUP BY day ORDER BY day",
+            params,
+        )
+        return [
+            {
+                "bucket": r["day"],
+                "inbound": int(r["inbound"] or 0),
+                "outbound": int(r["outbound"] or 0),
+            }
+            for r in await cursor.fetchall()
+        ]
+
+    cursor = await db.execute(f"SELECT * FROM {window} ORDER BY id", params)
     buckets: dict[str, dict] = {}
-    for r in rows:
-        day = local_day(r.get("log_timestamp") or "")
+    for r in (dict(x) for x in await cursor.fetchall()):
+        day = local_day(r["log_timestamp"] or "")
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "inbound": 0, "outbound": 0})
         # Real bytes from the flat feed: download → inbound, upload → outbound.
-        dn = _persisted_bytes(r.get("bytes_downloaded"))
-        up = _persisted_bytes(r.get("bytes_uploaded"))
+        dn = _persisted_bytes(r["bytes_downloaded"])
+        up = _persisted_bytes(r["bytes_uploaded"])
         if dn is not None:
             b["inbound"] += dn
         if up is not None:
             b["outbound"] += up
-    return list(buckets.values())
+    return [buckets[d] for d in sorted(buckets)]
 
 
 async def _findings_enforcements(db, minutes: int) -> list[dict]:
-    """Daily buckets counting ALLOW vs DENY decisions."""
+    """Daily buckets counting ALLOW vs DENY decisions.
+
+    Same day-bucketing choice as ``_findings_bandwidth``: SQL for a
+    fixed-offset zone, the exact Python helper for a named one, buckets
+    ordered by day ascending. ``allow`` is the complement of an enforcement
+    (``_row_is_enforced``), i.e. every non-DENY/FLAG row and, on a legacy
+    schema with no ``action`` column, every row — exactly the previous
+    ``if enforced ... else allow`` split.
+    """
     columns = await _column_names(db)
     has_action = _has_column(columns, "action")
 
     params: list = []
     where = _window_clause(minutes, params)
-    cursor = await db.execute(
-        f"SELECT * FROM findings WHERE 1=1{where} LIMIT 20000", params
-    )
-    rows = [dict(r) for r in await cursor.fetchall()]
+    window = f"(SELECT * FROM findings WHERE 1=1{where} LIMIT 20000)"
 
+    offset = _fixed_offset_minutes()
+    if offset is not None:
+        enf = _enf_expr(has_action)
+        day_sql = _local_day_sql(offset)
+        cursor = await db.execute(
+            f"SELECT {day_sql} AS day,"
+            f" COALESCE(SUM({enf}), 0) AS deny,"
+            f" COALESCE(SUM(1 - ({enf})), 0) AS allow"
+            f" FROM {window} WHERE {day_sql} IS NOT NULL"
+            f" GROUP BY day ORDER BY day",
+            params,
+        )
+        return [
+            {"bucket": r["day"], "allow": int(r["allow"]), "deny": int(r["deny"])}
+            for r in await cursor.fetchall()
+        ]
+
+    cursor = await db.execute(f"SELECT * FROM {window} ORDER BY id", params)
     buckets: dict[str, dict[str, int]] = {}
-    for r in rows:
-        day = local_day(r.get("log_timestamp") or "")
+    for r in (dict(x) for x in await cursor.fetchall()):
+        day = local_day(r["log_timestamp"] or "")
         if not day:
             continue
         b = buckets.setdefault(day, {"bucket": day, "allow": 0, "deny": 0})
@@ -348,7 +565,7 @@ async def _findings_enforcements(db, minutes: int) -> list[dict]:
             b["deny"] += 1
         else:
             b["allow"] += 1
-    return list(buckets.values())
+    return [buckets[d] for d in sorted(buckets)]
 
 
 async def _findings_top_domains(db, minutes: int, limit: int) -> list[dict]:

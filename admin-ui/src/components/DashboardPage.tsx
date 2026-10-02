@@ -35,6 +35,11 @@ interface DashboardPageProps {
   lastUpdated: number
   onRefresh: () => void
   onNavigate: (view: View, search?: string) => void
+  // Whether this page is the in-app view on screen. App.tsx keeps every
+  // visited page mounted behind a CSS `hidden` wrapper — which pauses painting
+  // but not JS — so a hidden Dashboard would otherwise keep polling its three
+  // reads (and its 60s timer) forever.
+  active?: boolean
 }
 
 function formatLastUpdated(timestamp: number) {
@@ -62,6 +67,7 @@ export function DashboardPage({
   lastUpdated,
   onRefresh,
   onNavigate,
+  active = true,
 }: DashboardPageProps) {
   const isOnline = status?.es_online ?? false
   const statusLabel = status ? (isOnline ? "Online" : "Idle") : "Unknown"
@@ -129,10 +135,16 @@ export function DashboardPage({
   }, [toast])
 
   useEffect(() => {
+    // Gate on the in-app view: a hidden Dashboard must not fetch. `active`
+    // flips true on navigate, so the first visit and every later one load
+    // immediately. The fetch callbacks stay out of deps — they are stable
+    // (toast is the only dep) and re-running on them would re-trigger here.
+    if (!active) return
     const cancelBlacklist = fetchBlacklistCount()
     const cancelTracked = fetchTrackedCount()
     return () => { cancelBlacklist(); cancelTracked() }
-  }, [fetchBlacklistCount, fetchTrackedCount])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   // `getFindings` is a plain READ, so it can be aborted; the generation keeps
   // the poll tick honest — useAutoRefresh discards a callback's cleanup, so an
@@ -170,8 +182,13 @@ export function DashboardPage({
   }, [runRecent, recentGen, toast])
 
   useEffect(() => {
+    // Same active gate as the count reads: the recent-findings read is the
+    // third hidden-page poll source. `fetchRecent` stays stable (generation
+    // refs + toast), so it is intentionally not a dep.
+    if (!active) return
     void fetchRecent()
-  }, [fetchRecent])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   // Returns the findings promise so useAutoRefresh's in-flight skip actually
   // engages: a `{}` body (returning undefined) left the flag unset, so 60s
@@ -180,7 +197,7 @@ export function DashboardPage({
     onRefresh()
     return fetchRecent()
   }, [onRefresh, fetchRecent])
-  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60)
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refreshAll, "dashboard", 60, active)
 
   /* The canonical page shell: `space-y-5` root + the one `PageHeader` title.
      Actions live in the title row per §2.3; previously this was a bespoke hero

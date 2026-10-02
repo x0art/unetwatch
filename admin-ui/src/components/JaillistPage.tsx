@@ -25,7 +25,11 @@ import {
   useToast,
 } from "./ui"
 
-export function JaillistPage() {
+// WHY active: App.tsx keeps every visited page mounted behind a CSS `hidden`
+// wrapper, so a hidden Jaillist page would keep firing its mount feed read.
+// `active` (the current in-app view) gates that work; it defaults to true so
+// the page behaves identically before App.tsx passes the prop.
+export function JaillistPage({ active = true }: { active?: boolean } = {}) {
   const [ips, setIps] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -89,10 +93,16 @@ export function JaillistPage() {
     }
   }, [])
 
+  // Keyed on `active` (not `load`/`loadUpstreamStatus`, which stay out of deps
+  // on purpose): an inactive page reads nothing, the first visit has `active`
+  // already true so it still loads immediately, and later visits refetch on
+  // arrival.
   useEffect(() => {
+    if (!active) return
     load()
     void loadUpstreamStatus()
-  }, [load, loadUpstreamStatus])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
 
   const jailUpstream: UpstreamFeedState = {
     configured: upstreamStatus?.urls_configured ?? false,

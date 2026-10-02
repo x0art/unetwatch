@@ -326,8 +326,14 @@ async function fetchHostSections(ip: string, timeRange: string, source: HostSour
 
 export function HostInspectorPage({
   onNavigate,
+  // When omitted the page behaves as before (always active), so standalone
+  // use/tests are unaffected. App passes `view === "host"`; hidden tabs stay
+  // mounted, and CSS `hidden` does not stop JS, so mount fetches must not fire
+  // until the tab is actually shown.
+  active = true,
 }: {
   onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url" | "report-host") => void
+  active?: boolean
 } = {}) {
   const { globalFilter, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const { toast } = useToast()
@@ -393,7 +399,11 @@ export function HostInspectorPage({
   // Jailed client IPs for the header badge — best-effort, fail-closed to no
   // badge (mirrors the Query/Findings per-row pattern).
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
+  // Mount-time fetch, gated on `active`: a hidden (previously visited) tab must
+  // not fire this. Re-runs when the tab becomes visible, so the badge index
+  // still builds on first show.
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     getJaillistSet()
       .then((res) => {
@@ -408,7 +418,7 @@ export function HostInspectorPage({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [active])
 
   // Pre-fill + re-lookup from FilterContext (?q=) so the Ctrl+K palette and
   // "View Host History" land on the right host. Re-runs on

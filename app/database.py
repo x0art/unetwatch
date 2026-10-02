@@ -319,6 +319,14 @@ async def init_db():
         )
     """)
 
+    # NOTE: no standalone index on redirect_edges(source_url) is added. The
+    # redirect graph/list per-row `COUNT(*) ... WHERE e.source_url = t.url`
+    # subquery is already served by the left prefix of this table's
+    # UNIQUE(source_url, target_url) constraint (SQLite's implicit
+    # sqlite_autoindex_redirect_edges_1) — EXPLAIN QUERY PLAN shows a covering
+    # index search — so a second index on the same column would add write cost
+    # for no read gain.
+
     # Audit trail for ES queries + webhook deliveries. Every poll writes one
     # row recording the exact query DSL, match counts and webhook outcome;
     # ad-hoc Query page runs are stored with kind='query' (no webhook).

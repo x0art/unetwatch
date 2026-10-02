@@ -306,7 +306,7 @@ function toFlow(graph: RedirectGraph | null): { nodes: NetworkNode[]; links: Net
 
 /* ── Page ───────────────────────────────────────────────────────────── */
 
-export function RedirectsPage() {
+export function RedirectsPage({ active = true }: { active?: boolean } = {}) {
   const { toast } = useToast()
   const [items, setItems] = useState<TrackedUrl[]>([])
   const [total, setTotal] = useState(0)
@@ -342,10 +342,13 @@ export function RedirectsPage() {
   // and the generation drops a slow earlier load that lands after a newer one
   // (the bare `cancelled` flag only suppressed setState on cleanup).
   const runTable = useAbortable()
-  const tableGen = useGeneration()
+  // Destructure the two STABLE useCallback functions, not the `useGeneration()`
+  // object — that object is a fresh literal each render, so depending on it
+  // would make `loadTable` new every render and reload in a loop.
+  const { next: tableNext, isCurrent: tableCurrent } = useGeneration()
   const tableLoadedRef = useRef(false)
   const loadTable = useCallback(() => {
-    const g = tableGen.next()
+    const g = tableNext()
     const isFirstLoad = !tableLoadedRef.current
     setLoading(true)
     setLoadingStartedAt(Date.now())
@@ -360,13 +363,13 @@ export function RedirectsPage() {
       }, { signal }),
     )
       .then((data) => {
-        if (data === undefined || !tableGen.isCurrent(g)) return
+        if (data === undefined || !tableCurrent(g)) return
         setItems(data.items)
         setTotal(data.total)
         tableLoadedRef.current = true
       })
       .catch((e) => {
-        if (!tableGen.isCurrent(g)) return
+        if (!tableCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         // Never blank good rows on a FAILED refetch; a failed first load has
         // nothing to keep, so it may still reset (§4.6 never-blank).
@@ -377,44 +380,57 @@ export function RedirectsPage() {
         setTableError((e as Error).message)
       })
       .finally(() => {
-        if (tableGen.isCurrent(g)) setLoading(false)
+        if (tableCurrent(g)) setLoading(false)
       })
-  }, [runTable, tableGen, debouncedSearch, page, pageSize, sortBy, sortDir])
+  }, [runTable, tableNext, tableCurrent, debouncedSearch, page, pageSize, sortBy, sortDir])
 
   // Not user-keyed (fixed params) but still overlappable via `reload`; the
   // abort+generation keep a slow first graph from clobbering a fresher one.
   const runGraph = useAbortable()
-  const graphGen = useGeneration()
+  const { next: graphNext, isCurrent: graphCurrent } = useGeneration()
   const graphLoadedRef = useRef(false)
   const loadGraph = useCallback(() => {
-    const g = graphGen.next()
+    const g = graphNext()
     const isFirstLoad = !graphLoadedRef.current
     setGraphLoading(true)
     setGraphError(null)
     return runGraph((signal) => getRedirectGraph({ signal }))
       .then((data) => {
-        if (data === undefined || !graphGen.isCurrent(g)) return
+        if (data === undefined || !graphCurrent(g)) return
         setGraph(data)
         graphLoadedRef.current = true
       })
       .catch((e) => {
-        if (!graphGen.isCurrent(g)) return
+        if (!graphCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         // Never blank a graph already on screen on a FAILED refetch.
         if (isFirstLoad) setGraph(null)
         setGraphError((e as Error).message)
       })
       .finally(() => {
-        if (graphGen.isCurrent(g)) setGraphLoading(false)
+        if (graphCurrent(g)) setGraphLoading(false)
       })
-  }, [runGraph, graphGen])
+  }, [runGraph, graphNext, graphCurrent])
 
   useEffect(() => {
+    // Gate on the in-app view, not the mount: App.tsx keeps every visited page
+    // mounted behind a CSS `hidden` wrapper, so a hidden Redirects page would
+    // otherwise keep re-running its two (server-expensive) loads on arrival
+    // forever. `active` is true on navigate, so the first visit loads at once.
+    // `loadTable` carries the search/page/sort deps, so including it is what
+    // makes a control change reload the table. The generation/abort guards are
+    // unchanged.
+    if (!active) return
     void loadTable()
-  }, [loadTable])
+  }, [active, loadTable])
+
   useEffect(() => {
+    // Separate gate for the graph load: same hidden-page reason, but
+    // `loadGraph` takes fixed params (no user controls), so this re-runs only
+    // when `active` flips — which is correct.
+    if (!active) return
     void loadGraph()
-  }, [loadGraph])
+  }, [active, loadGraph])
 
   const reload = useCallback(() => {
     loadTable()

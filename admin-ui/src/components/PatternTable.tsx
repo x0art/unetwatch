@@ -139,7 +139,11 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
   },
 ]
 
-export function PatternTable({ externalSearch }: { externalSearch?: string } = {}) {
+// WHY active: App.tsx keeps every visited page mounted behind a CSS `hidden`
+// wrapper, so a hidden Patterns table would keep firing its mount read. `active`
+// (the current in-app view) gates that work; it defaults to true so the page
+// behaves identically before App.tsx passes the prop.
+export function PatternTable({ externalSearch, active = true }: { externalSearch?: string; active?: boolean } = {}) {
   const [patterns, setPatterns] = useState<Pattern[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -244,9 +248,16 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
     }
   }, [run, gen, debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
 
+  // Auto-run when a control changes (search/filter/page/sort), and on arrival
+  // at this view. `active` is a dep so a hidden page reads nothing and a first
+  // visit loads immediately; `fetchPatterns` is a dep because a control change
+  // must re-read the list (the gate only suppresses the run while off-screen).
+  // No loop risk: `fetchPatterns` is a useCallback whose deps are the stable
+  // `run`/`gen` plus the primitive control values.
   useEffect(() => {
+    if (!active) return
     fetchPatterns()
-  }, [fetchPatterns])
+  }, [active, fetchPatterns])
 
   // Sync an external search (Ctrl+K palette) into the local search box.
   useEffect(() => {

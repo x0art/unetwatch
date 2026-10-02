@@ -88,6 +88,13 @@ export function useGeneration(): { next: () => number; isCurrent: (g: number) =>
  * persisted per `key` in localStorage and ticks are skipped while the tab is
  * hidden, so background tabs never hammer the API.
  *
+ * `enabled` gates the interval on the *in-app* view being active. A page kept
+ * mounted behind a CSS `hidden` wrapper (App.tsx never unmounts visited pages)
+ * is still fully live in JS: `document.visibilityState` stays "visible" for
+ * the whole browser tab, so without this gate every hidden page would poll
+ * forever. When `enabled` is false the interval is CLEARED — not merely
+ * skipped inside the callback — so a hidden page holds no timer at all.
+ *
  * `refresh` may return a promise. While one is pending the next tick is
  * SKIPPED (not queued and never aborted): a slow backend tick must not overlap
  * the next, but aborting every tick would defeat a periodic refresh against
@@ -100,6 +107,8 @@ export function useAutoRefresh(
   refresh: () => unknown,
   key: string,
   defaultSeconds = 0,
+  // Defaults to `true` so existing callers that pass no flag stay unchanged.
+  enabled = true,
 ): { refreshSeconds: number; setRefreshSeconds: (s: number) => void } {
   const [refreshSeconds, setRefreshSeconds] = useState<number>(() => {
     try {
@@ -123,7 +132,10 @@ export function useAutoRefresh(
   }, [refreshSeconds, key])
 
   useEffect(() => {
-    if (!refreshSeconds) return
+    // A disabled (inactive-view) page never arms a timer: returning before
+    // setInterval means there is nothing to clear, and toggling `enabled` back
+    // on starts a fresh one (the cleanup below still runs on the way out).
+    if (!enabled || !refreshSeconds) return
     const id = window.setInterval(() => {
       if (document.visibilityState === "hidden") return
       if (inFlightRef.current) return
@@ -136,7 +148,7 @@ export function useAutoRefresh(
       }
     }, refreshSeconds * 1000)
     return () => window.clearInterval(id)
-  }, [refreshSeconds, refresh])
+  }, [refreshSeconds, refresh, enabled])
 
   return { refreshSeconds, setRefreshSeconds }
 }

@@ -11,7 +11,11 @@ from app.services.redirects import blacklist_tracked_hosts, check_all, is_valid_
 
 router = APIRouter(prefix="/api/redirects", tags=["redirects"])
 
-# Derived per-row count of distinct targets a URL has ever pointed at.
+# Distinct targets a URL has ever pointed at. The per-row correlated subquery
+# is deliberately kept: SQLite already answers it from a covering index — the
+# left prefix of redirect_edges' UNIQUE(source_url, target_url) constraint
+# (confirmed with EXPLAIN QUERY PLAN) — so a LEFT JOIN ... GROUP BY rewrite
+# would change NULL/grouping semantics for no measurable gain.
 _HISTORY_COUNT_SQL = (
     "(SELECT COUNT(*) FROM redirect_edges e WHERE e.source_url = t.url) AS history_count"
 )

@@ -120,8 +120,14 @@ function dedupeByDomain<T extends { base_url?: string; url?: string }>(rows: T[]
 
 export function AnalyticsPage({
   onNavigate,
+  active = true,
 }: {
   onNavigate?: (view: "host" | "url") => void
+  // Whether this page is the in-app view on screen. App.tsx keeps every
+  // visited page mounted behind a CSS `hidden` wrapper, which stops painting
+  // but not JS — so without this gate a hidden Analytics page would keep its
+  // mount fetch and its auto-refresh interval hammering the API forever.
+  active?: boolean
 } = {}) {
   const { setGlobalFilter, timeRange: range, setTimeRange: setRange } = useFilter()
   const { toast } = useToast()
@@ -168,16 +174,19 @@ export function AnalyticsPage({
   // Two independent abort points: the 5-request aggregate fan-out and the raw
   // table. A newer range/compare/search supersedes the previous read.
   const runAll = useAbortable()
-  const allGen = useGeneration()
+  // Destructure the two STABLE useCallback functions, not the `useGeneration()`
+  // object — that object is a fresh literal each render, so depending on it
+  // would make `fetchAll`/`fetchRaw` new every render and refetch in a loop.
+  const { next: allNext, isCurrent: allCurrent } = useGeneration()
   const runRaw = useAbortable()
-  const rawGen = useGeneration()
+  const { next: rawNext, isCurrent: rawCurrent } = useGeneration()
 
   // Returns its promise so useAutoRefresh can skip a tick while this 5-request
   // read is pending (a poll tick must skip, never overlap). The generation is
   // the ordering guard: the poll's returned cleanup is discarded, so an abort
   // alone could not stop a slow tick from overwriting a newer one.
   const fetchAll = useCallback(() => {
-    const g = allGen.next()
+    const g = allNext()
     setLoading(true)
     setLoadingStartedAt(Date.now())
     return runAll((signal) =>
@@ -190,7 +199,7 @@ export function AnalyticsPage({
       ]),
     )
       .then((res) => {
-        if (res === undefined || !allGen.isCurrent(g)) return
+        if (res === undefined || !allCurrent(g)) return
         const [s, b, e, td, tc] = res
         setSummary(s)
         setBandwidth(b)
@@ -200,28 +209,34 @@ export function AnalyticsPage({
         setError(null)
       })
       .catch((err) => {
-        if (!allGen.isCurrent(g)) return
+        if (!allCurrent(g)) return
         if ((err as Error).name === "AbortError") return
         const msg = (err as Error).message || "Failed to load analytics"
         setError(msg)
         toast({ title: "Analytics load failed", description: msg, variant: "error" })
       })
       .finally(() => {
-        if (!allGen.isCurrent(g)) return
+        if (!allCurrent(g)) return
         setLoading(false)
         setHasLoaded(true)
       })
-  }, [runAll, allGen, range, compare, toast])
+  }, [runAll, allNext, allCurrent, range, compare, toast])
 
   useEffect(() => {
+    // Gate on the in-app view, not the mount: skipping while inactive and
+    // re-running when `active` flips true gives the first visit (active is
+    // already true on navigate) an immediate load and every later visit a
+    // fresh one. `fetchAll` carries the range/compare deps, so including it
+    // is what makes a range or compare change refetch.
+    if (!active) return
     void fetchAll()
-  }, [fetchAll])
+  }, [active, fetchAll])
 
-  useAutoRefresh(fetchAll, "analytics", 0)
+  useAutoRefresh(fetchAll, "analytics", 0, active)
 
   // Raw-data table — the persisted findings in the selected window.
   const fetchRaw = useCallback(() => {
-    const g = rawGen.next()
+    const g = rawNext()
     setRawLoading(true)
     setRawError(null)
     return runRaw((signal) =>
@@ -233,25 +248,30 @@ export function AnalyticsPage({
       }, { signal }),
     )
       .then((res) => {
-        if (res === undefined || !rawGen.isCurrent(g)) return
+        if (res === undefined || !rawCurrent(g)) return
         setRaw(res.items)
         setRawTotal(res.total)
       })
       .catch((e) => {
-        if (!rawGen.isCurrent(g)) return
+        if (!rawCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         const msg = (e as Error).message || "Raw data load failed"
         setRawError(msg)
         toast({ title: "Raw data load failed", description: msg, variant: "error" })
       })
       .finally(() => {
-        if (rawGen.isCurrent(g)) setRawLoading(false)
+        if (rawCurrent(g)) setRawLoading(false)
       })
-  }, [runRaw, rawGen, range, rawSearch, rawPage, toast])
+  }, [runRaw, rawNext, rawCurrent, range, rawSearch, rawPage, toast])
 
   useEffect(() => {
+    // Same active gate as the aggregate fan-out: the raw table is a second
+    // hidden-page poll source with its own abort/generation guard. `fetchRaw`
+    // carries the range/raw-search/raw-page deps, so including it refetches
+    // when the raw controls change.
+    if (!active) return
     void fetchRaw()
-  }, [fetchRaw])
+  }, [active, fetchRaw])
 
   // Refetch when search/range/page changes (search is server-side per page fetch).
   /* ── Stat card values ──────────────────────────────────────────────── */

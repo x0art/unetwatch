@@ -291,7 +291,7 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
   },
 ]
 
-export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: string; onNavigate?: (view: "host" | "url") => void } = {}) {
+export function FindingsPage({ initialSearch, onNavigate, active = true }: { initialSearch?: string; onNavigate?: (view: "host" | "url") => void; active?: boolean } = {}) {
   const { toast } = useToast()
   const { setGlobalFilter } = useFilter()
   const [findings, setFindings] = useState<Finding[]>([])
@@ -326,7 +326,11 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   // this a poll tick could let a stale page/list silently overwrite a newer one
   // (a tick can also land mid-typing, racing the debounced-search effect).
   const run = useAbortable()
-  const gen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `refetch` (and thus the mount effect) new on
+  // every render and refetch in a loop. `next`/`isCurrent` are stable.
+  const { next: genNext, isCurrent: genCurrent } = useGeneration()
 
   // Epoch-ms the current getFindings read left for the API. Reset each run so
   // the elapsed figure never inherits a previous read's clock.
@@ -353,7 +357,7 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
     // Claim a generation for this invocation; a later one (interval tick,
     // filter/search/page change) supersedes it, so this read's result is
     // ignored even if it lands after — the ordering rule (§4.4).
-    const g = gen.next()
+    const g = genNext()
     // First load blanks to a skeleton; every later run (interval tick, filter
     // change, page change) keeps the rows on screen and only lights the quiet
     // "Refreshing" cue, so a populated table is never blanked.
@@ -373,13 +377,13 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
       }, { signal }),
     )
       .then((data) => {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         if (data === undefined) return // aborted — the newer invocation owns state
         setFindings(data.items)
         setTotal(data.total)
       })
       .catch((e) => {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         // Never blank good data on a FAILED refetch: a later failure keeps the
         // rows the operator is reading and only raises the error cue. A failed
@@ -391,22 +395,38 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         setError((e as Error).message)
       })
       .finally(() => {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         loadedRef.current = true
         setLoading(false)
         setRefreshing(false)
       })
-  }, [run, gen, debouncedSearch, page, pageSize])
+  }, [run, genNext, genCurrent, debouncedSearch, page, pageSize])
 
   useEffect(() => {
+    // Gate on the in-app view, not the mount: App.tsx keeps every visited page
+    // mounted behind a CSS `hidden` wrapper, so a hidden Findings table would
+    // otherwise keep polling the (expensive) findings endpoint forever. The
+    // first visit has `active` already true, so it loads immediately; later
+    // visits refetch on arrival. `refetch` carries the search/page/page-size
+    // deps, so including it is what makes a control change refetch — while
+    // `active` stays a dep so a hidden page issues nothing.
+    if (!active) return
     void refetch()
-  }, [refetch])
+  }, [active, refetch])
 
-  // Live updates: refetch findings on an interval.
-  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refetch, "findings", 0)
+  // Live updates: refetch findings on an interval (only while this view is on
+  // screen — an inactive app-view clears the interval entirely).
+  const { refreshSeconds, setRefreshSeconds } = useAutoRefresh(refetch, "findings", 0, active)
 
   const refetchIndexes = useCallback(async () => {
     setIndexError(false)
+    // The whitelist/tracked badges need EXACT per-key membership, not a "set is
+    // non-empty" signal: a count would be truthy for every row and would both
+    // show a false "Whitelist" badge and shadow the (correct) "Blacklist" one
+    // beneath it. These two endpoints are the only exact source (neither has a
+    // set/keys-only variant) — see the backend follow-up below. The 5000-row
+    // cap is the exact-membership ceiling; page hosts beyond it go unbadged
+    // rather than being badged wrongly.
     const [wlRes, trackedRes, blRes, jailRes] = await Promise.allSettled([
       listPatterns({ pattern_type: "whitelist", limit: 5000 }),
       listTrackedUrls({ limit: 5000 }),
@@ -447,8 +467,12 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
   }, [])
 
   useEffect(() => {
-    refetchIndexes()
-  }, [refetchIndexes])
+    // Index fan-out is part of the same hidden-page storm: gate it on the view
+    // too, and refetch on arrival so the sets reflect state changed elsewhere
+    // (the page stays mounted across tab switches on purpose).
+    if (!active) return
+    void refetchIndexes()
+  }, [active, refetchIndexes])
 
   const handleSearchChange = (value: string) => {
     setSearch(value)

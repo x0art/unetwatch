@@ -543,7 +543,11 @@ function BackupPanel() {
   )
 }
 
-export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
+// WHY active: App.tsx keeps every visited page mounted behind a CSS `hidden`
+// wrapper, so a hidden Logs table would keep firing its mount read. `active`
+// (the current in-app view) gates that work; it defaults to true so the page
+// behaves identically before App.tsx passes the prop.
+export function LogsPage({ externalSearch, active = true }: { externalSearch?: string; active?: boolean } = {}) {
   const { toast } = useToast()
   const zone = useZone()
   const [items, setItems] = useState<MonitorLog[]>([])
@@ -617,9 +621,16 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
       })
   }, [run, gen, kind, page, pageSize, sortBy, sortDir, debouncedSearch])
 
+  // Auto-run when a control changes (kind/search/page/sort), and on arrival at
+  // this view. `active` is a dep so a hidden page reads nothing and a first
+  // visit loads immediately; `load` is a dep because a control change must
+  // re-read the logs (the gate only suppresses the run while off-screen). No
+  // loop risk: `load` is a useCallback whose deps are the stable `run`/`gen`
+  // plus the primitive control values.
   useEffect(() => {
+    if (!active) return
     void load()
-  }, [load])
+  }, [active, load])
 
   // Sync an external search (Ctrl+K palette) into the local search box.
   useEffect(() => {

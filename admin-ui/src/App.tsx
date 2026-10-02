@@ -265,6 +265,7 @@ function AppRoutes() {
           {visited.has("dashboard") && (
             <div hidden={view !== "dashboard"}>
               <DashboardPage
+                active={view === "dashboard"}
                 remaining={remaining}
                 intervalSec={intervalSec}
                 status={status}
@@ -277,52 +278,52 @@ function AppRoutes() {
           )}
           {visited.has("query") && (
             <div hidden={view !== "query"}>
-              <QueryPage onNavigate={handleNavigate} />
+              <QueryPage onNavigate={handleNavigate} active={view === "query"} />
             </div>
           )}
           {visited.has("patterns") && (
             <div hidden={view !== "patterns"}>
-              <PatternTable externalSearch={patternSearch} />
+              <PatternTable externalSearch={patternSearch} active={view === "patterns"} />
             </div>
           )}
           {visited.has("findings") && (
             <div hidden={view !== "findings"}>
-              <FindingsPage initialSearch={findingsSearch} onNavigate={handleNavigate} />
+              <FindingsPage initialSearch={findingsSearch} onNavigate={handleNavigate} active={view === "findings"} />
             </div>
           )}
           {visited.has("blacklist") && (
             <div hidden={view !== "blacklist"}>
-              <BlacklistPage />
+              <BlacklistPage active={view === "blacklist"} />
             </div>
           )}
           {visited.has("jaillist") && (
             <div hidden={view !== "jaillist"}>
-              <JaillistPage />
+              <JaillistPage active={view === "jaillist"} />
             </div>
           )}
           {visited.has("redirects") && (
             <div hidden={view !== "redirects"}>
-              <RedirectsPage />
+              <RedirectsPage active={view === "redirects"} />
             </div>
           )}
           {visited.has("logs") && (
             <div hidden={view !== "logs"}>
-              <LogsPage externalSearch={logsSearch} />
+              <LogsPage externalSearch={logsSearch} active={view === "logs"} />
             </div>
           )}
           {visited.has("host") && (
             <div hidden={view !== "host"}>
-              <HostInspectorPage onNavigate={handleNavigate} />
+              <HostInspectorPage onNavigate={handleNavigate} active={view === "host"} />
             </div>
           )}
           {visited.has("url") && (
             <div hidden={view !== "url"}>
-              <UrlInvestigationPage onNavigate={handleNavigate} />
+              <UrlInvestigationPage onNavigate={handleNavigate} active={view === "url"} />
             </div>
           )}
           {visited.has("analytics") && (
             <div hidden={view !== "analytics"}>
-              <AnalyticsPage onNavigate={handleNavigate} />
+              <AnalyticsPage onNavigate={handleNavigate} active={view === "analytics"} />
             </div>
           )}
           {visited.has("attck-fleet") && (

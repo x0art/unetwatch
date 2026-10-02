@@ -564,7 +564,11 @@ function TimelineChart({ points }: { points: { bucket: string; count: number }[]
 
 /* ── Page ───────────────────────────────────────────────────────────── */
 
-export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void } = {}) {
+// WHY active: App.tsx keeps every visited page mounted behind a CSS `hidden`
+// wrapper, so a hidden Query page would keep its mount fetch and poll firing.
+// `active` (the current in-app view) gates that work; it defaults to true so
+// the page behaves identically before App.tsx passes the prop.
+export function QueryPage({ onNavigate, active = true }: { onNavigate?: (view: "host" | "patterns" | "analytics" | "dashboard" | "query" | "findings" | "blacklist" | "redirects" | "logs" | "url") => void; active?: boolean } = {}) {
   const { toast } = useToast()
   const { viewMode, setViewMode, setGlobalFilter, timeRange, setTimeRange } = useFilter()
   const [whitelistMode, setWhitelistMode] = useState<"include" | "exclude">("include")
@@ -575,6 +579,9 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
 
   // Jailed client IPs for the per-row badge — best-effort, rows render regardless.
   useEffect(() => {
+    // An inactive page performs no work: gate the badge fetch on the view so a
+    // hidden Query page does not hit the jaillist on mount. Re-runs on arrival.
+    if (!active) return
     let cancelled = false
     getJaillistSet()
       .then((res) => {
@@ -589,7 +596,7 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [active])
   const [esSearch, setEsSearch] = useState("")
   const debouncedEsSearch = useDebounce(esSearch, 400)
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -687,12 +694,21 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
     }
   }, [timeRange, whitelistMode, blacklistMode, debouncedEsSearch, viewMode])
 
-  // Auto-run when the ES-level filter or whitelist mode changes.
-  useEffect(() => fetchQuery(), [fetchQuery])
+  // Auto-run when a filter changes, and on arrival at this view. `active` is a
+  // dep so a hidden page runs nothing and a first visit fires immediately;
+  // `fetchQuery` is a dep because a filter change must re-run the query (the
+  // gate only suppresses the run while the view is off-screen). No loop risk:
+  // `fetchQuery` is a useCallback over five primitives, so it changes only when
+  // one of them actually changes.
+  useEffect(() => {
+    if (!active) return
+    fetchQuery()
+  }, [active, fetchQuery])
 
-  // Auto-refresh — every 30s by default when the tab is visible; skips when
-  // hidden so background tabs don't hammer ES. Persists per-key in localStorage.
-  const { refreshSeconds: _queryRefresh } = useAutoRefresh(fetchQuery, "query", 0)
+  // Auto-refresh — only while this view is on screen; an inactive app-view
+  // clears the interval entirely so a hidden page holds no timer. Persists
+  // per-key in localStorage.
+  const { refreshSeconds: _queryRefresh } = useAutoRefresh(fetchQuery, "query", 0, active)
   void _queryRefresh
 
   const handleRun = () => fetchQuery()
