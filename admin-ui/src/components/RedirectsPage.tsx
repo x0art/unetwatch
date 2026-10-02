@@ -387,6 +387,12 @@ export function RedirectsPage({ active = true }: { active?: boolean } = {}) {
   // Not user-keyed (fixed params) but still overlappable via `reload`; the
   // abort+generation keep a slow first graph from clobbering a fresher one.
   const runGraph = useAbortable()
+
+  // Own abort point for the history dialog: reopening or hitting Retry
+  // supersedes the previous read instead of letting two overlap and a stale
+  // one win. Independence from `runTable`/`runGraph` keeps a dialog read from
+  // aborting (or being aborted by) either list read.
+  const runHistory = useAbortable()
   const { next: graphNext, isCurrent: graphCurrent } = useGeneration()
   const graphLoadedRef = useRef(false)
   const loadGraph = useCallback(() => {
@@ -653,8 +659,13 @@ export function RedirectsPage({ active = true }: { active?: boolean } = {}) {
     setHistoryLoading(true)
     setHistoryError(null)
     try {
-      setHistory(await getUrlRedirectHistory(target.id))
+      // A new open/Retry aborts the previous history read; AbortError is
+      // swallowed by useAbortable to `undefined`, so a superseded open paints
+      // nothing and cannot overwrite the newer one's edges.
+      const data = await runHistory((signal) => getUrlRedirectHistory(target.id, { signal }))
+      if (data !== undefined) setHistory(data)
     } catch (e) {
+      if ((e as Error).name === "AbortError") return
       setHistoryError((e as Error).message)
       toast({ title: "Failed to load history", description: (e as Error).message, variant: "error" })
     } finally {
