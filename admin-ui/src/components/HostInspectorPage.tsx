@@ -377,8 +377,8 @@ export function HostInspectorPage({
   // neither elapsed figure inherits a previous read's clock.
   const [loadingStartedAt, setLoadingStartedAt] = useState<number | undefined>(undefined)
   const [sectionsStartedAt, setSectionsStartedAt] = useState<number | undefined>(undefined)
-  useElapsed(loading)
-  useElapsed(sectionsLoading)
+  useElapsed(loading, undefined, active)
+  useElapsed(sectionsLoading, undefined, active)
 
   // One shared abort point for every user-keyed read on this page — the host
   // lookup, the report/sections toggles and the raw-findings search. A faster
@@ -388,7 +388,11 @@ export function HostInspectorPage({
   // render over the host the operator just selected (the audit's "Highest"
   // race site).
   const run = useAbortable()
-  const gen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `fetchRaw` (and everything that reads it) new on
+  // every render, refetching in a loop. `next`/`isCurrent` are stable.
+  const { next: genNext, isCurrent: genCurrent } = useGeneration()
   // The selector a read was issued for, so a late response can be dropped when
   // the operator has since moved to a different host/target.
   const selectorRef = useRef("")
@@ -444,18 +448,18 @@ export function HostInspectorPage({
     if (hSource === "findings") {
       // A toggle supersedes anything in flight, so claim the generation here
       // too: a slow report must not land after the operator flipped back.
-      const g = gen.next()
+      const g = genNext()
       setReportLoading(true)
       setLoadingStartedAt(Date.now())
       const selected = (host as unknown as { primaryIp: string }).primaryIp || target
       void run((signal) => getClientReport(selected, { signal }))
         .then((data) => {
-          if (data === undefined || !gen.isCurrent(g)) return
+          if (data === undefined || !genCurrent(g)) return
           setReport(data)
           if (data.has_data) setRawPage(0)
         })
         .catch((e) => {
-          if (!gen.isCurrent(g)) return
+          if (!genCurrent(g)) return
           if ((e as Error).name === "AbortError") return
           // Never blank a report already on screen on a failed refetch. Read
           // through the ref: `report` is deliberately absent from this effect's
@@ -465,7 +469,7 @@ export function HostInspectorPage({
           toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
         })
         .finally(() => {
-          if (gen.isCurrent(g)) setReportLoading(false)
+          if (genCurrent(g)) setReportLoading(false)
         })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -476,22 +480,22 @@ export function HostInspectorPage({
   useEffect(() => {
     if (!host || loading) return
     if (hSource === "live" && !sections) {
-      const g = gen.next()
+      const g = genNext()
       setSectionsLoading(true)
       setSectionsStartedAt(Date.now())
       const ip = (host as unknown as { primaryIp: string }).primaryIp || target
       void run((signal) => fetchHostSections(ip, timeRange, "live", signal))
         .then((data) => {
-          if (data === undefined || !gen.isCurrent(g)) return
+          if (data === undefined || !genCurrent(g)) return
           setSections(data)
         })
         .catch((e) => {
-          if (!gen.isCurrent(g)) return
+          if (!genCurrent(g)) return
           if ((e as Error).name === "AbortError") return
           setSections({ ...EMPTY_SECTIONS, window: timeRange })
         })
         .finally(() => {
-          if (gen.isCurrent(g)) setSectionsLoading(false)
+          if (genCurrent(g)) setSectionsLoading(false)
         })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -511,16 +515,16 @@ export function HostInspectorPage({
   useEffect(() => {
     if (!host || loading) return
     // Keyed on the host/time-range pair: a newer pair supersedes this read.
-    const g = gen.next()
+    const g = genNext()
     setDomainMatch(null)
     const ip = host.primaryIp || target
     void runDomainMatch((signal) => getHostProfile(ip, timeRange, { signal }))
       .then((profile) => {
-        if (profile === undefined || !gen.isCurrent(g)) return
+        if (profile === undefined || !genCurrent(g)) return
         setDomainMatch(readDomainMatch(profile.risk))
       })
       .catch(() => {
-        if (gen.isCurrent(g)) setDomainMatch(null)
+        if (genCurrent(g)) setDomainMatch(null)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host, timeRange])
@@ -536,11 +540,11 @@ export function HostInspectorPage({
     const data = await run((signal) => fetchHostSections(clean, timeRange, hSource, signal))
     // Superseded by a newer lookup/toggle, or aborted (undefined) — a newer
     // invocation owns the section state now.
-    if (data === undefined || !gen.isCurrent(g)) return
+    if (data === undefined || !genCurrent(g)) return
     // Stale-target guard: only paint if the operator is still on this host.
     if (clean === selectorRef.current) setSections(data)
     setSectionsLoading(false)
-  }, [run, gen, timeRange, hSource])
+  }, [run, genCurrent, timeRange, hSource])
 
   const lookup = async (ip: string) => {
     const clean = ip.trim()
@@ -549,7 +553,7 @@ export function HostInspectorPage({
       return
     }
     // Newest invocation wins; this aborts the previous lookup's in-flight read.
-    const g = gen.next()
+    const g = genNext()
     selectorRef.current = clean
     setLoading(true)
     setLoadingStartedAt(Date.now())
@@ -560,7 +564,7 @@ export function HostInspectorPage({
     setSectionsLoading(false)
     setReportLoading(false)
     const profile = await run((signal) => getHostProfile(clean, timeRange, { signal }))
-    if (profile === undefined || !gen.isCurrent(g)) return
+    if (profile === undefined || !genCurrent(g)) return
     setHost(profile)
     setLoading(false)
 
@@ -569,17 +573,17 @@ export function HostInspectorPage({
       setReportLoading(true)
       try {
         const data = await run((signal) => getClientReport(clean, { signal }))
-        if (data === undefined || !gen.isCurrent(g)) return
+        if (data === undefined || !genCurrent(g)) return
         setReport(data)
         setRawPage(0)
       } catch (e) {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         setReport(null)
         setError((e as Error).message || "Report failed")
         toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
       }
-      if (gen.isCurrent(g)) setReportLoading(false)
+      if (genCurrent(g)) setReportLoading(false)
     } else {
       // Live branch: sections load independently so the entity card paints immediately.
       await fetchSections(clean, g)
@@ -593,7 +597,7 @@ export function HostInspectorPage({
   const fetchRaw = useCallback(async () => {
     if (!report?.client_ip || !report.has_data) return
     // Newest search/page wins; a superseded raw read is aborted below.
-    const g = gen.next()
+    const g = genNext()
     const isFirstLoad = !rawLoadedRef.current
     setRawLoading(true)
     setRawError(null)
@@ -605,12 +609,12 @@ export function HostInspectorPage({
           offset: rawPage * rawPageSize,
         }, { signal }),
       )
-      if (res === undefined || !gen.isCurrent(g)) return
+      if (res === undefined || !genCurrent(g)) return
       setRaw(res.items)
       setRawTotal(res.total)
       rawLoadedRef.current = true
     } catch (e) {
-      if (!gen.isCurrent(g)) return
+      if (!genCurrent(g)) return
       if ((e as Error).name === "AbortError") return
       // Never blank good rows on a FAILED refetch; a failed first load may reset.
       if (isFirstLoad) {
@@ -621,9 +625,9 @@ export function HostInspectorPage({
       setRawError(msg)
       toast({ title: "Raw findings failed", description: msg, variant: "error" })
     } finally {
-      if (gen.isCurrent(g)) setRawLoading(false)
+      if (genCurrent(g)) setRawLoading(false)
     }
-  }, [runRaw, gen, report, rawSearch, rawPage, toast])
+  }, [runRaw, genNext, genCurrent, report, rawSearch, rawPage, toast])
 
   useEffect(() => { void fetchRaw() }, [fetchRaw])
 
@@ -1153,7 +1157,7 @@ export function HostInspectorPage({
       {showSections && (
         <>
           {sectionsError && (
-            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target, gen.next()) }}>Retry</Button>}>
+            <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target, genNext()) }}>Retry</Button>}>
               {sectionsError}
             </Callout>
           )}

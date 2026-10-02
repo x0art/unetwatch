@@ -114,7 +114,11 @@ export function UrlInvestigationPage({
   // spinner, because a superseded invocation (already resolving to undefined)
   // would otherwise blank the spinner the newer one set. Only the newest
   // invocation owns loading/result/error and releases the spinner.
-  const gen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `investigate` new on every render and churn the
+  // identity of everything downstream of it. `next`/`isCurrent` are stable.
+  const { next: genNext, isCurrent: genCurrent } = useGeneration()
   const investigate = useCallback(async (target: string) => {
     const trimmed = target.trim()
     if (!trimmed) {
@@ -127,7 +131,7 @@ export function UrlInvestigationPage({
     // Claim a generation for this invocation; a later investigate (or a
     // globalFilter change) supersedes it, so this read's terminal paths are
     // ignored even if they land after — the newer invocation then owns loading.
-    const g = gen.next()
+    const g = genNext()
     setLoading(true)
     setError(null)
     setSearched(trimmed)
@@ -139,7 +143,7 @@ export function UrlInvestigationPage({
       )
       // A newer invocation superseded us: it owns loading/result/error now,
       // so touch nothing or we would blank its spinner.
-      if (!gen.isCurrent(g)) return
+      if (!genCurrent(g)) return
       // Aborted while still current: no newer owner will clear it, so release
       // the spinner here — the read is over and the button must be usable.
       if (res === undefined) {
@@ -151,7 +155,7 @@ export function UrlInvestigationPage({
       setLoading(false)
     } catch (e) {
       // A newer invocation owns the state; leave its spinner untouched.
-      if (!gen.isCurrent(g)) return
+      if (!genCurrent(g)) return
       // A bare abort must never surface as a user-visible error.
       if ((e as Error).name === "AbortError") {
         setLoading(false)
@@ -164,7 +168,7 @@ export function UrlInvestigationPage({
       setResult(null)
       setLoading(false)
     }
-  }, [runBreakdown, gen, toast, uSource])
+  }, [runBreakdown, genNext, genCurrent, toast, uSource])
 
   // Auto-investigate an incoming URL — Host Inspector's "Top URLs" and the
   // Ctrl+K palette navigate here with the URL in the global filter. Re-runs on

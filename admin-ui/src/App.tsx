@@ -328,17 +328,17 @@ function AppRoutes() {
           )}
           {visited.has("attck-fleet") && (
             <div hidden={view !== "attck-fleet"}>
-              <AttckFleetPage onNavigate={handleNavigate} />
+              <AttckFleetPage onNavigate={handleNavigate} active={view === "attck-fleet"} />
             </div>
           )}
           {visited.has("report-host") && (
             <div hidden={view !== "report-host"}>
-              <ReportPage kind="host" value={globalFilter} onBack={() => handleNavigate("host")} />
+              <ReportPage kind="host" value={globalFilter} onBack={() => handleNavigate("host")} active={view === "report-host"} />
             </div>
           )}
           {visited.has("report-url") && (
             <div hidden={view !== "report-url"}>
-              <ReportPage kind="url" value={globalFilter} onBack={() => handleNavigate("url")} />
+              <ReportPage kind="url" value={globalFilter} onBack={() => handleNavigate("url")} active={view === "report-url"} />
             </div>
           )}
         </Suspense>

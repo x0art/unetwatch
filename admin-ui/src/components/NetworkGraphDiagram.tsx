@@ -231,6 +231,15 @@ export function NetworkGraphDiagram({
 
   const prev = useRef<{ nodes: NetworkNode[]; links: NetworkLink[] } | null>(null)
   const prevPalette = useRef<ResolvedColors["palette"] | null>(null)
+  // Pending `handleFitView` settle timeout. Held so an unmount can clear it —
+  // otherwise it fires after the chart is disposed and touches a dead instance.
+  const fitTimerRef = useRef<number | null>(null)
+
+  // Clear the fit-view timeout on unmount (the chart is disposed by the init
+  // effect's own cleanup just above).
+  useEffect(() => () => {
+    if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current)
+  }, [])
 
   // ── Init: create chart, ensure correct dimensions, then dispose on unmount ──
   useEffect(() => {
@@ -358,7 +367,9 @@ export function NetworkGraphDiagram({
     )
     chart.getZr().flush()
     const settleTime = reduced ? 0 : 500
-    setTimeout(() => {
+    if (fitTimerRef.current != null) window.clearTimeout(fitTimerRef.current)
+    fitTimerRef.current = window.setTimeout(() => {
+      fitTimerRef.current = null
       chart.resize()
       applyView(chart, 0.85)
       chart.getZr().flush()

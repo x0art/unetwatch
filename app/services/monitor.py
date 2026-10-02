@@ -92,8 +92,17 @@ async def get_whitelist_patterns(db) -> list[str]:
 
 # ── In-process TTL cache ───────────────────────────────────────────────────
 
+# NOTE: this cache is keyed by, among other things, the free-text `search`
+# parameter and the per-client `client_ip`, so the key space is unbounded
+# (ordinary Query-page use mints a new key per distinct search/IP). Entries
+# MUST therefore be evicted, not merely treated as misses once stale — hence
+# the hard `_QUERY_CACHE_MAX_ENTRIES` bound below in addition to the TTL.
 _query_cache: dict[str, tuple[float, dict]] = {}
 _QUERY_TTL_S = 2.0
+# Hard cap on retained entries. The TTL is only 2s, so a few hundred entries is
+# ample for coalescing bursts of identical reads while keeping memory bounded
+# even for keys that are written once and never read again.
+_QUERY_CACHE_MAX_ENTRIES = 256
 
 
 def _query_cache_key(
@@ -117,6 +126,41 @@ def _query_cache_key(
             "|".join(whitelist_patterns),
         ]
     )
+
+
+def _cache_set(key: str, value: tuple[float, dict]) -> None:
+    """Store a cache entry, keeping the store bounded.
+
+    Expired entries are dropped first; if the cache is still at capacity the
+    oldest entries are evicted (by insert timestamp, not dict order) so the
+    store can never grow past ``_QUERY_CACHE_MAX_ENTRIES``.
+    """
+    now = time.monotonic()
+    for stale_key in [
+        k for k, (ts, _) in _query_cache.items() if now - ts >= _QUERY_TTL_S
+    ]:
+        _query_cache.pop(stale_key, None)
+    if len(_query_cache) >= _QUERY_CACHE_MAX_ENTRIES:
+        overflow = len(_query_cache) - _QUERY_CACHE_MAX_ENTRIES + 1
+        for old_key, _ in sorted(_query_cache.items(), key=lambda kv: kv[1][0])[
+            :overflow
+        ]:
+            _query_cache.pop(old_key, None)
+    _query_cache[key] = value
+
+
+def _cache_get(key: str) -> dict | None:
+    """Return a shallow copy of a fresh cache entry, or None on miss.
+
+    A stale entry is deleted on lookup so keys that *are* re-read do not linger.
+    """
+    hit = _query_cache.get(key)
+    if hit is None:
+        return None
+    if time.monotonic() - hit[0] >= _QUERY_TTL_S:
+        _query_cache.pop(key, None)
+        return None
+    return dict(hit[1])
 
 
 def _invalidate_query_cache() -> None:
@@ -185,9 +229,9 @@ async def run_client_query(
     cache_key = _client_query_cache_key(
         ip, minutes, search, limit, block_patterns, whitelist_patterns
     )
-    hit = _query_cache.get(cache_key)
-    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
-        return dict(hit[1])
+    hit = _cache_get(cache_key)
+    if hit is not None:
+        return hit
 
     try:
         if not block_patterns:
@@ -242,7 +286,7 @@ async def run_client_query(
             for u, c in counts.items()
         ]
     finally:
-        _query_cache[cache_key] = (time.monotonic(), result)
+        _cache_set(cache_key, (time.monotonic(), result))
     return result
 
 
@@ -294,9 +338,9 @@ async def run_query(
         whitelist_patterns,
         client_ip,
     )
-    hit = _query_cache.get(cache_key)
-    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
-        return dict(hit[1])
+    hit = _cache_get(cache_key)
+    if hit is not None:
+        return hit
 
     result = {
         "window_minutes": minutes,
@@ -401,7 +445,7 @@ async def run_query(
         from app.services.logs import write_log
 
         await write_log(log)
-        _query_cache[cache_key] = (time.monotonic(), result)
+        _cache_set(cache_key, (time.monotonic(), result))
     return result
 
 
@@ -450,9 +494,9 @@ async def run_all_query(
         whitelist_patterns,
         ip,
     )
-    hit = _query_cache.get(cache_key)
-    if hit is not None and time.monotonic() - hit[0] < _QUERY_TTL_S:
-        return dict(hit[1])
+    hit = _cache_get(cache_key)
+    if hit is not None:
+        return hit
 
     result = {
         "window_minutes": minutes,
@@ -543,7 +587,7 @@ async def run_all_query(
         from app.services.logs import write_log
 
         await write_log(log)
-        _query_cache[cache_key] = (time.monotonic(), result)
+        _cache_set(cache_key, (time.monotonic(), result))
     return result
 
 

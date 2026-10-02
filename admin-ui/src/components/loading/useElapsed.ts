@@ -60,11 +60,18 @@ export interface ElapsedState {
  *    accumulate ticks nor drift: on return we re-anchor the display to
  *    (now - startedAt). This is the deliberate behaviour — we keep the
  *    wall-clock reading honest on wake rather than pretending the read paused.
+ *  - `enabled` gates the ticker on the *in-app* view being visible. App keeps
+ *    every visited page mounted behind a CSS `hidden` wrapper, and `hidden`
+ *    does not stop JS: `document.visibilityState` stays "visible" for the
+ *    whole browser tab, so several parked pages could each run a 100ms
+ *    interval at 10Hz. Pass the page's `active`; when false the interval is
+ *    cleared outright (never merely skipped). Defaults to `true` so existing
+ *    callers are unchanged.
  *  - Strict-Mode safe: every effect invocation owns its interval and clears it
  *    on cleanup, so the double invoke mounts two timers and disposes exactly
  *    one — no leak, no double-count.
  */
-export function useElapsed(active: boolean, startedAt?: number): ElapsedState {
+export function useElapsed(active: boolean, startedAt?: number, enabled = true): ElapsedState {
   const visible = usePageVisible()
   const [elapsedMs, setElapsedMs] = useState(0)
   // The anchor this hook actually measures from. Held in a ref so the ticking
@@ -73,7 +80,7 @@ export function useElapsed(active: boolean, startedAt?: number): ElapsedState {
   const anchorRef = useRef(0)
 
   useEffect(() => {
-    if (!active) {
+    if (!active || !enabled) {
       setElapsedMs(0)
       return
     }
@@ -96,7 +103,7 @@ export function useElapsed(active: boolean, startedAt?: number): ElapsedState {
     }
     const id = window.setInterval(tick, anchorRef.current && Date.now() - anchor > SLOW_AFTER_MS ? SLOW_TICK_MS : TICK_MS)
     return () => window.clearInterval(id)
-  }, [active, startedAt, visible])
+  }, [active, startedAt, visible, enabled])
 
   // Reset the anchor whenever the operation goes idle, so the next read
   // measures from its own start rather than a stale past instant.

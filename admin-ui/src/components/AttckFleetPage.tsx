@@ -195,9 +195,13 @@ const FLEET_HOST_COLUMNS: DataTableColumn<FleetHostSummary>[] = [
 interface Props {
   /** Clicking a host row drills into that host's investigation page. */
   onNavigate?: (view: "host") => void
+  /** Hidden (previously visited) tabs stay mounted and CSS `hidden` does not
+   *  stop JS, so the mount fetch must not fire until the view is shown. When
+   *  omitted the page behaves as before (always active). */
+  active?: boolean
 }
 
-export function AttckFleetPage({ onNavigate }: Props) {
+export function AttckFleetPage({ onNavigate, active = true }: Props) {
   const { setGlobalFilter } = useFilter()
   const [timeRange, setTimeRange] = useState("24h")
   const [mapping, setMapping] = useState<FleetMapping | null>(null)
@@ -231,30 +235,37 @@ export function AttckFleetPage({ onNavigate }: Props) {
   // the generation stops a slow earlier range from overwriting a faster newer
   // one. Without this a quick 24h→7d flip could paint the 24h fleet under 7d.
   const runFleet = useAbortable()
-  const fleetGen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `fetchFleet` (and thus the mount effect) new on
+  // every render and refetch in a loop. `next`/`isCurrent` are stable.
+  const { next: fleetNext, isCurrent: fleetCurrent } = useGeneration()
   const fetchFleet = useCallback(() => {
-    const g = fleetGen.next()
+    const g = fleetNext()
     setLoading(true)
     setError(null)
     return runFleet((signal) => getFleetAttckMapping({ timeRange }, { signal }))
       .then((data) => {
-        if (data === undefined || !fleetGen.isCurrent(g)) return
+        if (data === undefined || !fleetCurrent(g)) return
         setMapping(data)
       })
       .catch((e: unknown) => {
-        if (!fleetGen.isCurrent(g)) return
+        if (!fleetCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         setMapping(null)
         setError(e instanceof Error ? e.message : "Request failed")
       })
       .finally(() => {
-        if (fleetGen.isCurrent(g)) setLoading(false)
+        if (fleetCurrent(g)) setLoading(false)
       })
-  }, [runFleet, fleetGen, timeRange])
+  }, [runFleet, fleetNext, fleetCurrent, timeRange])
 
+  // Gate the mount fetch on `active`: a hidden parked page must fire no read.
+  // `fetchFleet` stays in deps so a time-range change still refetches.
   useEffect(() => {
-    fetchFleet()
-  }, [fetchFleet])
+    if (!active) return
+    void fetchFleet()
+  }, [active, fetchFleet])
 
   const suppressed = useMemo(
     () => (mapping?.suppressed ?? []).filter((s) => !!s?.id && !!s?.reason),

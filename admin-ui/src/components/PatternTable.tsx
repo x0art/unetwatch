@@ -166,8 +166,12 @@ export function PatternTable({ externalSearch, active = true }: { externalSearch
   // Orders competing reads: a later search/filter/page/sort change claims a
   // newer generation, so this read's terminal paths are ignored even if they
   // land after — the newer invocation then owns loading/data/error.
-  const gen = useGeneration()
-  const { elapsed } = useElapsed(loading)
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `fetchPatterns` (and thus the mount effect) new
+  // on every render and refetch in a loop. `next`/`isCurrent` are stable.
+  const { next: genNext, isCurrent: genCurrent } = useGeneration()
+  const { elapsed } = useElapsed(loading, undefined, active)
 
   // ── Edit dialog ──
   const [editOpen, setEditOpen] = useState(false)
@@ -201,7 +205,7 @@ export function PatternTable({ externalSearch, active = true }: { externalSearch
   /* ── Data fetching ──────────────────────────────────────────────── */
   const fetchPatterns = useCallback(async () => {
     // Claim a generation for this invocation; a later one supersedes it.
-    const g = gen.next()
+    const g = genNext()
     setLoading(true)
     setLoadingStartedAt(Date.now())
     setError(null)
@@ -220,7 +224,7 @@ export function PatternTable({ externalSearch, active = true }: { externalSearch
       )
       // A newer invocation superseded us: it owns loading/data/error now, so
       // touch nothing or we would blank its spinner.
-      if (!gen.isCurrent(g)) return
+      if (!genCurrent(g)) return
       // Aborted while still current: no newer owner will clear it, so release
       // the spinner here — the read is over and Retry must be reachable.
       if (data === undefined) {
@@ -234,7 +238,7 @@ export function PatternTable({ externalSearch, active = true }: { externalSearch
       setLoading(false)
     } catch (e) {
       // A newer invocation owns the state; leave its spinner untouched.
-      if (!gen.isCurrent(g)) return
+      if (!genCurrent(g)) return
       // A bare abort must never surface as a user-visible error.
       if ((e as Error).name === "AbortError") {
         setLoading(false)
@@ -246,14 +250,15 @@ export function PatternTable({ externalSearch, active = true }: { externalSearch
       setError((e as Error).message)
       setLoading(false)
     }
-  }, [run, gen, debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
+  }, [run, genNext, genCurrent, debouncedSearch, filterType, page, pageSize, sortBy, sortDir])
 
   // Auto-run when a control changes (search/filter/page/sort), and on arrival
   // at this view. `active` is a dep so a hidden page reads nothing and a first
   // visit loads immediately; `fetchPatterns` is a dep because a control change
   // must re-read the list (the gate only suppresses the run while off-screen).
   // No loop risk: `fetchPatterns` is a useCallback whose deps are the stable
-  // `run`/`gen` plus the primitive control values.
+  // `run` plus the destructured generation functions and the primitive control
+  // values.
   useEffect(() => {
     if (!active) return
     fetchPatterns()

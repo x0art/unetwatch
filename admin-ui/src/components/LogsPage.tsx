@@ -574,16 +574,20 @@ export function LogsPage({ externalSearch, active = true }: { externalSearch?: s
   // page, kind, search, sort or an explicit Refresh — keep the rows mounted and
   // surface the quiet banner instead, so a populated table never flickers.
   const loadedRef = useRef(false)
-  const { elapsed } = useElapsed(loading)
+  const { elapsed } = useElapsed(loading, undefined, active)
 
   // User-keyed READ (kind/search/page/sort). A newer load aborts the previous
   // one and the generation drops a slow earlier load that lands after a newer
   // one — the `cancelled` flag alone only suppresses setState on cleanup, which
   // never runs for the post-mutation refetches above.
   const run = useAbortable()
-  const gen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `load` (and thus the mount effect) new on every
+  // render and refetch in a loop. `next`/`isCurrent` are stable.
+  const { next: genNext, isCurrent: genCurrent } = useGeneration()
   const load = useCallback(() => {
-    const g = gen.next()
+    const g = genNext()
     const isFirstLoad = !loadedRef.current
     setLoading(true)
     setLoadingStartedAt(Date.now())
@@ -599,12 +603,12 @@ export function LogsPage({ externalSearch, active = true }: { externalSearch?: s
       }, { signal }),
     )
       .then((data) => {
-        if (data === undefined || !gen.isCurrent(g)) return
+        if (data === undefined || !genCurrent(g)) return
         setItems(data.items)
         setTotal(data.total)
       })
       .catch((e) => {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         // Never blank good rows on a FAILED refetch; a failed first load has
         // nothing to keep, so it may still reset (§4.6 never-blank).
@@ -615,18 +619,18 @@ export function LogsPage({ externalSearch, active = true }: { externalSearch?: s
         setLoadError((e as Error).message)
       })
       .finally(() => {
-        if (!gen.isCurrent(g)) return
+        if (!genCurrent(g)) return
         loadedRef.current = true
         setLoading(false)
       })
-  }, [run, gen, kind, page, pageSize, sortBy, sortDir, debouncedSearch])
+  }, [run, genNext, genCurrent, kind, page, pageSize, sortBy, sortDir, debouncedSearch])
 
   // Auto-run when a control changes (kind/search/page/sort), and on arrival at
   // this view. `active` is a dep so a hidden page reads nothing and a first
   // visit loads immediately; `load` is a dep because a control change must
   // re-read the logs (the gate only suppresses the run while off-screen). No
-  // loop risk: `load` is a useCallback whose deps are the stable `run`/`gen`
-  // plus the primitive control values.
+  // loop risk: `load` is a useCallback whose deps are the stable `run` plus the
+  // destructured generation functions and the primitive control values.
   useEffect(() => {
     if (!active) return
     void load()

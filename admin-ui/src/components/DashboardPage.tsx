@@ -150,25 +150,29 @@ export function DashboardPage({
   // the poll tick honest — useAutoRefresh discards a callback's cleanup, so an
   // abort alone cannot await a superseded read there.
   const runRecent = useAbortable()
-  const recentGen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, so
+  // depending on it would make `fetchRecent` (and thus the mount effect and the
+  // auto-refresh callback) new on every render, re-arming the interval.
+  const { next: recentNext, isCurrent: recentCurrent } = useGeneration()
   const recentLoadedRef = useRef(false)
 
   // Returns its promise so useAutoRefresh can skip a tick while this read is
   // pending (a poll tick must skip, never overlap).
   const fetchRecent = useCallback(() => {
-    const g = recentGen.next()
+    const g = recentNext()
     const isFirstLoad = !recentLoadedRef.current
     setRecentLoading(true)
     setRecentError(null)
     setRecentLoadingStartedAt(Date.now())
     return runRecent((signal) => getFindings({ limit: 5 }, { signal }))
       .then((data) => {
-        if (data === undefined || !recentGen.isCurrent(g)) return
+        if (data === undefined || !recentCurrent(g)) return
         setRecentFindings(data.items)
         recentLoadedRef.current = true
       })
       .catch((e) => {
-        if (!recentGen.isCurrent(g)) return
+        if (!recentCurrent(g)) return
         if ((e as Error).name === "AbortError") return
         // Never blank the recent list on a FAILED refetch; a failed first load
         // has nothing to keep, so it may still reset (§4.6 never-blank).
@@ -177,18 +181,18 @@ export function DashboardPage({
         toast({ title: "Failed to load recent findings", variant: "error" })
       })
       .finally(() => {
-        if (recentGen.isCurrent(g)) setRecentLoading(false)
+        if (recentCurrent(g)) setRecentLoading(false)
       })
-  }, [runRecent, recentGen, toast])
+  }, [runRecent, recentNext, recentCurrent, toast])
 
   useEffect(() => {
     // Same active gate as the count reads: the recent-findings read is the
-    // third hidden-page poll source. `fetchRecent` stays stable (generation
-    // refs + toast), so it is intentionally not a dep.
+    // third hidden-page poll source. `fetchRecent` is stable (`runRecent` +
+    // the destructured generation fns + toast), so a control change cannot
+    // silently skip the re-read; keep it in deps for completeness.
     if (!active) return
     void fetchRecent()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active])
+  }, [active, fetchRecent])
 
   // Returns the findings promise so useAutoRefresh's in-flight skip actually
   // engages: a `{}` body (returning undefined) left the flag unset, so 60s

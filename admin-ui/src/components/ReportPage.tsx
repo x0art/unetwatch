@@ -35,6 +35,10 @@ interface Props {
   kind: "host" | "url"
   value: string
   onBack: () => void
+  /** Hidden (previously visited) tabs stay mounted and CSS `hidden` does not
+   *  stop JS, so the mount fetch must not fire until the view is shown. When
+   *  omitted the page behaves as before (always active). */
+  active?: boolean
 }
 
 type SectionState<T> = {
@@ -299,7 +303,7 @@ function RiskSummaryBody({ profile }: { profile: HostProfile }) {
   )
 }
 
-export function ReportPage({ kind, value, onBack }: Props) {
+export function ReportPage({ kind, value, onBack, active = true }: Props) {
   const { toast } = useToast()
   const [generatedAt, setGeneratedAt] = useState(() => new Date().toISOString())
 
@@ -315,7 +319,11 @@ export function ReportPage({ kind, value, onBack }: Props) {
   // paint over the entity the operator just navigated to. Each section gets its
   // OWN abort point — the host branch fires three reads in the same tick, and a
   // single shared controller would have the later calls abort the earlier ones.
-  const sectionGen = useGeneration()
+  // Destructure the two STABLE useCallback functions rather than keeping the
+  // `useGeneration()` object: that object is a fresh literal every render, and
+  // it is a DIRECT dep of the effect below, so depending on it would re-run the
+  // effect — which calls `setGeneratedAt` — on every render: an infinite loop.
+  const { next: sectionNext, isCurrent: sectionCurrent } = useGeneration()
   const runProfile = useAbortable()
   const runReport = useAbortable()
   const runHostEnrich = useAbortable()
@@ -332,6 +340,9 @@ export function ReportPage({ kind, value, onBack }: Props) {
   }, [])
 
   useEffect(() => {
+    // A hidden parked page performs no work — no fetch, and critically no
+    // state write that would feed a re-render loop. Re-runs on arrival.
+    if (!active) return
     // Re-stamp on every refetch so the timestamp always belongs to the data
     // currently on screen (report views stay mounted; switching entity only
     // re-runs this effect).
@@ -340,14 +351,14 @@ export function ReportPage({ kind, value, onBack }: Props) {
     // localStorage with no ?q=) — never issue a fetch with an empty value.
     if (value.trim() === "") return
     // Supersede any in-flight read from the previous entity.
-    const g = sectionGen.next()
+    const g = sectionNext()
     if (kind === "host") {
       setProfile({ data: null, loading: true, error: null })
       setReport({ data: null, loading: true, error: null })
       setHostEnrich({ data: null, loading: true, error: null })
       void runProfile((signal) => getHostProfile(value, "24h", { signal }))
         .then((data) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           if (data === undefined) {
             setProfile({ data: null, loading: false, error: null })
             return
@@ -355,13 +366,13 @@ export function ReportPage({ kind, value, onBack }: Props) {
           setProfile({ data, loading: false, error: null })
         })
         .catch((e: unknown) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           const aborted = (e as Error).name === "AbortError"
           setProfile({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
         })
       void runReport((signal) => getClientReport(value, { signal }))
         .then((data) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           if (data === undefined) {
             setReport({ data: null, loading: false, error: null })
             return
@@ -369,13 +380,13 @@ export function ReportPage({ kind, value, onBack }: Props) {
           setReport({ data, loading: false, error: null })
         })
         .catch((e: unknown) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           const aborted = (e as Error).name === "AbortError"
           setReport({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
         })
       void runHostEnrich((signal) => getHostEnrichment(value, 3, { signal }))
         .then((data) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           if (data === undefined) {
             setHostEnrich({ data: null, loading: false, error: null })
             return
@@ -383,7 +394,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
           setHostEnrich({ data, loading: false, error: null })
         })
         .catch((e: unknown) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           const aborted = (e as Error).name === "AbortError"
           setHostEnrich({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
         })
@@ -392,7 +403,7 @@ export function ReportPage({ kind, value, onBack }: Props) {
       setUrlEnrich({ data: null, loading: true, error: null })
       void runBreakdown((signal) => getUrlBreakdown(value, { limit: 100, source: "findings" }, { signal }))
         .then((data) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           if (data === undefined) {
             setBreakdown({ data: null, loading: false, error: null })
             return
@@ -400,13 +411,13 @@ export function ReportPage({ kind, value, onBack }: Props) {
           setBreakdown({ data, loading: false, error: null })
         })
         .catch((e: unknown) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           const aborted = (e as Error).name === "AbortError"
           setBreakdown({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
         })
       void runUrlEnrich((signal) => getUrlEnrichment(value, 3, { signal }))
         .then((data) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           if (data === undefined) {
             setUrlEnrich({ data: null, loading: false, error: null })
             return
@@ -414,12 +425,12 @@ export function ReportPage({ kind, value, onBack }: Props) {
           setUrlEnrich({ data, loading: false, error: null })
         })
         .catch((e: unknown) => {
-          if (!sectionGen.isCurrent(g)) return
+          if (!sectionCurrent(g)) return
           const aborted = (e as Error).name === "AbortError"
           setUrlEnrich({ data: null, loading: false, error: aborted ? null : e instanceof Error ? e.message : "Request failed" })
         })
     }
-  }, [sectionGen, runProfile, runReport, runHostEnrich, runBreakdown, runUrlEnrich, kind, value])
+  }, [active, kind, value, runProfile, runReport, runHostEnrich, runBreakdown, runUrlEnrich, sectionCurrent, sectionNext])
 
   const handleCopy = useCallback(async () => {
     const ok = await copyText(`${kind}:${value} @ ${generatedAt}`)
