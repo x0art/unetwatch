@@ -33,6 +33,10 @@ import {
 } from "lucide-react"
 
 const DEFAULT_PAGE_SIZE = 50
+/* One module-scope formatter, reused for every row and render: constructing
+ * Intl.DateTimeFormat is expensive, so hoisting it avoids per-cell cost while
+ * keeping output identical to the previous toLocaleDateString() call. */
+const DATE_FMT = new Intl.DateTimeFormat(undefined)
 
 /* Module-level handles to component state, synced each render, so
  * PATTERNS_COLUMNS stays referentially stable at module scope while its
@@ -98,7 +102,7 @@ const PATTERNS_COLUMNS: DataTableColumn<Pattern>[] = [
     accessor: (p) => p.created_at,
     cell: (p) => (
       <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-        {p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}
+        {p.created_at ? DATE_FMT.format(new Date(p.created_at)) : "—"}
       </span>
     ),
     width: "w-28",

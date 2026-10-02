@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
   MotionConfig,
   animate,
@@ -52,6 +52,24 @@ export const staggerItemVariants: Variants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: EASE } },
 }
 
+/** Row/item budget for the per-child entrance stagger.
+ *
+ * The stagger is a first-paint *enhancement*, never a tax on a long table.
+ * At `staggerChildren: 0.05` (staggerVariants) the tail of an N-item list
+ * settles at roughly `N * 0.05s`: 40 items ≈ 2s worst case, which is the most
+ * we ever want the opening beat to cost. Past the cap the table must paint
+ * instantly — 200 rows would otherwise animate for ~10s and 1000 for ~50s,
+ * saturating the main thread and freezing the page (the Patterns-page hang).
+ * 40 also clears every pager page size up to the 25/50 that `Pagination`
+ * offers near the boundary without a cliff. */
+export const STAGGER_MAX_ITEMS = 40
+
+/** Whether the nearest <Stagger> child budget allows animating this child.
+ * Module-private (a plain `export` would add a `react(only-export-components)`
+ * warning): `Stagger` is the only writer, so the cap is decided in exactly one
+ * place and cannot drift between DataTable and SimpleTable. */
+const StaggerBudgetContext = createContext(true)
+
 type StaggerTag = "div" | "tbody" | "tr" | "ul"
 
 /** Parent that staggers its <StaggerItem> children into view.
@@ -62,16 +80,39 @@ export function Stagger({
   children,
   as = "div",
   className,
+  count,
 }: {
   children: ReactNode
   as?: StaggerTag
   className?: string
+  /** Number of children that will animate. Omit when unknown (e.g. an async
+   *  list) — only an explicit overflow over the cap disables the animation,
+   *  so a table that has not yet learned its length keeps its entrance. */
+  count?: number
 }) {
-  const Tag = motion[as]
+  // The single decision point for the row-count cap. Past budget the plain
+  // branch below passes ONLY `className` — handing motion props to a plain
+  // intrinsic tag would leak `initial="hidden"`, `animate="show"` and
+  // `variants="[object Object]"` onto the DOM and make React warn.
+  const animated = count === undefined || count <= STAGGER_MAX_ITEMS
+  const AnimatedTag = motion[as]
+  const PlainTag = as as keyof React.JSX.IntrinsicElements
   return (
-    <Tag className={className} initial="hidden" animate="show" variants={staggerVariants}>
-      {children}
-    </Tag>
+    <StaggerBudgetContext.Provider value={animated}>
+      {animated ? (
+        // `initial`/`animate`/`variants` on the parent drive the children:
+        // framer propagates variants through React context, so the <tr>
+        // children animate without a DOM wrapper (an extra <span> inside
+        // <tbody> would be foster-parented out of the table anyway).
+        <AnimatedTag className={className} initial="hidden" animate="show" variants={staggerVariants}>
+          {children}
+        </AnimatedTag>
+      ) : (
+        // Plain, un-animated element: same class/children, no motion props, so
+        // the rows are simply visible immediately and never left at opacity 0.
+        <PlainTag className={className}>{children}</PlainTag>
+      )}
+    </StaggerBudgetContext.Provider>
   )
 }
 
@@ -99,9 +140,32 @@ export function StaggerItem({
   role?: string
   title?: string
 }) {
-  const Tag = motion[as]
+  // Past the parent's cap this is a plain, immediately-visible element: no
+  // `initial`/`animate`/`variants` at all, so it cannot get stuck at
+  // `opacity: 0` waiting for an animation that will never run. Every DOM
+  // attribute and className is identical to the animated branch — only the
+  // motion wrapper differs.
+  const animated = useContext(StaggerBudgetContext)
+  if (!animated) {
+    const Tag = as as keyof React.JSX.IntrinsicElements
+    return (
+      <Tag
+        className={className}
+        onClick={onClick}
+        onKeyDown={onKeyDown}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        tabIndex={tabIndex}
+        role={role}
+        title={title}
+      >
+        {children}
+      </Tag>
+    )
+  }
+  const MotionTag = motion[as]
   return (
-    <Tag
+    <MotionTag
       className={className}
       onClick={onClick}
       onKeyDown={onKeyDown}
@@ -113,7 +177,7 @@ export function StaggerItem({
       variants={staggerItemVariants}
     >
       {children}
-    </Tag>
+    </MotionTag>
   )
 }
 

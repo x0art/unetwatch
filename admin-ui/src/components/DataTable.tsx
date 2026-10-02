@@ -1272,9 +1272,12 @@ export function DataTable<T>({
               </tr>
             </tbody>
           ) : (
-            // Stagger only the visible page of rows on first paint — never the
-            // full dataset (internalPagination keeps displayData ≤ page size).
-            <Stagger as="tbody">
+            // Stagger the rows only while the table is small enough for the
+            // entrance to read as an enhancement; `Stagger` owns the cap
+            // (`STAGGER_MAX_ITEMS`) and, past it, renders a plain <tbody> with
+            // identical classes, so the DOM — `cv-auto` row paint containment
+            // included — does not change with the row count.
+            <Stagger as="tbody" count={displayData.length}>
               {displayData.map((row) => {
                 const id = rowId(row)
                 const isSelected = selected.has(id)

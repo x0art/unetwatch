@@ -1264,7 +1264,7 @@ export function SimpleTable<T>({
           </tr>
         </tbody>
       ) : (
-        <Stagger as="tbody">
+        <Stagger as="tbody" count={data.length}>
           {data.map((row, index) => {
             const activate = onRowClick ? () => onRowClick(row) : undefined
             return (
