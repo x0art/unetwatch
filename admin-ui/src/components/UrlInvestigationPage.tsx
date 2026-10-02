@@ -300,9 +300,14 @@ export function UrlInvestigationPage({
             className="flex-1 min-w-[240px]"
             aria-label="URL to investigate"
           />
-          <Button type="submit" disabled={loading}>
+          {/* Fixed label + fixed min-width (sized for the longest label): the
+              box is identical in both states, so the spinner swaps into the
+              icon's own 4×4 cell without resizing the button or re-wrapping
+              this flex-wrap row. `aria-busy` announces the run without a
+              label flip. */}
+          <Button type="submit" className="min-w-[168px]" disabled={loading} aria-busy={loading}>
             {loading ? <LoadingIcon /> : <Search className="h-4 w-4" />}
-            {loading ? "Investigating..." : "Investigate"}
+            Investigate
           </Button>
           <div className="inline-flex rounded-md border border-border p-0.5" role="group" aria-label="Data source">
             <button type="button" onClick={() => setUSource("findings")} aria-pressed={uSource === "findings"} className={`rounded-sm px-2.5 py-1 text-[11px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${uSource === "findings" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>Findings</button>

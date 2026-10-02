@@ -1078,9 +1078,14 @@ export function HostInspectorPage({
             className="flex-1 min-w-[240px] font-mono text-[13px]"
             aria-label="Host or IP search"
           />
-          <Button onClick={() => lookup(target)} disabled={loading}>
+          {/* Fixed label + fixed min-width (sized for the longest label): the
+              box is identical in both states, so the spinner swaps into the
+              icon's own 4×4 cell without resizing the button or re-wrapping
+              this flex-wrap row. `aria-busy` announces the lookup without a
+              label flip. */}
+          <Button className="min-w-[150px]" onClick={() => lookup(target)} disabled={loading} aria-busy={loading}>
             {loading ? <LoadingIcon /> : <Search className="h-4 w-4" aria-hidden="true" />}
-            {loading ? "Looking up..." : "Lookup"}
+            Lookup
           </Button>
           <Select
             value={timeRange}
@@ -1139,18 +1144,24 @@ export function HostInspectorPage({
         <>
           {sectionsError && (
             <Callout action={<Button variant="outline" size="sm" onClick={() => { void fetchSections(target.trim() || target, gen.next()) }}>Retry</Button>}>
+              {sectionsError}
             </Callout>
           )}
           {/* Refetch (time-range change / Retry) with sections already loaded:
               keep every panel below mounted and report the read out loud. The
-              per-panel skeletons only appear on the first sections load. */}
-          {sectionsLoading && sections && (
+              slot is ALWAYS rendered (same rationale as QueryPage) so the
+              `space-y-5` child count never changes, and `mb-0` zeroes the gap
+              it would otherwise own — spacing matches having no slot at all.
+              The cue is `absolute`, adding no height. The per-panel skeletons
+              only appear on the first sections load. */}
+          <div className="relative mb-0">
             <LoadingIndicator
+              active={sectionsLoading && Boolean(sections)}
               label="Refreshing host sections"
               startedAt={sectionsStartedAt}
-              className="max-w-md"
+              className="absolute inset-x-0 top-0 z-10 max-w-md"
             />
-          )}
+          </div>
           {/* 1) Visual Traffic Timeline & Anomaly Heatmap */}
           <Panel
             title="Visual Traffic Timeline & Anomaly Heatmap"

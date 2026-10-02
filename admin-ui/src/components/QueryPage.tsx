@@ -34,6 +34,7 @@ import {
   Callout,
   CopyUrlButton,
   EmptyState,
+  HeaderStatus,
   IconButton,
   ListBadge,
   LoadingIcon,
@@ -889,24 +890,23 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
           </button>
         </div>
         {/* Quiet header status: what's happening and for how long, without a
-            toast or a layout shift. The banner below carries the announced
-            sentence; this mirror stays aria-hidden. */}
-        {loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <LoadingIcon className="h-3.5 w-3.5" />
-            Querying Elasticsearch · <span className="font-mono tabular-nums">{queryElapsed}</span>
-          </span>
-        )}
-        <Button onClick={handleRun} disabled={loading}>
+            toast or a layout shift. The refetch banner carries the announced
+            sentence; this mirror stays aria-hidden. Always mounted via the
+            shared `HeaderStatus` slot, so a request coming or going can never
+            insert a flex item and re-wrap the control row. */}
+        <HeaderStatus active={loading} icon={LoadingIcon}>
+          Querying Elasticsearch · <span className="font-mono tabular-nums">{queryElapsed}</span>
+        </HeaderStatus>
+        {/* Fixed label + fixed min-width: the button's box is identical in both
+            states, so the spinner swaps in for the icon without resizing it.
+            `aria-busy` announces the run without a per-second label change. */}
+        <Button className="min-w-24" aria-busy={loading} onClick={handleRun} disabled={loading}>
           {loading ? <LoadingIcon /> : <Play className="h-4 w-4" />}
-          {loading ? "Running…" : "Run"}
+          Run
         </Button>
-        <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
+        <Button className="min-w-28" variant="outline" size="sm" aria-busy={loading} onClick={handleRun} disabled={loading}>
           {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
-          {loading ? "Refreshing…" : "Refresh"}
+          Refresh
         </Button>
       </PageHeader>
 
@@ -1021,15 +1021,23 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
               {error}
             </Callout>
           )}
-          {/* Refetch in flight — everything below stays mounted. The elapsed
-              figure is the honest part: ES reads here routinely run 10-60s. */}
-          {loading && (
+          {/* Refetch in flight — everything below stays mounted. The slot is
+              ALWAYS rendered so the `space-y-6` child count never changes (a
+              conditional child would recompute every sibling's margin and
+              shift the panels). `mb-0` zeroes the gap this 0-height slot would
+              otherwise own, so spacing matches having no slot at all. The cue
+              itself is `absolute`, so it adds no height (`LoadingIndicator`
+              returns null until the 250ms anti-flicker delay). The header slot
+              + the indicator's own `role="status"` region carry the state for
+              AT. */}
+          <div className="relative mb-0">
             <LoadingIndicator
+              active={loading}
               label="Refreshing query"
               startedAt={loadingStartedAt}
-              className="max-w-md"
+              className="absolute inset-x-0 top-0 z-10 max-w-md"
             />
-          )}
+          </div>
           {/* Timeline chart */}
           <Panel title="Requests over time" icon={Network}>
             {result.timeline.length > 0 ? (
@@ -1096,9 +1104,14 @@ export function QueryPage({ onNavigate }: { onNavigate?: (view: "host" | "patter
                 >
                   Simplify
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleRun} disabled={loading}>
+                {/* Constant label + fixed min-width: the text no longer flips
+                    "Refresh" ↔ "Refreshing…", so the button box — and the
+                    panel's `flex-wrap` action row — cannot resize or re-wrap.
+                    The spinner swaps in for the same `h-4 w-4` icon box and
+                    `aria-busy` announces the run for AT. */}
+                <Button className="min-w-24" variant="outline" size="sm" onClick={handleRun} disabled={loading} aria-busy={loading}>
                   {loading ? <LoadingIcon /> : <RefreshCcw className="h-4 w-4" />}
-                  {loading ? "Refreshing…" : "Refresh"}
+                  Refresh
                 </Button>
                 {(timeRange === "7d" || timeRange === "30d" || timeRange === "90d" || timeRange === "1y") && (
                   <Button variant="ghost" size="sm" onClick={() => setFlowCollapsed((v) => !v)}>

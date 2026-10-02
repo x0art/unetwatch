@@ -15,6 +15,7 @@ import {
   Select,
   Label,
   ConfirmDialog,
+  HeaderStatus,
   PageHeader,
   SearchInput,
   useToast,
@@ -390,16 +391,16 @@ export function PatternTable({ externalSearch }: { externalSearch?: string } = {
           Bulk import
         </Button>
         {/* Quiet "what + how long" cue — the banner below carries the announced
-            sentence, so this mirror stays aria-hidden. */}
-        {loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Loading patterns · <span className="font-mono tabular-nums">{elapsed}</span>
-          </span>
-        )}
+            sentence, so this mirror stays aria-hidden.
+            The slot is ALWAYS mounted and always occupies the same box, so a
+            fetch coming or going can never insert a flex item and re-wrap the
+            row. On narrow viewports it gets its own fixed-height line under
+            the controls; at `lg` and up it joins the control row with a
+            reserved width. Either way the element set, the order, and every
+            className are identical in both states — only the text changes. */}
+        <HeaderStatus active={loading} icon={Loader2}>
+          Loading patterns · <span className="font-mono tabular-nums">{elapsed}</span>
+        </HeaderStatus>
       </PageHeader>
 
       {/* ── Error banner ── */}

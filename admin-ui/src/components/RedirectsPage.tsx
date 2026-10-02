@@ -31,7 +31,9 @@ import {
   CopyUrlButton,
   Dialog,
   EmptyState,
+  HeaderStatus,
   Input,
+  LoadingIcon,
   PageHeader,
   SearchInput,
   SkeletonShape,
@@ -700,21 +702,29 @@ export function RedirectsPage() {
         </div>
         {/* The "Check now" poll and the auto-reload are background work; name
             them here and count the seconds. The banner below is the announced
-            mirror, so this stays aria-hidden. */}
-        {loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-            Loading tracked URLs · <span className="font-mono tabular-nums">{elapsed}</span>
-          </span>
-        )}
+            mirror, so this stays aria-hidden. Always mounted (shared
+            `HeaderStatus` slot), so a load cannot re-wrap the control row. */}
+        <HeaderStatus active={loading} icon={RefreshCcw}>
+          Loading tracked URLs · <span className="font-mono tabular-nums">{elapsed}</span>
+        </HeaderStatus>
         <Button onClick={handleAdd} disabled={busy || !addUrl.trim()}>
           Track URL
         </Button>
-        <Button variant="outline" size="sm" onClick={handleCheckNow} disabled={busy || loading || checking}>
-          {checking ? <RefreshCcw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+        {/* Constant label + pinned min-width: "Checking in background" is a
+            genuinely different state (the work outlives the request), so the
+            text is kept — but the box is sized to the longer string so the
+            Track URL / Refresh controls beside it never move. The spinner
+            swaps in for the same `h-4 w-4` Zap box, and `aria-busy` carries
+            the state for AT without a per-poll live-region churn. */}
+        <Button
+          className="min-w-56"
+          variant="outline"
+          size="sm"
+          onClick={handleCheckNow}
+          disabled={busy || loading || checking}
+          aria-busy={checking}
+        >
+          {checking ? <LoadingIcon /> : <Zap className="h-4 w-4" />}
           {checking ? "Checking in background" : "Check now"}
         </Button>
         <Button variant="outline" size="sm" onClick={reload} disabled={busy}>

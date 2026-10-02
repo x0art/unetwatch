@@ -16,6 +16,7 @@ import {
 import {
   Button,
   Callout,
+  HeaderStatus,
   IconButton,
   Label,
   PageHeader,
@@ -644,16 +645,16 @@ export function AnalyticsPage({
           {rangeLabel(range)} · {summary?.source === "es" ? "live ES" : "findings table"}
         </span>
         {/* The auto-refresh tick is silent by design, so surface it beside the
-            range label — the banner below carries the announced sentence. */}
-        {loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <Activity className="h-3.5 w-3.5 animate-pulse" />
-            Loading analytics · <span className="font-mono tabular-nums">{elapsed}</span>
-          </span>
-        )}
+            range label — the banner below carries the announced sentence.
+            The slot is ALWAYS mounted and always occupies the same box, so a
+            fetch coming or going can never insert a flex item and re-wrap the
+            row. On narrow viewports it gets its own fixed-height line under
+            the controls; at `lg` and up it joins the control row with a
+            reserved width. Either way the element set, the order, and every
+            className are identical in both states — only the text changes. */}
+        <HeaderStatus active={loading} icon={Activity}>
+          Loading analytics · <span className="font-mono tabular-nums">{elapsed}</span>
+        </HeaderStatus>
         <Button variant="outline" onClick={handleExportPdf} aria-label="Export PDF">
           <Printer className="h-4 w-4" aria-hidden="true" />
           Export PDF
@@ -691,14 +692,20 @@ export function AnalyticsPage({
       )}
 
       {/* Refetch with panels already on screen: keep them mounted, report the
-          read out loud. First load still shows the skeleton grid below. */}
-      {refreshing && (
+          read out loud. The slot is ALWAYS rendered so the `space-y-5` child
+          count never changes (a conditional child would recompute every
+          sibling's margin and shift the panels). `mb-0` zeroes the gap this
+          0-height slot would otherwise own, so spacing matches having no slot
+          at all. The cue is `absolute`, adding no height. First load still
+          shows the skeleton grid below, untouched. */}
+      <div className="relative mb-0">
         <LoadingIndicator
+          active={refreshing}
           label="Refreshing analytics aggregates"
           startedAt={loadingStartedAt}
-          className="max-w-md"
+          className="absolute inset-x-0 top-0 z-10 max-w-md"
         />
-      )}
+      </div>
 
       {/* ── High-level usage metrics ───────────────────────────────── */}
       {loading && !summary ? (

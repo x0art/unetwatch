@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ComponentPropsWithRef,
+  type ComponentType,
   type ReactNode,
 } from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
@@ -95,6 +96,41 @@ export function Button({
 /** Shared spinner for "processing" button states. */
 export function LoadingIcon({ className }: { className?: string }) {
   return <Loader2 className={cn("h-4 w-4 animate-spin", className)} aria-hidden="true" />
+}
+/* ── HeaderStatus — the always-mounted header status slot ───────
+ * WHY: mounting a status cue only while a request is in flight inserts a
+ * flex item into `PageHeader`'s `flex-wrap` action row, re-wrapping it and
+ * shoving the buttons sideways — the reported CLS. The slot below is always
+ * rendered and always occupies the same box, so a request coming or going
+ * cannot move the controls; only its children change. On narrow viewports it
+ * takes a fixed-height line under the controls; at `lg` it joins the control
+ * row at a reserved width. The className is one constant string and must
+ * NEVER depend on `active` (a conditional class would re-wrap the row).
+ * Decorative mirror: the caller owns the announced sentence elsewhere. */
+export function HeaderStatus({
+  active,
+  icon: Icon,
+  children,
+}: {
+  active: boolean
+  /** Any icon component that takes a `className` — `LucideIcon` covers the
+   *  lucide set; `LoadingIcon` is accepted too so the slot can spin. */
+  icon: ComponentType<{ className?: string }>
+  children: ReactNode
+}) {
+  return (
+    <span
+      className="order-last flex h-5 basis-full items-center gap-1.5 text-xs font-medium text-muted-foreground lg:order-none lg:h-auto lg:basis-auto lg:w-52 lg:min-w-52"
+      aria-hidden="true"
+    >
+      {active && (
+        <>
+          <Icon className="h-3.5 w-3.5 animate-spin" />
+          {children}
+        </>
+      )}
+    </span>
+  )
 }
 
 /** Notion-style timestamp cell: relative time on top, absolute below.

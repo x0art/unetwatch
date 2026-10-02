@@ -1032,7 +1032,11 @@ export function DataTable<T>({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1.5 px-2.5"
+              // Fixed label + min-width (sized for the longest label): the box
+              // is identical in both states, so the spinner swaps in without
+              // resizing the button and shoving the right cluster — the row is
+              // `flex-wrap`, so a wider button can also re-wrap it.
+              className="h-8 min-w-[104px] gap-1.5 px-2.5"
               disabled={loading}
               onClick={onRefresh}
               aria-label={loading ? "Refreshing" : "Refresh"}
@@ -1046,7 +1050,7 @@ export function DataTable<T>({
                 className={cn("h-3.5 w-3.5", loading && "animate-spin")}
                 aria-hidden="true"
               />
-              <span className="hidden sm:inline">{loading ? "Refreshing" : "Refresh"}</span>
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
           )}
           <DensityToggle density={density} onChange={columnState.setDensity} />

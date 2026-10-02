@@ -32,6 +32,7 @@ import {
   Callout,
   ConfirmDialog,
   CopyUrlButton,
+  HeaderStatus,
   IconButton,
   PageHeader,
   Panel,
@@ -644,16 +645,13 @@ export function FindingsPage({ initialSearch, onNavigate }: { initialSearch?: st
         </Button>
         {/* The auto-refresh tick is silent by design, so surface it: a quiet,
             non-destructive "what + how long" cue beside the controls. The
-            banner below owns the announced sentence; this is its mirror. */}
-        {refreshing && !loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-            Refreshing findings · <span className="font-mono tabular-nums">{elapsed}</span>
-          </span>
-        )}
+            banner below owns the announced sentence; this is its mirror.
+            Always mounted (shared `HeaderStatus` slot), so a tick can never
+            re-wrap the control row. The child condition stays
+            `refreshing && !loading`. */}
+        <HeaderStatus active={refreshing && !loading} icon={RefreshCcw}>
+          Refreshing findings · <span className="font-mono tabular-nums">{elapsed}</span>
+        </HeaderStatus>
         <RefreshIntervalSelect value={refreshSeconds} onChange={setRefreshSeconds} />
         <Button variant="outline" size="sm" onClick={refetch} disabled={busy}>
           <RefreshCcw className="h-4 w-4" />

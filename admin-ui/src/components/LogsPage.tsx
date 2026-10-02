@@ -32,6 +32,7 @@ import {
   ConfirmDialog,
   Dialog,
   EmptyState,
+  HeaderStatus,
   PageHeader,
   Panel,
   SearchInput,
@@ -703,16 +704,11 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
           aria-label="Search logs"
         />
         {/* Quiet "what + how long" cue — the banner below carries the announced
-            sentence, so this mirror stays aria-hidden. */}
-        {loading && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
-            aria-hidden="true"
-          >
-            <RefreshCcw className="h-3.5 w-3.5 animate-spin" />
-            Loading logs · <span className="font-mono tabular-nums">{elapsed}</span>
-          </span>
-        )}
+            sentence, so this mirror stays aria-hidden. Always mounted (shared
+            `HeaderStatus` slot), so a load can never re-wrap the control row. */}
+        <HeaderStatus active={loading} icon={RefreshCcw}>
+          Loading logs · <span className="font-mono tabular-nums">{elapsed}</span>
+        </HeaderStatus>
         <Button variant="outline" size="sm" onClick={load} disabled={loading || busy}>
           <RefreshCcw className="h-4 w-4" />
           Refresh
@@ -730,17 +726,20 @@ export function LogsPage({ externalSearch }: { externalSearch?: string } = {}) {
       </PageHeader>
 
       {/* Refetch with rows already on screen: keep them mounted and say what is
-          happening. The first load routes straight to `DataTable`, which draws
-          its own shape-faithful row skeleton — hand-rolling a block here only
-          pre-empted a better placeholder and made Logs load worse than pages
-          that delegate (the `total === 0` empty state is gated on `!loading` so
-          it can never flash mid-read). */}
+          happening. The cue overlays the results instead of sitting in the
+          page flow — a flow block would insert a ~66px card above the table
+          and push it down the moment the 250ms anti-flicker delay elapses.
+          The first load routes straight to `DataTable`, which draws its own
+          shape-faithful row skeleton (the `total === 0` empty state is gated on
+          `!loading` so it can never flash mid-read). */}
       {loading && items.length > 0 && (
-        <LoadingIndicator
-          label="Loading logs"
-          startedAt={loadingStartedAt}
-          className="max-w-md"
-        />
+        <div className="relative">
+          <LoadingIndicator
+            label="Loading logs"
+            startedAt={loadingStartedAt}
+            className="absolute inset-x-0 top-0 z-10 max-w-md"
+          />
+        </div>
       )}
 
       {loadError ? (
