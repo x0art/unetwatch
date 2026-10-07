@@ -252,8 +252,14 @@ const FINDINGS_COLUMNS: DataTableColumn<Finding>[] = [
     header: <span className="sr-only">Actions</span>,
     enableSorting: false,
     enableColumnFilter: false,
-    align: "right",
-    width: "w-40",
+    /* A single chevron trigger (ListActionCell) — match the sibling
+     * convention of a snug actions box (QueryPage `w-12`, PatternTable
+     * `w-20`, LogsPage `w-16`) rather than a `w-40` slab. As the
+     * sticky-right `actions` slot, an oversized box with a bare sr-only
+     * header read as a blank strip at the table edge and the affordance
+     * looked absent. No `align` either: QueryPage's working actions cell
+     * is left-aligned in its own snug column. */
+    width: "w-12",
     cell: (f) => (
       <div className="flex justify-end">
         <ListActionCell

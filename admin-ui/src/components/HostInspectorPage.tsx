@@ -293,10 +293,19 @@ async function fetchHostSections(ip: string, timeRange: string, source: HostSour
   // Prefer live ES rows filtered to this host — richest source (action-aware,
   // pattern matches, durations). Backend caps items at 500; total_requests is
   // the real window total and drives the request-log count summary.
-  // The `ip` param uses an exact ES term filter so risk rows are found even
-  // when the generic substring search would miss them.
+  // The `ip` param is an EXACT ES term filter on client_ip — and the host page
+  // IS client-scoped: the request-log grid's Client IP column is documented as
+  // constant (see logColumns below), so every row must have client_ip === this
+  // host. We therefore pass `ip` ALONE. Passing `q` as well would (a) AND in a
+  // three-leading-wildcard query_string scan (url OR client_ip OR server_ip)
+  // that is the expensive part of the ES query, and (b) WIDEN the result set
+  // to rows that only mention the IP as a server_ip or an unrelated substring —
+  // exactly the rows this client-scoped grid must not show. Dropping `q` also
+  // keeps monitor._query_cache_key stable for this page: search="" and
+  // client_ip=ip is ONE key, so repeat lookups of the same host within the 2s
+  // TTL reuse the cached payload instead of paying another cold ES round-trip.
   try {
-    const res = await runQuery(minutes, { q: ip.trim(), ip: ip.trim(), signal })
+    const res = await runQuery(minutes, { ip: ip.trim(), signal })
     if (res.items.length > 0) {
       const timeline = res.timeline.map((t) => ({ hour: formatHour(t.bucket), volume: t.count }))
       const topDomains = buildTopDomains(res.items)
@@ -388,6 +397,13 @@ export function HostInspectorPage({
   // render over the host the operator just selected (the audit's "Highest"
   // race site).
   const run = useAbortable()
+  // SEPARATE abort point for the per-host sections read. `lookup` now starts
+  // this read CONCURRENTLY with the profile read (so the two ES round-trips
+  // overlap instead of running back-to-back), which means they must NOT share
+  // the `run` controller above: `useAbortable` aborts the previous call before
+  // starting the next, so whichever started second would cancel the other and
+  // one read would never land. The generation still drops a superseded pair.
+  const runSections = useAbortable()
   // Destructure the two STABLE useCallback functions rather than keeping the
   // `useGeneration()` object: that object is a fresh literal every render, so
   // depending on it would make `fetchRaw` (and everything that reads it) new on
@@ -533,18 +549,21 @@ export function HostInspectorPage({
   // EMPTY_SECTIONS + toasts on failure. Used by both lookup and Retry.
   // `g` is the lookup's generation, threaded in so the profile read and the
   // sections read that make up one lookup share an ownership token.
+  // Reads through `runSections`, NOT the shared `run`: `lookup` fires this
+  // concurrently with the profile read, and a shared controller would abort
+  // one of the two (see the `runSections` comment above).
   const fetchSections = useCallback(async (clean: string, g: number) => {
     setSectionsLoading(true)
     setSectionsStartedAt(Date.now())
     setSectionsError(null)
-    const data = await run((signal) => fetchHostSections(clean, timeRange, hSource, signal))
+    const data = await runSections((signal) => fetchHostSections(clean, timeRange, hSource, signal))
     // Superseded by a newer lookup/toggle, or aborted (undefined) — a newer
     // invocation owns the section state now.
     if (data === undefined || !genCurrent(g)) return
     // Stale-target guard: only paint if the operator is still on this host.
     if (clean === selectorRef.current) setSections(data)
     setSectionsLoading(false)
-  }, [run, genCurrent, timeRange, hSource])
+  }, [runSections, genCurrent, timeRange, hSource])
 
   const lookup = async (ip: string) => {
     const clean = ip.trim()
@@ -563,8 +582,30 @@ export function HostInspectorPage({
     setSections(null)
     setSectionsLoading(false)
     setReportLoading(false)
+    // Live branch starts its sections read NOW, concurrently with the profile
+    // read below, instead of after it: the profile read (GET /api/hosts/{ip})
+    // and the sections read (GET /api/query/run) are independent ES round-trips
+    // that both only need `clean`/`timeRange`, so awaiting the profile first
+    // doubled the page's cold latency for no ordering benefit. They use
+    // DIFFERENT abort controllers (`run` vs `runSections`) so neither cancels
+    // the other, and both are gated on the SAME lookup generation `g`, so a
+    // superseding lookup still drops whichever lands late. Findings branch
+    // keeps its strictly-serial order below.
+    // `.catch(() => {})` here, not only at the await below: if the profile read
+    // THROWS (rung 4 of getHostProfile), `lookup` propagates the error and never
+    // reaches the await — an unguarded sections promise would then surface as an
+    // unhandled rejection. fetchSections resolves by construction; this is a
+    // belt-and-suspenders that keeps that invariant enforceable.
+    const sectionsPromise = hSource === "live"
+      ? fetchSections(clean, g).catch(() => {})
+      : null
     const profile = await run((signal) => getHostProfile(clean, timeRange, { signal }))
-    if (profile === undefined || !genCurrent(g)) return
+    if (profile === undefined || !genCurrent(g)) {
+      // Superseded/aborted: settle the concurrent sections read so it is not
+      // left dangling; its own generation check discards any stale payload.
+      if (sectionsPromise) await sectionsPromise
+      return
+    }
     setHost(profile)
     setLoading(false)
 
@@ -584,9 +625,9 @@ export function HostInspectorPage({
         toast({ title: "Report failed", description: (e as Error).message, variant: "error" })
       }
       if (genCurrent(g)) setReportLoading(false)
-    } else {
-      // Live branch: sections load independently so the entity card paints immediately.
-      await fetchSections(clean, g)
+    } else if (sectionsPromise) {
+      // Live branch: the sections read started above; just settle it.
+      await sectionsPromise
     }
   }
 
