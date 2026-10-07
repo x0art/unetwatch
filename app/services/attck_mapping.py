@@ -45,13 +45,12 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from app.config import get_settings
 from app.database import get_db
-from app.services import es_fields
+from app.services import es_fields, timeutil
 from app.services.es_client import es_client, es_hits_total
 from app.services.logline import LogLine, parse_line, parse_rule_codes
 from app.services.monitor import (
@@ -1551,15 +1550,16 @@ async def map_host(ip: str, minutes: int) -> AttckMapping:
         if signals.line_tz_offsets:
             # Cross-check only — a NOTE, never a gate. now()-based display-tz
             # offset vs the lines' row-instant stamps can disagree across a
-            # DST boundary; that nuance is acceptable for prose.
-            try:
-                display_off = datetime.now(ZoneInfo(settings.display_tz)).strftime("%z")
-            except Exception:
-                display_off = ""
+            # DST boundary; that nuance is acceptable for prose. The zone goes
+            # through timeutil (the single source of truth), so an unset
+            # DISPLAY_TZ follows the host zone like every other path — reading
+            # settings.display_tz raw would drop this NOTE when unset.
+            zone = timeutil.operator_tz()
+            display_off = datetime.now(zone).strftime("%z")
             if display_off and display_off not in signals.line_tz_offsets:
                 summary_parts.append(
                     f"note: lines stamped {', '.join(sorted(signals.line_tz_offsets))}"
-                    f" (display tz {settings.display_tz} is {display_off})."
+                    f" (display tz {timeutil.zone_label(zone)} is {display_off})."
                 )
         if techniques:
             summary_parts.append(

@@ -1274,19 +1274,32 @@ async def test_rule_codes_ride_structured_and_create_no_technique(monkeypatch):
 async def test_line_tz_note_surfaces_only_on_mismatch(monkeypatch):
     """§j.7 — the display-tz cross-check is a NOTE, never a gate.
 
-    Default display_tz is UTC (+0000): a window stamped +0700 gets a note
-    naming the mismatch; a window stamped +0000 matches and gets none.
+    With display_tz pinned to UTC (+0000): a window stamped +0700 gets a note
+    naming the mismatch; a window stamped +0000 matches and gets none. Pinned
+    explicitly — an unset DISPLAY_TZ now follows the host zone, so leaving it
+    to the default would make the verdict depend on the test machine.
     """
-    mismatched = await _map_host_hits(
-        monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0700")
-    )
-    assert "note: lines stamped +0700" in mismatched.summary
-    assert mismatched.signals.line_tz_offsets == {"+0700"}
+    from app.config import get_settings
+    from app.services import timeutil
 
-    matching = await _map_host_hits(
-        monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0000")
-    )
-    assert "note:" not in matching.summary
+    monkeypatch.setenv("DISPLAY_TZ", "UTC")
+    monkeypatch.setenv("TZ", "UTC")
+    timeutil.reset_system_zone_cache()
+    get_settings.cache_clear()
+    try:
+        mismatched = await _map_host_hits(
+            monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0700")
+        )
+        assert "note: lines stamped +0700" in mismatched.summary
+        assert mismatched.signals.line_tz_offsets == {"+0700"}
+
+        matching = await _map_host_hits(
+            monkeypatch, _operator_hits(stamp="01/Sep/2026:06:59:11 +0000")
+        )
+        assert "note:" not in matching.summary
+    finally:
+        get_settings.cache_clear()
+        timeutil.reset_system_zone_cache()
 
 
 # ── Enforcement count — the proxy's own DENY population, not the pattern frame ─

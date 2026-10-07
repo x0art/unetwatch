@@ -61,10 +61,10 @@ aggregation (documented honest no-op — see each endpoint docstring).
 
 Calendar days and clock labels follow the operator's zone: every ``bucket``
 date and every peak-time label is converted from the UTC feed into
-``Settings.display_tz`` (env ``DISPLAY_TZ``, default ``UTC``) via
-``app/services/timeutil.py``. Invalid zones degrade to UTC with one warning.
-The ``bucket`` field stays a ``YYYY-MM-DD`` string — only its value changes,
-and only when a non-UTC zone is configured.
+``Settings.display_tz`` (env ``DISPLAY_TZ``; unset follows the host's system
+zone) via ``app/services/timeutil.py``. Invalid zones degrade to UTC with one
+warning. The ``bucket`` field stays a ``YYYY-MM-DD`` string — only its value
+changes, and only when a non-UTC zone is in effect.
 """
 
 
@@ -277,8 +277,9 @@ def _primary_rule(matched_patterns: str | None) -> str:
 def _fmt_peak(ts: str) -> str:
     """Format an ISO bucket as ``'Tue 14:00 +07:00'`` in the operator's zone.
 
-    The label is derived from the configured zone (``DISPLAY_TZ``),
-    never hardcoded; unparseable input is returned verbatim.
+    The label is derived from the effective zone (``DISPLAY_TZ``, or the
+    host's system zone when unset), never hardcoded; unparseable input is
+    returned verbatim.
     """
     return format_peak_iso(ts)
 

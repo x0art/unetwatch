@@ -17,8 +17,13 @@ async def db_path(tmp_path):
 
     # Reset cached settings so the new values take effect.
     from app.config import get_settings
+    from app.services import timeutil
 
     get_settings.cache_clear()
+    # `system_zone_name()` memoises the host-zone lookup process-wide (it is
+    # read inside per-row loops). Reset it per test so a test that sets `TZ`
+    # is not contaminated by a previous test's resolved zone.
+    timeutil.reset_system_zone_cache()
 
     yield str(dbfile)
     os.environ.pop("DATABASE_URL", None)
@@ -26,6 +31,7 @@ async def db_path(tmp_path):
     os.environ.pop("ADMIN_USER", None)
     os.environ.pop("ADMIN_PASS", None)
     get_settings.cache_clear()
+    timeutil.reset_system_zone_cache()
 
 
 @pytest_asyncio.fixture

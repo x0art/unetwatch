@@ -473,12 +473,21 @@ async def test_fmt_peak_uses_configured_zone_not_hardcoded_est(monkeypatch):
         get_settings.cache_clear()
 
 
-async def test_fmt_peak_default_zone_is_utc_and_unparseable_passthrough(monkeypatch):
-    """Default zone is UTC (honest label) and bad input is returned verbatim."""
+async def test_fmt_peak_explicit_utc_is_honest_and_unparseable_passthrough(
+    monkeypatch,
+):
+    """An explicit UTC zone labels honestly; bad input is returned verbatim.
+
+    (An *unset* DISPLAY_TZ now follows the host zone — see test_timezone.py —
+    so this pins the explicit-UTC case rather than the old default.)
+    """
     from app.config import get_settings
     from app.routes.analytics import _fmt_peak
+    from app.services import timeutil
 
-    monkeypatch.delenv("DISPLAY_TZ", raising=False)
+    monkeypatch.setenv("DISPLAY_TZ", "UTC")
+    monkeypatch.setenv("TZ", "UTC")
+    timeutil.reset_system_zone_cache()
     get_settings.cache_clear()
     try:
         assert _fmt_peak(_BOUNDARY_TS) == "Mon 23:59 UTC"
@@ -486,6 +495,7 @@ async def test_fmt_peak_default_zone_is_utc_and_unparseable_passthrough(monkeypa
         assert _fmt_peak("") == ""
     finally:
         get_settings.cache_clear()
+        timeutil.reset_system_zone_cache()
 
 
 async def test_invalid_timezone_degrades_to_utc_without_raising(
