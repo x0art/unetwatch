@@ -119,6 +119,16 @@ async def lifespan(app: FastAPI):
     db = await get_db()
     try:
         await sync_regenerate(db)
+        # Derived "Domain Blacklist": sanction the domain feed from the URL
+        # rows so domains.txt is populated on startup. Best-effort and
+        # non-fatal (a failure here must not block boot), and it only ever
+        # reads the URL rows — it never touches the upstream sync.
+        try:
+            from app.services.domain_blacklist import sanction_domains
+
+            await sanction_domains(db)
+        except Exception as e:
+            log.warning("domain sanction at boot failed: %s", e)
         await sync_regenerate_jail(db)
         # Reconciliation: every tracked redirect URL belongs on the blacklist
         # feed (source='redirect'). Idempotent — already-blacklisted hosts are

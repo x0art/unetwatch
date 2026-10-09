@@ -61,7 +61,7 @@ def edl_line(kind: str, value: str) -> str:
     return value if kind != "url" else value.rstrip("/") + "/"
 
 
-async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip")) -> None:
+async def sync_regenerate(db, kinds: tuple[str, ...] = ("url", "ip", "domain")) -> None:
     """Rewrite the feed files for ``kinds`` from the database.
 
     Lines are terminated with CRLF (not LF): downstream integrations parse

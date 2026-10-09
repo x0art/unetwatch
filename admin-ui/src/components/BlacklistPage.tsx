@@ -13,9 +13,11 @@ import {
   bulkAddBlacklist,
   bulkDeleteBlacklist,
   deleteBlacklistEntry,
+  getBlacklistDomains,
   getBlacklistIps,
   getBlacklistUrls,
   getBlacklistUpstreamStatus,
+  sanctionBlacklistDomains,
   syncBlacklistUpstream,
   type BlacklistUpstreamStatus,
 } from "../api"
@@ -62,7 +64,7 @@ function edlDisplay(value: string): string {
 interface FeedCardProps {
   title: string
   path: string
-  kind: "url" | "ip"
+  kind: "url" | "ip" | "domain"
   entries: string[]
   /** Total entries before filtering (shown when a search is active). */
   totalEntries?: number
@@ -72,7 +74,7 @@ interface FeedCardProps {
   refreshing?: boolean
   onRefresh: () => void
   onCopy: () => void
-  onDelete: (kind: "url" | "ip", value: string) => void
+  onDelete: (kind: "url" | "ip" | "domain", value: string) => void
   /** Selection mode for bulk delete. */
   selectMode?: boolean
   selected?: Set<string>
@@ -88,6 +90,8 @@ interface FeedCardProps {
   upstream?: UpstreamFeedState
   upstreamSyncing?: boolean
   onFetchUpstream?: () => void
+  /** Optional extra header action (rendered last in the button row). */
+  extraAction?: React.ReactNode
 }
 
 function formatUpstreamLine(u: UpstreamFeedState): string {
@@ -122,7 +126,8 @@ export function FeedCard({
   upstream,
   upstreamSyncing = false,
   onFetchUpstream,
-}: FeedCardProps) {
+  extraAction,
+ }: FeedCardProps) {
   const fetchUpstreamLabel =
     upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"
   return (
@@ -184,6 +189,7 @@ export function FeedCard({
                 <Copy className="h-3.5 w-3.5" />
                 Copy
               </Button>
+              {extraAction}
             </>
           )}
         </div>
@@ -308,18 +314,19 @@ export function FeedCard({
 export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
   const [urls, setUrls] = useState<string[]>([])
   const [ips, setIps] = useState<string[]>([])
+  const [domains, setDomains] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // True once the first feed read finished. A later refetch keeps the lists
   // mounted and reports itself quietly; a refetch ERROR keeps them too, so a
   // transient failure never blanks a populated feed.
-  const haveEntries = urls.length > 0 || ips.length > 0
+  const haveEntries = urls.length > 0 || ips.length > 0 || domains.length > 0
   const [addValue, setAddValue] = useState("")
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [search, setSearch] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<{
-    kind: "url" | "ip"
+    kind: "url" | "ip" | "domain"
     value: string
   } | null>(null)
 
@@ -329,9 +336,12 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
 
   // Bulk delete (per-feed selection)
-  const [selectFeed, setSelectFeed] = useState<"url" | "ip" | null>(null)
+  const [selectFeed, setSelectFeed] = useState<"url" | "ip" | "domain" | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+
+  // Domain feed is DERIVED from the URL feed — no upstream, manual re-derive.
+  const [deriving, setDeriving] = useState(false)
 
   // Upstream sync: per-feed status, one combined sync call.
   const [upstreamStatus, setUpstreamStatus] = useState<BlacklistUpstreamStatus | null>(null)
@@ -354,14 +364,23 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     () => (q ? ips.filter((i) => i.toLowerCase().includes(q)) : ips),
     [ips, q],
   )
+  const filteredDomains = useMemo(
+    () => (q ? domains.filter((d) => d.toLowerCase().includes(q)) : domains),
+    [domains, q],
+  )
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [u, i] = await Promise.all([getBlacklistUrls(), getBlacklistIps()])
+      const [u, i, d] = await Promise.all([
+        getBlacklistUrls(),
+        getBlacklistIps(),
+        getBlacklistDomains(),
+      ])
       setUrls(splitLines(u))
       setIps(splitLines(i))
+      setDomains(splitLines(d))
     } catch (e) {
       const msg = (e as Error).message
       setError(msg)
@@ -437,6 +456,29 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
+  // Manual re-derive of the domain feed from the URL blacklist.
+  const handleSanctionDomains = async () => {
+    setDeriving(true)
+    try {
+      const res = await sanctionBlacklistDomains()
+      const parts: string[] = []
+      parts.push(`${res.scanned} scanned`)
+      parts.push(`${res.added} added`)
+      parts.push(`${res.skipped} skipped`)
+      parts.push(`${res.pruned} pruned`)
+      toast({
+        title: res.ok ? "Domain feed re-derived" : "Domain feed re-derive failed",
+        description: parts.join(" · "),
+        variant: res.ok ? "success" : "error",
+      })
+      await load()
+    } catch (e) {
+      toast({ title: "Domain feed re-derive failed", description: (e as Error).message, variant: "error" })
+    } finally {
+      setDeriving(false)
+    }
+  }
+
   const copy = useCallback(
     async (text: string, label: string) => {
       const ok = await copyText(text)
@@ -480,7 +522,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
-  const requestDelete = useCallback((kind: "url" | "ip", value: string) => {
+  const requestDelete = useCallback((kind: "url" | "ip" | "domain", value: string) => {
     setDeleteTarget({ kind, value })
   }, [])
 
@@ -515,7 +557,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
   }
 
   /* ── Bulk delete ──────────────────────────────────────────────── */
-  const enterSelectMode = (kind: "url" | "ip") => {
+  const enterSelectMode = (kind: "url" | "ip" | "domain") => {
     setSelectFeed(kind)
     setSelected(new Set())
   }
@@ -561,7 +603,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     <div className="space-y-5">
       <PageHeader
         title="Blacklist"
-        description="Blacklisted destinations, consumed as separate URL and IP feeds by the device firewall (nginx/fail2ban). IP entries are destinations whose host is an IP address."
+        description="Blacklisted destinations, consumed as separate URL, IP, and domain feeds by the device firewall (nginx/fail2ban). IP entries are destinations whose host is an IP address; the domain feed is derived from the URL entries."
       />
 
       <div className="rounded-md border border-border bg-card shadow-sm space-y-4 p-4">
@@ -602,8 +644,8 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
           />
           {q && (
             <span className="text-xs text-muted-foreground">
-              {filteredUrls.length + filteredIps.length} match
-              {filteredUrls.length + filteredIps.length === 1 ? "" : "es"} across both feeds
+              {filteredUrls.length + filteredIps.length + filteredDomains.length} match
+              {filteredUrls.length + filteredIps.length + filteredDomains.length === 1 ? "" : "es"} across all feeds
             </span>
           )}
         </div>
@@ -671,6 +713,37 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             upstreamSyncing={upstreamSyncing}
             onFetchUpstream={handleFetchUpstream}
           />
+          {/* Third card: the DERIVED domain feed. No upstream — it is
+              sanctioned from the URL blacklist, so the header offers a
+              manual "Re-derive" instead of a fetch button. */}
+          <FeedCard
+            title="Domain Blacklist"
+            path="/api/blacklist/domains.txt"
+            kind="domain"
+            entries={filteredDomains}
+            totalEntries={domains.length}
+            searchActive={!!q}
+            loading={loading}
+            refreshing={loading && haveEntries}
+            onRefresh={load}
+            note="Derived from the URL blacklist — domains sanctioned from URL entries. No upstream feed."
+            onCopy={() => copy(domains.join("\n"), "Domains")}
+            onDelete={requestDelete}
+            selectMode={selectFeed === "domain"}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onEnterSelectMode={() => enterSelectMode("domain")}
+            onClearSelection={exitSelectMode}
+            onDeleteSelected={() => setConfirmBulkDelete(true)}
+            disabled={deleting}
+            onClearSearch={() => setSearch("")}
+            extraAction={
+              <Button variant="outline" size="sm" onClick={handleSanctionDomains} disabled={loading || deriving}>
+                {deriving ? <LoadingIcon className="h-3.5 w-3.5" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+                {deriving ? "Re-deriving…" : "Re-derive"}
+              </Button>
+            }
+          />
         </div>
       )}
 
@@ -680,7 +753,9 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
         title="Remove from blacklist?"
         description={
           deleteTarget
-            ? `${deleteTarget.value} will no longer be blocked by the ${deleteTarget.kind} blacklist.`
+            ? `${deleteTarget.value} will no longer be blocked by the ${
+                deleteTarget.kind === "domain" ? "domain" : deleteTarget.kind
+              } blacklist.`
             : undefined
         }
         confirmLabel="Remove"
@@ -695,7 +770,9 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
         title="Delete selected entries?"
         description={
           selectFeed
-            ? `${selected.size} selected entr${selected.size === 1 ? "y" : "ies"} will be removed from the ${selectFeed} blacklist. This cannot be undone.`
+            ? `${selected.size} selected entr${selected.size === 1 ? "y" : "ies"} will be removed from the ${
+                selectFeed === "domain" ? "domain" : selectFeed
+              } blacklist. This cannot be undone.`
             : undefined
         }
         confirmLabel="Delete selected"

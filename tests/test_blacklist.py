@@ -307,7 +307,7 @@ def test_blacklist_delete_missing_returns_404(client):
 
 
 def test_blacklist_delete_invalid_kind(client):
-    resp = client.delete("/api/blacklist/domain/example.com")
+    resp = client.delete("/api/blacklist/nope/example.com")
     assert resp.status_code == 422
 
 

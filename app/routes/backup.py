@@ -216,7 +216,7 @@ async def import_backup(request: Request, db=Depends(get_db_conn)):
             skipped["whitelist"] += 1
 
     # ── blacklist_entries (fixed shape, source defaults to manual) ──
-    allowed_sources = {"manual", "finding", "upstream", "redirect", "auto"}
+    allowed_sources = {"manual", "finding", "upstream", "redirect", "auto", "sanction"}
     for item in _as_list(payload, "blacklist"):
         if not isinstance(item, dict) or not item.get("kind") or not item.get("value"):
             skipped["blacklist"] += 1

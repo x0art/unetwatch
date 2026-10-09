@@ -93,7 +93,7 @@ Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diag
 | `action` | proxy disposition: `ALLOW` / `DENY`; `FLAG` unused |
 | `enforcement` | a DENY — the proxy handled a prohibited request; *not* a risk |
 | `whitelist` | URLs the operator explicitly allows; excluded from Findings + risk counts |
-| `blacklist` | bare hosts (`kind ∈ url, ip`); URL feed served in EDL trailing-slash form (`host/`), IP feed stays bare, at `/api/blacklist/urls.txt` / `ips.txt` for nginx/fail2ban |
+| `blacklist` | bare hosts (`kind ∈ url, ip, domain`); URL feed served in EDL trailing-slash form (`host/`), IP feed stays bare, at `/api/blacklist/urls.txt` / `ips.txt` for nginx/fail2ban. The derived **Domain Blacklist** (`domains.txt`, `/api/blacklist/domains.txt`) is sanctioned from the URL rows (`kind='domain'`, `source='sanction'`, bare, no upstream) |
 | `jaillist` | client IPs (sources) to jail, served at `/api/jaillist/ips.txt` for firewall/fail2ban; manual + Findings action + gist upstream |
 | `client_ip` | source host; `base_url`/`domain` = destination |
 | `host` | an IP + optional hostname; no dept/user/MAC identity |
@@ -101,7 +101,7 @@ Removed: **Live Monitor** (folded into Query), **Traffic/Graph** (aggregate diag
 
 ## Storage (SQLite, inline migrations in `app/database.py init_db`)
 
-`findings` (rich flat fields incl. `action`, `duration_seconds`, `matched_patterns`), `url_patterns`, `blacklist_entries`, `jaillist_entries` (flat client IPs, `UNIQUE(value)`), `tracked_urls` + `redirect_edges`, `monitor_logs`. No settings table (env/pydantic `Settings`); no IP→person/department/host-group table anywhere.
+`findings` (rich flat fields incl. `action`, `duration_seconds`, `matched_patterns`), `url_patterns`, `blacklist_entries` (`kind ∈ url, ip, domain`; `CHECK` widened by an inline table-rebuild migration), `jaillist_entries` (flat client IPs, `UNIQUE(value)`), `tracked_urls` + `redirect_edges`, `monitor_logs`. No settings table (env/pydantic `Settings`); no IP→person/department/host-group table anywhere.
 
 ## Conventions
 

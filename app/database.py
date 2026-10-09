@@ -216,6 +216,39 @@ async def init_db():
             )
         """)
 
+        # Migration: widen `blacklist_entries.kind` to also allow 'domain' —
+        # the DERIVED domain feed sanctioned from the URL rows. The original
+        # inline CHECK only accepts ('url', 'ip'), and SQLite cannot ALTER a
+        # CHECK constraint, so this is the standard table-rebuild: create a
+        # twin with the widened CHECK, copy every row, drop the old table,
+        # rename. Idempotent by inspection (skips entirely once 'domain' is in
+        # the stored DDL) and runs on every startup. All columns, the
+        # UNIQUE(kind, value) constraint, and any indexes are preserved.
+        cursor = await db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='blacklist_entries'"
+        )
+        _bl_row = await cursor.fetchone()
+        if _bl_row and _bl_row[0] and "'domain'" not in _bl_row[0]:
+            await db.execute("""
+                CREATE TABLE blacklist_entries_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL CHECK (kind IN ('url', 'ip', 'domain')),
+                    value TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'manual',  -- manual|finding|...
+                    finding_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (kind, value)
+                )
+            """)
+            await db.execute(
+                "INSERT INTO blacklist_entries_new"
+                " (id, kind, value, source, finding_id, created_at)"
+                " SELECT id, kind, value, source, finding_id, created_at"
+                " FROM blacklist_entries"
+            )
+            await db.execute("DROP TABLE blacklist_entries")
+            await db.execute("ALTER TABLE blacklist_entries_new RENAME TO blacklist_entries")
+
         # Jaillist: client (source) IPs to be jailed at the enforcement layer
         # (firewall / fail2ban). One flat list — no kinds, single IPs only.
         # `source` is 'manual' | 'finding' | 'upstream'.

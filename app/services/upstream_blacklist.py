@@ -442,6 +442,10 @@ async def get_upstream_status() -> dict:
         "enabled": enabled,
         "urls_configured": urls_configured,
         "ips_configured": ips_configured,
+        # The derived "Domain Blacklist" feed has NO upstream: it is sanctioned
+        # from the URL rows (source='sanction'), so it is never "configured".
+        "domains_configured": False,
+        "domains_derived_from": "url",
         "url_configured": urls_configured,
         "last_error": _LAST_SYNC["last_error"],
         "last_sync": _LAST_SYNC["last_sync"],
@@ -453,5 +457,15 @@ async def get_upstream_status() -> dict:
         "upstream_count": upstream_count,
         "feeds": {
             name: dict(_LAST_SYNC["feeds"][name]) for name in _FEEDS
+        }
+        | {
+            # Derived feed: no upstream, so its per-feed stats are always zero.
+            "domains": {
+                "last_added": 0,
+                "last_skipped": 0,
+                "last_errors": 0,
+                "last_error": None,
+                "last_deleted": 0,
+            }
         },
     }

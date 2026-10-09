@@ -111,13 +111,14 @@ export interface BlacklistBulkDeleteResult {
 }
 
 export interface BlacklistEntryRef {
-  kind: "url" | "ip"
+  kind: "url" | "ip" | "domain"
   value: string
 }
 
 export interface BlacklistSet {
   urls: string[]
   ips: string[]
+  domains: string[]
 }
 
 export interface TrackedUrl {
@@ -1222,6 +1223,16 @@ export async function getBlacklistIps(opts?: ReqOpts): Promise<string> {
   return res.text()
 }
 
+export async function getBlacklistDomains(opts?: ReqOpts): Promise<string> {
+  const res = await fetch(`${API}/blacklist/domains.txt`, {
+    headers: getToken() ? { "X-API-Key": getToken()! } : {},
+    signal: opts?.signal,
+  })
+  if (res.status === 401) { setToken(null); _onSessionExpired?.(); throw new Error("Session expired") }
+  if (!res.ok) throw new Error(`Failed: ${res.status}`)
+  return res.text()
+}
+
 export async function addBaseUrlToBlacklist(value: string): Promise<{ added: string[] }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
   const tok = getToken()
@@ -1232,11 +1243,11 @@ export async function addBaseUrlToBlacklist(value: string): Promise<{ added: str
   return res.json()
 }
 
-export async function deleteBlacklistEntry(kind: "url" | "ip", value: string): Promise<void> {
+export async function deleteBlacklistEntry(kind: "url" | "ip" | "domain", value: string): Promise<void> {
   return request(`/blacklist/${kind}/${encodeURIComponent(value)}`, { method: "DELETE" })
 }
 
-export async function getBlacklistSet(opts?: ReqOpts): Promise<{ urls: string[]; ips: string[] }> {
+export async function getBlacklistSet(opts?: ReqOpts): Promise<{ urls: string[]; ips: string[]; domains: string[] }> {
   const headers: Record<string, string> = {}
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok
@@ -1296,6 +1307,20 @@ export async function getBlacklistUpstreamStatus(opts?: ReqOpts): Promise<Blackl
 
 export async function syncBlacklistUpstream(): Promise<UpstreamSyncResult> {
   return request("/blacklist/upstream-sync", { method: "POST" })
+}
+
+/** Result of manually re-deriving the domain feed from the URL blacklist. */
+export interface SanctionDomainsResult {
+  ok: boolean
+  scanned: number
+  added: number
+  skipped: number
+  pruned: number
+}
+
+/** Re-derive the domain feed now; returns the derive stats. */
+export async function sanctionBlacklistDomains(): Promise<SanctionDomainsResult> {
+  return request("/blacklist/sanction-domains", { method: "POST" })
 }
 
 /* ── Jaillist (client-IP jail list) ────────────────────────────────── */

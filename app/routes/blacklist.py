@@ -45,6 +45,20 @@ async def list_blacklist_ips():
         _feed_path("ip"), media_type="text/plain", headers={"Cache-Control": "no-store"}
     )
 
+@router.get("/domains.txt")
+async def list_blacklist_domains():
+    """Serve the on-disk derived domain feed as a real file (public).
+
+    Same ``no-store`` rationale as the URL feed — see list_blacklist_urls.
+    This feed is derived from the URL rows (``source='sanction'``); it has no
+    upstream of its own.
+    """
+    return FileResponse(
+        _feed_path("domain"),
+        media_type="text/plain",
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 @router.get("/entries", dependencies=[Depends(verify_admin)])
 async def list_blacklist_entries(db=Depends(get_db_conn)):
@@ -52,7 +66,8 @@ async def list_blacklist_entries(db=Depends(get_db_conn)):
     rows = await cursor.fetchall()
     urls = sorted([row[1] for row in rows if row[0] == "url"])
     ips = sorted([row[1] for row in rows if row[0] == "ip"])
-    return {"urls": urls, "ips": ips}
+    domains = sorted([row[1] for row in rows if row[0] == "domain"])
+    return {"urls": urls, "ips": ips, "domains": domains}
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_admin)])
@@ -162,13 +177,24 @@ async def upstream_status():
     return await get_upstream_status()
 
 
+@router.post("/sanction-domains", dependencies=[Depends(verify_admin)])
+async def sanction_domains_route(db=Depends(get_db_conn)):
+    """Re-derive the domain feed from the URL rows now; returns the stats.
+
+    This is the derived feed's only mutation path — it reads ``kind='url'``
+    hosts, reduces each to its domain, and syncs ``domains.txt``.
+    """
+    from app.services.domain_blacklist import sanction_domains
+
+    return await sanction_domains(db)
+
 @router.delete(
     "/{kind}/{value}",
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(verify_admin)],
 )
 async def delete_blacklist_entry(
-    kind: str = Path(pattern="^(url|ip)$"),
+    kind: str = Path(pattern="^(url|ip|domain)$"),
     value: str = Path(min_length=1, max_length=500),
     db=Depends(get_db_conn),
 ):

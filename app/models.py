@@ -52,7 +52,7 @@ class PatternBulkImport(BaseModel):
 
 class BlacklistEntryCreate(BaseModel):
     value: str = Field(..., min_length=1, max_length=500)
-    source: str = Field(default="manual", pattern="^(manual|finding|redirect)$")
+    source: str = Field(default="manual", pattern="^(manual|finding|redirect|sanction)$")
     finding_id: int | None = None
 
 
@@ -67,7 +67,7 @@ class BlacklistEntryRef(BaseModel):
     """An existing entry identified by its stored kind + value (both are
     normalized — the frontend sends back what the list endpoint returned)."""
 
-    kind: str = Field(..., pattern="^(url|ip)$")
+    kind: str = Field(..., pattern="^(url|ip|domain)$")
     value: str = Field(..., min_length=1, max_length=500)
 
 

@@ -337,7 +337,7 @@ async def test_upstream_status_reports_counts(monkeypatch, db_path):
     assert status["last_sync"] is not None
     assert status["last_added"] == 1
     assert status["upstream_count"] >= 1
-    assert set(status["feeds"]) == {"urls", "ips"}
+    assert set(status["feeds"]) == {"urls", "ips", "domains"}
     assert status["feeds"]["urls"]["last_added"] == 1
 
 
@@ -700,6 +700,8 @@ async def test_upstream_status_reflects_prune(monkeypatch, db_path):
     assert status["last_deleted_sample"] == ["old3.example.com"]
     assert status["feeds"]["urls"]["last_deleted"] == 1
     assert status["url_configured"] is True
+    assert status["domains_configured"] is False
+    assert status["domains_derived_from"] == "url"
     assert set(status) == {
         "enabled",
         "urls_configured",
@@ -714,6 +716,8 @@ async def test_upstream_status_reflects_prune(monkeypatch, db_path):
         "last_deleted_sample",
         "upstream_count",
         "feeds",
+        "domains_configured",
+        "domains_derived_from",
     }
 async def _run_sync_cycling_ips(monkeypatch, ips_bodies, db_path, allow_empty_prune=False):
     """Two concurrent syncs via ``asyncio.gather`` with a ``_fetch_text`` stub

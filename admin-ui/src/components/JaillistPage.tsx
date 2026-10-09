@@ -182,7 +182,7 @@ export function JaillistPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
-  const requestDelete = useCallback((_kind: "url" | "ip", value: string) => {
+  const requestDelete = useCallback((_kind: "url" | "ip" | "domain", value: string) => {
     setDeleteTarget(value)
   }, [])
 
