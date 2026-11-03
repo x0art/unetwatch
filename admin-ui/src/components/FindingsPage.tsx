@@ -456,8 +456,8 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
     }
     if (blRes.status === "fulfilled") {
       const blNext: Record<string, true> = {}
-      for (const url of blRes.value.urls) blNext[url] = true
-      for (const ip of blRes.value.ips) blNext[ip] = true
+      for (const url of blRes.value.urls) blNext[url.value] = true
+      for (const ip of blRes.value.ips) blNext[ip.value] = true
       setBlacklistIndex(blNext)
     } else {
       failed = true

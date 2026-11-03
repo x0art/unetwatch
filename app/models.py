@@ -77,16 +77,20 @@ class BlacklistBulkDelete(BaseModel):
     entries: list[BlacklistEntryRef] = Field(..., min_length=1, max_length=500)
 
 
-class BlacklistEntryResponse(BaseModel):
-    id: int
-    kind: str
+
+
+class BlacklistEntryWithSource(BaseModel):
+    """A single blacklist entry as returned by the /entries endpoint,
+    including which path wrote it ('manual' | 'finding' | 'redirect'
+    | 'sanction' | 'upstream')."""
     value: str
     source: str
-    finding_id: int | None = None
-    created_at: datetime | None = None
 
-    model_config = {"from_attributes": True}
 
+class BlacklistEntriesResponse(BaseModel):
+    urls: list[BlacklistEntryWithSource]
+    ips: list[BlacklistEntryWithSource]
+    domains: list[BlacklistEntryWithSource]
 
 class JaillistEntryCreate(BaseModel):
     value: str = Field(..., min_length=1, max_length=500)

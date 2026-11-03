@@ -13,16 +13,16 @@ import {
   bulkAddBlacklist,
   bulkDeleteBlacklist,
   deleteBlacklistEntry,
-  getBlacklistDomains,
-  getBlacklistIps,
-  getBlacklistUrls,
+  getBlacklistSet,
   getBlacklistUpstreamStatus,
   sanctionBlacklistDomains,
   syncBlacklistUpstream,
+  type BlacklistEntry,
   type BlacklistUpstreamStatus,
 } from "../api"
 import { copyText } from "../lib/utils"
 import {
+  Badge,
   Button,
   IconButton,
   Callout,
@@ -61,11 +61,37 @@ function edlDisplay(value: string): string {
   return value.endsWith("/") ? value : `${value}/`
 }
 
+/** Per-entry source chip, mirroring the Source column meta in RedirectsPage.
+ *  Manual entries get a muted default badge so the origin of EVERY entry is
+ *  visible; machine-sourced entries get a coloured chip. */
+const SOURCE_META: Record<
+  BlacklistEntry["source"],
+  { label: string; variant: "default" | "secondary" | "outline" | "warning" }
+> = {
+  manual: { label: "manual", variant: "default" },
+  finding: { label: "finding", variant: "outline" },
+  redirect: { label: "redirect", variant: "outline" },
+  sanction: { label: "sanction", variant: "warning" },
+  upstream: { label: "upstream", variant: "secondary" },
+}
+
+function SourceChip({ source }: { source: BlacklistEntry["source"] }) {
+  const meta = SOURCE_META[source]
+  if (!meta) return null
+  return (
+    <Badge variant={meta.variant} className="text-[10px] px-1.5">
+      {meta.label}
+    </Badge>
+  )
+}
+
 interface FeedCardProps {
   title: string
   path: string
   kind: "url" | "ip" | "domain"
-  entries: string[]
+  /** Object entries ({value, source}) when the feed carries source data;
+   *  bare strings otherwise (e.g. the jaillist, which has no source column). */
+  entries: Array<string | BlacklistEntry>
   /** Total entries before filtering (shown when a search is active). */
   totalEntries?: number
   searchActive?: boolean
@@ -238,8 +264,11 @@ export function FeedCard({
           </div>
         ) : entries.length > 0 ? (
           <ul className="max-h-80 divide-y divide-border overflow-y-auto rounded-md border border-border bg-muted/30 shadow-sm">
-            {entries.map((value) => {
+            {entries.map((entry) => {
+              const value = typeof entry === "string" ? entry : entry.value
+              const display = kind === "url" ? edlDisplay(value) : value
               const isSelected = selected.has(value)
+              const hasSource = typeof entry === "object"
               return (
                 <li
                   key={value}
@@ -256,12 +285,13 @@ export function FeedCard({
                       className="h-4 w-4 shrink-0 rounded border-input accent-primary"
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={kind === "url" ? edlDisplay(value) : value}>
-                    {kind === "url" ? edlDisplay(value) : value}
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={display}>
+                    {display}
                   </span>
+                  {hasSource && <SourceChip source={entry.source} />}
                   {!selectMode && (
                     <span className="flex items-center gap-1">
-                      <CopyUrlButton value={kind === "url" ? edlDisplay(value) : value} label="Entry" />
+                      <CopyUrlButton value={display} label="Entry" />
                       <IconButton
                         icon={Trash2}
                         label={`Remove ${value} from blacklist`}
@@ -312,9 +342,9 @@ export function FeedCard({
 // `active` (the current in-app view) gates that work; it defaults to true so
 // the page behaves identically before App.tsx passes the prop.
 export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
-  const [urls, setUrls] = useState<string[]>([])
-  const [ips, setIps] = useState<string[]>([])
-  const [domains, setDomains] = useState<string[]>([])
+  const [urls, setUrls] = useState<BlacklistEntry[]>([])
+  const [ips, setIps] = useState<BlacklistEntry[]>([])
+  const [domains, setDomains] = useState<BlacklistEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // True once the first feed read finished. A later refetch keeps the lists
@@ -349,23 +379,18 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
 
   const { toast } = useToast()
 
-  const splitLines = useCallback((text: string) => {
-    // Feeds are CRLF files — split on \r?\n so entries carry no \r residue
-    // (residue would break row-delete/copy, which send the value back).
-    return text.split(/\r?\n/).filter((l) => l.trim().length > 0)
-  }, [])
 
   const q = search.trim().toLowerCase()
   const filteredUrls = useMemo(
-    () => (q ? urls.filter((u) => u.toLowerCase().includes(q)) : urls),
+    () => (q ? urls.filter((u) => u.value.toLowerCase().includes(q)) : urls),
     [urls, q],
   )
   const filteredIps = useMemo(
-    () => (q ? ips.filter((i) => i.toLowerCase().includes(q)) : ips),
+    () => (q ? ips.filter((i) => i.value.toLowerCase().includes(q)) : ips),
     [ips, q],
   )
   const filteredDomains = useMemo(
-    () => (q ? domains.filter((d) => d.toLowerCase().includes(q)) : domains),
+    () => (q ? domains.filter((d) => d.value.toLowerCase().includes(q)) : domains),
     [domains, q],
   )
 
@@ -373,14 +398,10 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     setLoading(true)
     setError(null)
     try {
-      const [u, i, d] = await Promise.all([
-        getBlacklistUrls(),
-        getBlacklistIps(),
-        getBlacklistDomains(),
-      ])
-      setUrls(splitLines(u))
-      setIps(splitLines(i))
-      setDomains(splitLines(d))
+      const bl = await getBlacklistSet()
+      setUrls(bl.urls)
+      setIps(bl.ips)
+      setDomains(bl.domains)
     } catch (e) {
       const msg = (e as Error).message
       setError(msg)
@@ -388,7 +409,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     } finally {
       setLoading(false)
     }
-  }, [splitLines, toast])
+  }, [toast])
 
   const loadUpstreamStatus = useCallback(async () => {
     try {
@@ -675,7 +696,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             refreshing={loading && haveEntries}
             onRefresh={load}
             note="EDL form — each host terminated with a trailing slash"
-            onCopy={() => copy(urls.map(edlDisplay).join("\n"), "URLs")}
+            onCopy={() => copy(urls.map((u) => edlDisplay(u.value)).join("\n"), "URLs")}
             onDelete={requestDelete}
             selectMode={selectFeed === "url"}
             selected={selected}
@@ -699,7 +720,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             loading={loading}
             refreshing={loading && haveEntries}
             onRefresh={load}
-            onCopy={() => copy(ips.join("\n"), "IPs")}
+            onCopy={() => copy(ips.map((i) => i.value).join("\n"), "IPs")}
             onDelete={requestDelete}
             selectMode={selectFeed === "ip"}
             selected={selected}
@@ -727,7 +748,7 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             refreshing={loading && haveEntries}
             onRefresh={load}
             note="Derived from the URL blacklist — domains sanctioned from URL entries. No upstream feed."
-            onCopy={() => copy(domains.join("\n"), "Domains")}
+            onCopy={() => copy(domains.map((d) => d.value).join("\n"), "Domains")}
             onDelete={requestDelete}
             selectMode={selectFeed === "domain"}
             selected={selected}

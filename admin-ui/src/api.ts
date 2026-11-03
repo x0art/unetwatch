@@ -115,10 +115,15 @@ export interface BlacklistEntryRef {
   value: string
 }
 
+export interface BlacklistEntry {
+  value: string
+  source: "manual" | "finding" | "redirect" | "sanction" | "upstream"
+}
+
 export interface BlacklistSet {
-  urls: string[]
-  ips: string[]
-  domains: string[]
+  urls: BlacklistEntry[]
+  ips: BlacklistEntry[]
+  domains: BlacklistEntry[]
 }
 
 export interface TrackedUrl {
@@ -1247,7 +1252,7 @@ export async function deleteBlacklistEntry(kind: "url" | "ip" | "domain", value:
   return request(`/blacklist/${kind}/${encodeURIComponent(value)}`, { method: "DELETE" })
 }
 
-export async function getBlacklistSet(opts?: ReqOpts): Promise<{ urls: string[]; ips: string[]; domains: string[] }> {
+export async function getBlacklistSet(opts?: ReqOpts): Promise<BlacklistSet> {
   const headers: Record<string, string> = {}
   const tok = getToken()
   if (tok) headers["X-API-Key"] = tok

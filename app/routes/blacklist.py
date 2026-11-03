@@ -62,11 +62,22 @@ async def list_blacklist_domains():
 
 @router.get("/entries", dependencies=[Depends(verify_admin)])
 async def list_blacklist_entries(db=Depends(get_db_conn)):
-    cursor = await db.execute("SELECT kind, value FROM blacklist_entries ORDER BY value")
+    cursor = await db.execute(
+        "SELECT kind, value, source FROM blacklist_entries ORDER BY value"
+    )
     rows = await cursor.fetchall()
-    urls = sorted([row[1] for row in rows if row[0] == "url"])
-    ips = sorted([row[1] for row in rows if row[0] == "ip"])
-    domains = sorted([row[1] for row in rows if row[0] == "domain"])
+    urls = sorted(
+        [{"value": row[1], "source": row[2]} for row in rows if row[0] == "url"],
+        key=lambda e: e["value"],
+    )
+    ips = sorted(
+        [{"value": row[1], "source": row[2]} for row in rows if row[0] == "ip"],
+        key=lambda e: e["value"],
+    )
+    domains = sorted(
+        [{"value": row[1], "source": row[2]} for row in rows if row[0] == "domain"],
+        key=lambda e: e["value"],
+    )
     return {"urls": urls, "ips": ips, "domains": domains}
 
 

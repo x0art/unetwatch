@@ -158,7 +158,7 @@ def test_entries_endpoint_includes_domains(client):
     client.post("/api/blacklist/sanction-domains")
     body = client.get("/api/blacklist/entries").json()
     assert set(body) == {"urls", "ips", "domains"}
-    assert body["domains"] == ["evil.example.com"]
+    assert body["domains"] == [{"value": "evil.example.com", "source": "sanction"}]
 
 
 # ── (g) /sanction-domains returns ok + stats ─────────────────────────────

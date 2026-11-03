@@ -359,7 +359,7 @@ def test_track_url_auto_blacklists_host(client):
     assert resp.status_code == 201
 
     entries = client.get("/api/blacklist/entries").json()
-    assert "evil.example" in entries["urls"]
+    assert {"value": "evil.example", "source": "redirect"} in entries["urls"]
 
 
 def test_retrack_same_host_blacklists_once(client):
@@ -375,7 +375,7 @@ def test_retrack_same_host_blacklists_once(client):
     other = client.post("/api/redirects/", json={"url": "http://dup.example/b"})
     assert other.status_code == 201
     entries = client.get("/api/blacklist/entries").json()
-    assert entries["urls"].count("dup.example") == 1
+    assert entries["urls"].count({"value": "dup.example", "source": "redirect"}) == 1
 
 
 async def test_check_hop_targets_auto_blacklisted(client, monkeypatch):
@@ -395,5 +395,5 @@ async def test_check_hop_targets_auto_blacklisted(client, monkeypatch):
     assert resp.status_code == 200
 
     entries = client.get("/api/blacklist/entries").json()
-    assert "src.example" in entries["urls"]
-    assert "hop-target.example" in entries["urls"]
+    assert {"value": "src.example", "source": "redirect"} in entries["urls"]
+    assert {"value": "hop-target.example", "source": "redirect"} in entries["urls"]

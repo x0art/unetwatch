@@ -147,8 +147,8 @@ async def test_blacklist_entries_returns_split(client):
     resp = client.get("/api/blacklist/entries")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["urls"] == ["a.example"]
-    assert data["ips"] == ["1.1.1.1"]
+    assert data["urls"] == [{"value": "a.example", "source": "manual"}]
+    assert data["ips"] == [{"value": "1.1.1.1", "source": "manual"}]
 
 
 async def test_blacklist_migration_normalizes_legacy_entries(db_path):
@@ -363,3 +363,56 @@ async def test_blacklist_ip_feed_is_unchanged_by_edl(client, db_path):
     resp = client.post("/api/blacklist/", json={"value": "9.9.9.9"})
     assert resp.status_code == 201
     assert _feed_path("ip").read_bytes() == b"9.9.9.9\r\n"
+
+
+async def test_entries_endpoint_returns_source_per_value(client, db_path):
+    """Each /entries list carries the source that wrote it, so the admin UI
+    can distinguish manual vs upstream vs finding vs redirect vs sanction."""
+    from app.database import get_db
+
+    db = await get_db()
+    try:
+        # Simulate one insert per source path (direct DB insert mirrors each
+        # service's INSERT statement exactly).
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source)"
+            " VALUES ('url', 'manual.example', 'manual')",
+        )
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source, finding_id)"
+            " VALUES ('url', 'finding.example', 'finding', 1)",
+        )
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source)"
+            " VALUES ('url', 'redirect.example', 'redirect')",
+        )
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source)"
+            " VALUES ('url', 'upstream.example', 'upstream')",
+        )
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source)"
+            " VALUES ('domain', 'sanction.example', 'sanction')",
+        )
+        await db.execute(
+            "INSERT INTO blacklist_entries (kind, value, source)"
+            " VALUES ('ip', '1.2.3.4', 'upstream')",
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    body = client.get("/api/blacklist/entries").json()
+
+    urls = {e["value"]: e["source"] for e in body["urls"]}
+    ips = {e["value"]: e["source"] for e in body["ips"]}
+    domains = {e["value"]: e["source"] for e in body["domains"]}
+
+    assert urls == {
+        "manual.example": "manual",
+        "finding.example": "finding",
+        "redirect.example": "redirect",
+        "upstream.example": "upstream",
+    }
+    assert ips == {"1.2.3.4": "upstream"}
+    assert domains == {"sanction.example": "sanction"}
