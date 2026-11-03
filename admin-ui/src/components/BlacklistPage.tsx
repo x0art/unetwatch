@@ -84,6 +84,14 @@ function SourceChip({ source }: { source: BlacklistEntry["source"] }) {
     </Badge>
   )
 }
+const SOURCE_FILTER_OPTIONS: Array<"all" | BlacklistEntry["source"]> = [
+  "all",
+  "manual",
+  "finding",
+  "redirect",
+  "sanction",
+  "upstream",
+]
 
 interface FeedCardProps {
   title: string
@@ -101,6 +109,9 @@ interface FeedCardProps {
   onRefresh: () => void
   onCopy: () => void
   onDelete: (kind: "url" | "ip" | "domain", value: string) => void
+  /** Per-feed source filter; bare-string entries are never filtered out. */
+  sourceFilter?: "all" | BlacklistEntry["source"]
+  onSourceFilterChange?: (source: "all" | BlacklistEntry["source"]) => void
   /** Selection mode for bulk delete. */
   selectMode?: boolean
   selected?: Set<string>
@@ -108,6 +119,10 @@ interface FeedCardProps {
   onEnterSelectMode?: () => void
   onClearSelection?: () => void
   onDeleteSelected?: () => void
+  /** Copies the currently selected entries (bulk-copy, select mode only). */
+  onCopySelected?: () => void
+  /** Selects every currently visible entry for bulk actions. */
+  onSelectAll?: () => void
   disabled?: boolean
   onClearSearch?: () => void
   /** Optional muted hint rendered under the feed path. */
@@ -140,12 +155,16 @@ export function FeedCard({
   onRefresh,
   onCopy,
   onDelete,
+  sourceFilter = "all",
+  onSourceFilterChange,
   selectMode = false,
   selected = new Set(),
   onToggleSelect,
   onEnterSelectMode,
   onClearSelection,
   onDeleteSelected,
+  onCopySelected,
+  onSelectAll,
   disabled,
   onClearSearch,
   note,
@@ -153,7 +172,8 @@ export function FeedCard({
   upstreamSyncing = false,
   onFetchUpstream,
   extraAction,
- }: FeedCardProps) {
+}: FeedCardProps) {
+  const sourceFilterActive = sourceFilter !== "all"
   const fetchUpstreamLabel =
     upstream && !upstream.configured ? "No upstream URL configured for this feed" : "Fetch upstream now"
   return (
@@ -164,7 +184,7 @@ export function FeedCard({
             <CardTitle>{title}</CardTitle>
             {typeof totalEntries === "number" && (
               <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
-                {searchActive ? `${entries.length}/${totalEntries}` : totalEntries}
+                {(searchActive || sourceFilterActive) ? `${entries.length}/${totalEntries}` : totalEntries}
               </span>
             )}
           </div>
@@ -182,7 +202,23 @@ export function FeedCard({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {onSourceFilterChange ? (
+            <select
+              value={sourceFilter}
+              onChange={(e) =>
+                onSourceFilterChange(e.target.value as "all" | BlacklistEntry["source"])
+              }
+              aria-label={`Filter ${title} by source`}
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs font-medium text-muted-foreground"
+            >
+              {SOURCE_FILTER_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s === "all" ? "All sources" : s}
+                </option>
+              ))}
+            </select>
+          ) : null}
           {selectMode ? (
             <Button variant="outline" size="sm" onClick={onClearSelection} disabled={disabled}>
               Cancel
@@ -228,9 +264,25 @@ export function FeedCard({
               {selected.size} selected
             </span>
             <div className="ml-auto flex items-center gap-1.5">
+              {onSelectAll && (
+                <Button variant="ghost" size="sm" onClick={onSelectAll} disabled={disabled || entries.length === 0}>
+                  Select all ({entries.length})
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={onClearSelection} disabled={disabled}>
                 Cancel
               </Button>
+              {onCopySelected && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onCopySelected}
+                  disabled={selected.size === 0 || disabled}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy
+                </Button>
+              )}
               <Button
                 variant="destructive"
                 size="sm"
@@ -372,26 +424,42 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
 
   // Domain feed is DERIVED from the URL feed — no upstream, manual re-derive.
   const [deriving, setDeriving] = useState(false)
-
   // Upstream sync: per-feed status, one combined sync call.
   const [upstreamStatus, setUpstreamStatus] = useState<BlacklistUpstreamStatus | null>(null)
   const [upstreamSyncing, setUpstreamSyncing] = useState(false)
 
   const { toast } = useToast()
-
+  const [sourceFilterUrl, setSourceFilterUrl] = useState<"all" | BlacklistEntry["source"]>("all")
+  const [sourceFilterIp, setSourceFilterIp] = useState<"all" | BlacklistEntry["source"]>("all")
+  const [sourceFilterDomain, setSourceFilterDomain] = useState<"all" | BlacklistEntry["source"]>("all")
 
   const q = search.trim().toLowerCase()
   const filteredUrls = useMemo(
-    () => (q ? urls.filter((u) => u.value.toLowerCase().includes(q)) : urls),
-    [urls, q],
+    () =>
+      urls.filter(
+        (u) =>
+          (!q || u.value.toLowerCase().includes(q)) &&
+          (sourceFilterUrl === "all" || u.source === sourceFilterUrl),
+      ),
+    [urls, q, sourceFilterUrl],
   )
   const filteredIps = useMemo(
-    () => (q ? ips.filter((i) => i.value.toLowerCase().includes(q)) : ips),
-    [ips, q],
+    () =>
+      ips.filter(
+        (i) =>
+          (!q || i.value.toLowerCase().includes(q)) &&
+          (sourceFilterIp === "all" || i.source === sourceFilterIp),
+      ),
+    [ips, q, sourceFilterIp],
   )
   const filteredDomains = useMemo(
-    () => (q ? domains.filter((d) => d.value.toLowerCase().includes(q)) : domains),
-    [domains, q],
+    () =>
+      domains.filter(
+        (d) =>
+          (!q || d.value.toLowerCase().includes(q)) &&
+          (sourceFilterDomain === "all" || d.source === sourceFilterDomain),
+      ),
+    [domains, q, sourceFilterDomain],
   )
 
   const load = useCallback(async () => {
@@ -618,6 +686,28 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
     }
   }
 
+  /* ── Bulk copy (per-feed) ─────────────────────────────────────── */
+  const handleCopySelected = async () => {
+    if (!selectFeed || selected.size === 0) return
+    const kind = selectFeed
+    const displayValues =
+      kind === "url" ? [...selected].map((v) => edlDisplay(v)) : [...selected]
+    const count = selected.size
+    await copy(
+      displayValues.join("\n"),
+      kind === "url" ? "URLs" : kind === "ip" ? "IPs" : "Domains",
+    )
+    toast({ title: `Copied ${count} entr${count === 1 ? "y" : "ies"}`, variant: "success" })
+  }
+
+  /* ── Select all visible entries for active feed ───────────────── */
+  const handleSelectAll = () => {
+    if (!selectFeed) return
+    const visible =
+      selectFeed === "url" ? filteredUrls : selectFeed === "ip" ? filteredIps : filteredDomains
+    setSelected(new Set(visible.map((e) => e.value)))
+  }
+
   return (
     // Page root is the canonical `space-y-5`; the title row is the shared
     // `PageHeader` so it can never drift from every other page's title again.
@@ -698,6 +788,10 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             note="EDL form — each host terminated with a trailing slash"
             onCopy={() => copy(urls.map((u) => edlDisplay(u.value)).join("\n"), "URLs")}
             onDelete={requestDelete}
+            sourceFilter={sourceFilterUrl}
+            onSourceFilterChange={setSourceFilterUrl}
+            onCopySelected={handleCopySelected}
+            onSelectAll={handleSelectAll}
             selectMode={selectFeed === "url"}
             selected={selected}
             onToggleSelect={toggleSelect}
@@ -722,6 +816,10 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             onRefresh={load}
             onCopy={() => copy(ips.map((i) => i.value).join("\n"), "IPs")}
             onDelete={requestDelete}
+            sourceFilter={sourceFilterIp}
+            onSourceFilterChange={setSourceFilterIp}
+            onCopySelected={handleCopySelected}
+            onSelectAll={handleSelectAll}
             selectMode={selectFeed === "ip"}
             selected={selected}
             onToggleSelect={toggleSelect}
@@ -750,6 +848,10 @@ export function BlacklistPage({ active = true }: { active?: boolean } = {}) {
             note="Derived from the URL blacklist — domains sanctioned from URL entries. No upstream feed."
             onCopy={() => copy(domains.map((d) => d.value).join("\n"), "Domains")}
             onDelete={requestDelete}
+            sourceFilter={sourceFilterDomain}
+            onSourceFilterChange={setSourceFilterDomain}
+            onCopySelected={handleCopySelected}
+            onSelectAll={handleSelectAll}
             selectMode={selectFeed === "domain"}
             selected={selected}
             onToggleSelect={toggleSelect}
