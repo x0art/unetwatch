@@ -101,14 +101,6 @@ async def init_db():
                                     "UPDATE findings SET matched_patterns = ? WHERE id = ?",
                                     (_json.dumps(_hits), _row[0]),
                                 )
-                            else:
-                                # No current block pattern matches — store the best-effort
-                                # per-row fallback (first pattern) so the cell is never "—"
-                                # and stays debuggable about which rule class stored it.
-                                await db.execute(
-                                    "UPDATE findings SET matched_patterns = ? WHERE id = ?",
-                                    (_json.dumps([_bps[0]]), _row[0]),
-                                )
                         await db.commit()
             except Exception:
                 pass  # never block startup on backfill

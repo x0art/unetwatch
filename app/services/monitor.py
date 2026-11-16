@@ -407,7 +407,7 @@ async def run_query(
             regex = _glob_to_regex(pat)
             if regex and any(re.search(regex, u, re.IGNORECASE) for u in urls):
                 actual_patterns_q.append(pat)
-        log["matched_patterns"] = actual_patterns_q or list(block_patterns)
+        log["matched_patterns"] = actual_patterns_q
 
         result["total_requests"] = int(len(df))
         result["unique_ips"] = int(df["client_ip"].nunique())
@@ -717,7 +717,7 @@ async def fetch_logs(minutes: int = 10):
                 regex = _glob_to_regex(pat)
                 if regex and any(re.search(regex, u, re.IGNORECASE) for u in urls):
                     actual_patterns.append(pat)
-            log["matched_patterns"] = actual_patterns or list(block_patterns)
+            log["matched_patterns"] = actual_patterns
 
         # Suppression gate — the canonical ADR 0001 enforcement rule (DENY is
         # "handled") plus the blacklist join, applied AFTER the whitelist/action
