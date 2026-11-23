@@ -716,12 +716,14 @@ export async function getFindings(params?: {
   minutes?: number
   limit?: number
   offset?: number
+  exclude?: string[]
 }, opts?: ReqOpts): Promise<FindingsResponse> {
   const qs = new URLSearchParams()
   if (params?.search) qs.set("search", params.search)
   if (params?.minutes) qs.set("minutes", String(params.minutes))
   if (params?.limit) qs.set("limit", String(params.limit))
   if (params?.offset) qs.set("offset", String(params.offset))
+  for (const term of params?.exclude ?? []) qs.append("exclude", term)
   return request(`/findings/?${qs}`, opts)
 }
 

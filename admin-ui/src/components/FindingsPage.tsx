@@ -306,6 +306,7 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [search, setSearch] = useState(initialSearch ?? "")
+  const [excludePatterns, setExcludePatterns] = useState("")
   const [uniqueDomainsOnly, setUniqueDomainsOnly] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Finding | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -319,6 +320,10 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
   const [trackedIndex, setTrackedIndex] = useState<Record<string, true>>({})
   const [jailedIndex, setJailedIndex] = useState<Record<string, true>>({})
   const debouncedSearch = useDebounce(search, 300)
+  const excludeTerms = useMemo(
+    () => excludePatterns.split(/[\n,]/).map((term) => term.trim()).filter(Boolean),
+    [excludePatterns],
+  )
 
   // Keep rows visible while an auto-refresh is in flight (no skeleton flicker).
   // Keyed on "an initial load finished" rather than data presence, so an
@@ -378,6 +383,7 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
     return run((signal) =>
       getFindings({
         search: debouncedSearch || undefined,
+        exclude: excludeTerms,
         limit: pageSize,
         offset: page * pageSize,
       }, { signal }),
@@ -406,7 +412,7 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
         setLoading(false)
         setRefreshing(false)
       })
-  }, [run, genNext, genCurrent, debouncedSearch, page, pageSize])
+  }, [run, genNext, genCurrent, debouncedSearch, excludeTerms, page, pageSize])
 
   useEffect(() => {
     // Gate on the in-app view, not the mount: App.tsx keeps every visited page
@@ -482,6 +488,11 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
 
   const handleSearchChange = (value: string) => {
     setSearch(value)
+    setPage(0)
+  }
+
+  const handleExcludePatternsChange = (value: string) => {
+    setExcludePatterns(value)
     setPage(0)
   }
 
@@ -655,6 +666,18 @@ export function FindingsPage({ initialSearch, onNavigate, active = true }: { ini
           className="w-64"
           aria-label="Search findings"
         />
+        <label className="flex min-w-0 flex-col gap-1 text-xs font-medium text-muted-foreground">
+          Exclude patterns
+          <textarea
+            value={excludePatterns}
+            onChange={(e) => handleExcludePatternsChange(e.target.value)}
+            placeholder="netflix, ads.example"
+            title="Separate terms with commas or newlines"
+            aria-label="Exclude patterns"
+            rows={2}
+            className="w-56 resize-y rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring"
+          />
+        </label>
         <Button
           variant={uniqueDomainsOnly ? "default" : "outline"}
           size="sm"

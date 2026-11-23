@@ -532,6 +532,7 @@ async def list_findings(
     minutes: int | None = Query(None, ge=0, le=525600),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    exclude: list[str] | None = Query(None),
 ):
     """List persisted findings, newest first, with total count for pagination.
 
@@ -549,6 +550,20 @@ async def list_findings(
     if minutes:
         where.append("log_timestamp >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
         params.append(f"-{minutes} minutes")
+
+    # Each repeated term must be absent from every one of these fields;
+    # instr() keeps terms literal (unlike LIKE) and the same `where` is used
+    # by the count and the rows query, so `total` and offsets stay in sync.
+    for term in exclude or []:
+        if not term.strip():
+            continue
+        where.append(
+            "(instr(lower(coalesce(url, '')), lower(?)) = 0"
+            " AND instr(lower(coalesce(base_url, '')), lower(?)) = 0"
+            " AND instr(lower(coalesce(domain, '')), lower(?)) = 0"
+            " AND instr(lower(coalesce(matched_patterns, '')), lower(?)) = 0)"
+        )
+        params.extend([term] * 4)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
 
